@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Oddballz HD - 3D Hex Puzzle Game Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css">
+  
+  <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+  <!-- 3D Three.js Canvas Container -->
+  <div id="canvasContainer"></div>
+
+  <!-- HUD Glassmorphic Overlay -->
+  <div id="uiOverlay">
+    <!-- Header Bar -->
+    <header class="game-header glass-card">
+      <div class="brand">
+        <h1 class="logo-text">ODDBALLZ <span class="badge-hd">HD 3D</span></h1>
+      </div>
+
+      <!-- Mode Selector Tabs -->
+      <div class="mode-tabs">
+        <button id="tabColorMatch" class="mode-tab active">
+          <span class="tab-icon">💎</span> Color Match (5+)
+        </button>
+        <button id="tabRowBuild" class="mode-tab">
+          <span class="tab-icon">⚡</span> Row Build
+        </button>
+      </div>
+
+      <!-- Quick Action Toggles -->
+      <div class="header-actions">
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggleSound" checked>
+          <span class="slider"></span>
+          <span class="toggle-label">🔊 Audio</span>
+        </label>
+        <button id="btnPause" class="btn btn-secondary btn-sm" disabled>Pause (P)</button>
+        <button id="btnHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
+      </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <aside class="stats-panel glass-card">
+      <div class="stat-card">
+        <span class="stat-label">SCORE</span>
+        <span id="statScore" class="stat-value text-gold">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">LEVEL</span>
+        <span id="statLevel" class="stat-value text-cyan">1</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">SKILL RATING</span>
+        <span id="statSkill" class="stat-value text-emerald">1</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">BALLS</span>
+        <span id="statBalls" class="stat-value">0</span>
+      </div>
+    </aside>
+
+    <!-- Floating Keybind Help Card -->
+    <div class="keybinds-panel glass-card">
+      <div class="panel-title">Controls Guide</div>
+      <div class="key-row"><kbd>←</kbd> <kbd>→</kbd> Move Piece</div>
+      <div class="key-row"><kbd>↑</kbd> <kbd>↓</kbd> Rotate Piece</div>
+      <div class="key-row"><kbd>X</kbd> <kbd>Y</kbd> Flip X / Y</div>
+      <div class="key-row"><kbd class="key-highlight">F</kbd> Cycle Color Order</div>
+      <div class="key-row"><kbd class="key-space">Space</kbd> Hard Drop (Zip)</div>
+    </div>
+
+    <!-- On-Screen Touch / Mouse Action Controls -->
+    <div class="touch-controls">
+      <div class="touch-cluster">
+        <button id="btnTouchLeft" class="touch-btn">◀ Left</button>
+        <button id="btnTouchRight" class="touch-btn">Right ▶</button>
+        <button id="btnTouchRotCW" class="touch-btn">↻ Rot CW</button>
+        <button id="btnTouchRotCCW" class="touch-btn">↺ Rot CCW</button>
+        <button id="btnTouchFlip" class="touch-btn">⇄ Flip</button>
+        <button id="btnTouchF" class="touch-btn btn-f">F Cycle Color</button>
+        <button id="btnTouchSpace" class="touch-btn btn-zip">⚡ HARD DROP</button>
+      </div>
+    </div>
+
+    <!-- Start Overlay Modal -->
+    <div id="overlayStart" class="overlay-modal flex-center">
+      <div class="modal-card glass-card text-center">
+        <h2 class="modal-title">ODDBALLZ <span class="badge-hd">HD</span></h2>
+        <p class="modal-desc">
+          Experience the classic 1992 hex game engine transformed with real-time 3D sphere physics, metallic shaders, dynamic particle explosions, and Web Audio synthesis!
+        </p>
+
+        <div class="mode-summary">
+          <div class="mode-info">
+            <h3>💎 Color Match Mode</h3>
+            <p>Match 5+ balls in parallel lines or 3+ in perpendicular angles. Use <kbd>F</kbd> to cycle color order before dropping!</p>
+          </div>
+          <div class="mode-info">
+            <h3>⚡ Row Build Mode</h3>
+            <p>Build complete edge-to-edge hex rows. When a full row fills up, it clears for mega points!</p>
+          </div>
+        </div>
+
+        <button id="btnOverlayStart" class="btn btn-primary btn-lg glow-btn">
+          🚀 START NEW GAME (Enter)
+        </button>
+      </div>
+    </div>
+
+    <!-- Pause Overlay Modal -->
+    <div id="overlayPause" class="overlay-modal flex-center hidden">
+      <div class="modal-card glass-card text-center">
+        <h2 class="modal-title">GAME PAUSED</h2>
+        <p class="modal-desc">Press <kbd>P</kbd> or click below to resume your game.</p>
+        <div class="modal-buttons">
+          <button id="btnResume" class="btn btn-primary btn-lg">▶ RESUME (P)</button>
+          <button id="btnPauseEnd" class="btn btn-secondary btn-lg">⏹ END GAME</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm End Game Modal -->
+    <div id="dialogConfirmEnd" class="overlay-modal flex-center hidden">
+      <div class="modal-card glass-card text-center">
+        <h2 class="modal-title text-danger">END GAME?</h2>
+        <p class="modal-desc">Are you sure you want to end the current game and return to the main menu?</p>
+        <div class="modal-buttons">
+          <button id="btnConfirmEndYes" class="btn btn-primary btn-lg">End Game</button>
+          <button id="btnConfirmEndNo" class="btn btn-secondary btn-lg">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Over Overlay Modal -->
+    <div id="overlayGameOver" class="overlay-modal flex-center hidden">
+      <div class="modal-card glass-card text-center">
+        <h2 class="modal-title text-danger">GAME OVER</h2>
+        <p class="modal-desc">The hexagonal grid overflowed!</p>
+        <div class="final-score-box">
+          <span class="score-label">FINAL SCORE</span>
+          <span id="finalScore" class="final-score-val">0</span>
+        </div>
+        <div class="modal-buttons">
+          <button id="btnRestart" class="btn btn-primary btn-lg glow-btn">PLAY AGAIN (Enter)</button>
+          <button id="btnGameOverHighScores" class="btn btn-secondary btn-lg">🏆 High Scores</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- High Scores Modal -->
+    <div id="gameDialogView" class="modal-dialog hidden flex-center">
+      <div class="modal-card glass-card">
+        <div class="modal-header">
+          <h2>🏆 HALL OF FAME</h2>
+          <button id="btnCloseModal" class="btn-close">&times;</button>
+        </div>
+        <table class="hiscores-table">
+          <thead>
+            <tr>
+              <th>RANK</th>
+              <th>SCORE</th>
+              <th>LEVEL</th>
+              <th>MODE</th>
+            </tr>
+          </thead>
+          <tbody id="recordsTableBody">
+            <!-- Dynamic rows -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="./oddballz-app.js"></script>
+</body>
+</html>
