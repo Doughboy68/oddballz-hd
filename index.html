@@ -61,6 +61,7 @@
         </label>
         <button id="btnPause" class="btn btn-secondary btn-sm" disabled>Pause (P)</button>
         <button id="btnHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
+        <button id="btnAbout" class="btn btn-secondary btn-sm">ℹ️ About & Credits</button>
       </div>
     </header>
 
@@ -119,9 +120,17 @@
           </div>
         </div>
 
-        <button id="btnOverlayStart" class="btn btn-primary btn-lg glow-btn">
-          🚀 START NEW GAME (Enter)
-        </button>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:0.5rem; margin-top:0.5rem;">
+          <button id="btnOverlayStart" class="btn btn-primary btn-lg glow-btn">
+            🚀 START NEW GAME (Enter)
+          </button>
+          <button id="btnStartCredits" class="btn btn-secondary btn-sm" style="opacity: 0.9;">
+            ℹ️ About & Game Credits
+          </button>
+          <p class="credits-tagline" style="font-size: 0.8rem; opacity: 0.75; margin-top: 0.25rem; color: var(--text-muted);">
+            Inspired by <span style="white-space: nowrap;">Fred Kohler</span>'s early 1990s design &amp; <span style="white-space: nowrap;">Brian Semotiuk</span>'s 1992 Windows port.
+          </p>
+        </div>
       </div>
     </div>
 
@@ -186,6 +195,30 @@
           </tbody>
         </table>
         <button id="btnRecordsClose" class="btn btn-secondary btn-lg" style="margin-top:1rem; align-self:center;">Close</button>
+      </div>
+    </div>
+
+    <!-- About & Credits Modal -->
+    <div id="gameDialogAbout" class="overlay-modal flex-center hidden">
+      <div class="modal-card glass-card text-center" style="max-width: 520px;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; width:100%; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.75rem;">
+          <h2 style="margin:0; font-size:1.4rem;">ℹ️ ABOUT & CREDITS</h2>
+          <button id="btnCloseAbout" class="btn-close">&times;</button>
+        </div>
+        
+        <div class="about-content" style="text-align: left; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.92rem; line-height: 1.5; color: rgba(255, 255, 255, 0.9);">
+          <p>
+            <strong>Oddballz HD 3D</strong> is inspired by a game designed by <strong style="white-space: nowrap;">Fred Kohler</strong> in the early 1990s and based off the Windows 1992 port by <strong style="white-space: nowrap;">Brian Semotiuk</strong>.
+          </p>
+          <p>
+            It uses the exact same algorithms and preserves authentic hexagonal strategy gameplay, enhanced with real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, and Web Audio synthesis.
+          </p>
+          <div style="background: rgba(255, 255, 255, 0.05); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.85rem; text-align: center; color: var(--accent-gold); font-weight: 600;">
+            Code and graphics/design copyright &copy; <span style="white-space: nowrap;">Brian Semotiuk</span> and <span style="white-space: nowrap;">Fred Kohler</span>.
+          </div>
+        </div>
+
+        <button id="btnAboutClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Close</button>
       </div>
     </div>
   </div>

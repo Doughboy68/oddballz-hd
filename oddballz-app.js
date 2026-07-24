@@ -2449,6 +2449,16 @@
         if (btn) btn.addEventListener('click', () => this.closeHighScoresModal());
       });
 
+      ['btnAbout', 'btnStartCredits'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.showAboutModal());
+      });
+
+      ['btnCloseAbout', 'btnAboutClose'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.closeAboutModal());
+      });
+
       document.getElementById('toggleSound').addEventListener('change', (e) => {
         this.audio.enabled = e.target.checked;
         if (this.audio.enabled && this.isPlaying && !this.isPaused) {
@@ -2752,6 +2762,28 @@
 
     closeHighScoresModal() {
       const modal = document.getElementById('gameDialogView');
+      if (modal) modal.classList.add('hidden');
+
+      if (this.wasPausedByModal) {
+        this.wasPausedByModal = false;
+        if (this.isPlaying && this.isPaused) {
+          this.isPaused = false;
+          this.lastTime = performance.now();
+        }
+      }
+    }
+
+    showAboutModal() {
+      if (this.isPlaying && !this.isPaused) {
+        this.wasPausedByModal = true;
+        this.isPaused = true;
+      }
+      const modal = document.getElementById('gameDialogAbout');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    closeAboutModal() {
+      const modal = document.getElementById('gameDialogAbout');
       if (modal) modal.classList.add('hidden');
 
       if (this.wasPausedByModal) {
