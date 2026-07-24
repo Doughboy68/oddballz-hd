@@ -713,6 +713,8 @@
       let noneDropped = true;
       let flipGate = true;
 
+      if (!this.droppingPathsMap) this.droppingPathsMap = new Map();
+
       for (let y = 19; y >= 0; y--) {
         for (let x = 4; x <= 20; x++) {
           const startPts = { x: x, y: y };
@@ -723,6 +725,8 @@
               noneDropped = false;
               let current = { x: x, y: y };
               let maxDrops = 25;
+              const origKey = `${x}_${y}`;
+              const hexPath = [{ x: x, y: y }];
 
               while (!this.supported(current) && maxDrops > 0) {
                 maxDrops--;
@@ -736,7 +740,7 @@
                 const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
 
                 if (!canMove1 && !canMove2) {
-                  break; // Ball cannot fall down in either direction — break loop!
+                  break;
                 }
 
                 let chosenTarget = null;
@@ -750,7 +754,20 @@
                 this.ballMap[current.x][current.y].bzMap = 0;
                 current = chosenTarget;
                 this.ballMap[current.x][current.y].bzMap = saveColor;
-                if (this.onPlaySound) this.onPlaySound('drop');
+                hexPath.push({ x: current.x, y: current.y });
+              }
+
+              const targetKey = `${current.x}_${current.y}`;
+              if (targetKey !== origKey) {
+                let fullPath = hexPath;
+                if (this.droppingPathsMap.has(origKey)) {
+                  const oldPathInfo = this.droppingPathsMap.get(origKey);
+                  fullPath = oldPathInfo.path.concat(hexPath.slice(1));
+                  this.droppingPathsMap.delete(origKey);
+                  this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
+                } else {
+                  this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
+                }
               }
             }
           }
@@ -1299,6 +1316,53 @@
           oscSine.stop(now + dur);
           break;
         }
+        case 'lock': {
+          const osc1 = this.ctx.createOscillator();
+          const osc2 = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc1.type = 'triangle';
+          osc1.frequency.setValueAtTime(440, now);
+          osc1.frequency.exponentialRampToValueAtTime(880, now + 0.05);
+
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(220, now);
+          osc2.frequency.exponentialRampToValueAtTime(440, now + 0.05);
+
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc1.start(now); osc1.stop(now + 0.06);
+          osc2.start(now); osc2.stop(now + 0.06);
+          break;
+        }
+        case 'land': {
+          const osc = this.ctx.createOscillator();
+          const filter = this.ctx.createBiquadFilter();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.exponentialRampToValueAtTime(90, now + 0.07);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(400, now);
+          filter.frequency.exponentialRampToValueAtTime(100, now + 0.07);
+
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.005, now + 0.07);
+
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now); osc.stop(now + 0.07);
+          break;
+        }
         case 'pop': {
           // Multi-Variation Animated Ball Match Sound Engine (4 Randomized Patterns + Micro-detune)
           const color = Math.max(1, Math.min(6, param || 1));
@@ -1589,6 +1653,76 @@
       });
     }
 
+    spawnLockSparks(worldPos, colorIndex = 1, count = 16) {
+      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = worldPos.x;
+        positions[i * 3 + 1] = worldPos.y;
+        positions[i * 3 + 2] = worldPos.z + 0.1;
+
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+        const speed = 1.8 + Math.random() * 2.2;
+        velocities.push(
+          Math.cos(angle) * speed,
+          Math.sin(angle) * speed,
+          1.2 + Math.random() * 1.5
+        );
+      }
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: color,
+        size: 0.22,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        opacity: 1.0,
+        depthWrite: false
+      });
+
+      const pointCloud = new THREE.Points(geometry, material);
+      this.scene.add(pointCloud);
+      this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 3.2 });
+    }
+
+    spawnLandDust(worldPos, count = 10) {
+      const color = new THREE.Color(0xffffff);
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = worldPos.x;
+        positions[i * 3 + 1] = worldPos.y;
+        positions[i * 3 + 2] = worldPos.z;
+
+        const angle = (i / count) * Math.PI * 2;
+        const speed = 0.8 + Math.random() * 1.2;
+        velocities.push(
+          Math.cos(angle) * speed,
+          Math.sin(angle) * speed,
+          0.5 + Math.random() * 0.8
+        );
+      }
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: color,
+        size: 0.18,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        opacity: 0.7,
+        depthWrite: false
+      });
+
+      const pointCloud = new THREE.Points(geometry, material);
+      this.scene.add(pointCloud);
+      this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 3.5 });
+    }
+
     update(dt) {
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const p = this.particles[i];
@@ -1766,7 +1900,11 @@
     }
 
     updateScene(engine) {
+      this.engine = engine;
       const currentKeys = new Set();
+      const nextStaticMeshes = new Map();
+
+      const droppingPathsMap = engine.droppingPathsMap || new Map();
 
       for (let x = 4; x <= 20; x++) {
         for (let y = 0; y <= 19; y++) {
@@ -1780,6 +1918,33 @@
             const wPos = gridToWorld(x, y, SPHERE_RADIUS);
 
             let mesh = this.staticBallMeshes.get(key);
+
+            if (!mesh && droppingPathsMap.has(key)) {
+              const pathInfo = droppingPathsMap.get(key);
+              const fromKey = pathInfo.sourceKey;
+
+              if (this.staticBallMeshes.has(fromKey)) {
+                mesh = this.staticBallMeshes.get(fromKey);
+                this.staticBallMeshes.delete(fromKey);
+                mesh.material = mat;
+              } else {
+                mesh = new THREE.Mesh(this.sphereGeo, mat);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.ballsGroup.add(mesh);
+              }
+
+              mesh.worldPath = pathInfo.path.map(p => gridToWorld(p.x, p.y, SPHERE_RADIUS));
+              mesh.pathIndex = 1;
+              mesh.position.set(mesh.worldPath[0].x, mesh.worldPath[0].y, mesh.worldPath[0].z);
+              mesh.targetPos = new THREE.Vector3(
+                mesh.worldPath[mesh.worldPath.length - 1].x,
+                mesh.worldPath[mesh.worldPath.length - 1].y,
+                mesh.worldPath[mesh.worldPath.length - 1].z
+              );
+              mesh.isPathDropping = true;
+            }
+
             if (!mesh) {
               mesh = new THREE.Mesh(this.sphereGeo, mat);
               mesh.castShadow = true;
@@ -1787,21 +1952,26 @@
               mesh.targetPos = new THREE.Vector3(wPos.x, wPos.y, wPos.z);
               mesh.position.set(wPos.x, wPos.y, wPos.z);
               this.ballsGroup.add(mesh);
-              this.staticBallMeshes.set(key, mesh);
             } else {
               mesh.material = mat;
-              mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
+              if (!mesh.isPathDropping) {
+                mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
+              }
             }
+
+            nextStaticMeshes.set(key, mesh);
           }
         }
       }
 
       for (const [key, mesh] of this.staticBallMeshes.entries()) {
-        if (!currentKeys.has(key)) {
+        if (!nextStaticMeshes.has(key)) {
           this.ballsGroup.remove(mesh);
-          this.staticBallMeshes.delete(key);
         }
       }
+
+      this.staticBallMeshes = nextStaticMeshes;
+      engine.droppingPathsMap = new Map();
 
       if (!this.activeMeshes || this.activeMeshes.length === 0) {
         this.activeMeshes = [];
@@ -2098,7 +2268,30 @@
       const lerpSpeed = Math.min(1.0, dt * 24.0);
 
       for (const mesh of this.staticBallMeshes.values()) {
-        if (mesh.targetPos) {
+        mesh.scale.set(1.0, 1.0, 1.0);
+
+        if (mesh.isPathDropping && mesh.worldPath && mesh.worldPath.length > 1) {
+          const zipSpeed = 35.0; // Fast zip drop speed along visual hex path
+          const targetWaypoint = mesh.worldPath[mesh.pathIndex];
+          if (targetWaypoint) {
+            const dist = mesh.position.distanceTo(targetWaypoint);
+            const step = zipSpeed * dt;
+            if (dist <= step) {
+              mesh.position.set(targetWaypoint.x, targetWaypoint.y, targetWaypoint.z);
+              mesh.pathIndex++;
+              if (mesh.pathIndex >= mesh.worldPath.length) {
+                mesh.isPathDropping = false;
+                mesh.worldPath = null;
+                if (this.engine && this.engine.onPlaySound) this.engine.onPlaySound('land');
+              }
+            } else {
+              const dir = new THREE.Vector3().subVectors(targetWaypoint, mesh.position).normalize();
+              mesh.position.addScaledVector(dir, step);
+            }
+          } else {
+            mesh.isPathDropping = false;
+          }
+        } else if (mesh.targetPos) {
           mesh.position.lerp(mesh.targetPos, lerpSpeed);
         }
       }

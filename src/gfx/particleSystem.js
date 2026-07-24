@@ -122,6 +122,76 @@ export class ParticleSystem {
     });
   }
 
+  spawnLockSparks(worldPos, colorIndex = 1, count = 16) {
+    const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const velocities = [];
+
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = worldPos.x;
+      positions[i * 3 + 1] = worldPos.y;
+      positions[i * 3 + 2] = worldPos.z + 0.1;
+
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      const speed = 1.8 + Math.random() * 2.2;
+      velocities.push(
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        1.2 + Math.random() * 1.5
+      );
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+      color: color,
+      size: 0.22,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      opacity: 1.0,
+      depthWrite: false
+    });
+
+    const pointCloud = new THREE.Points(geometry, material);
+    this.scene.add(pointCloud);
+    this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 3.2 });
+  }
+
+  spawnLandDust(worldPos, count = 10) {
+    const color = new THREE.Color(0xffffff);
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const velocities = [];
+
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = worldPos.x;
+      positions[i * 3 + 1] = worldPos.y;
+      positions[i * 3 + 2] = worldPos.z;
+
+      const angle = (i / count) * Math.PI * 2;
+      const speed = 0.8 + Math.random() * 1.2;
+      velocities.push(
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        0.5 + Math.random() * 0.8
+      );
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+      color: color,
+      size: 0.18,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      opacity: 0.7,
+      depthWrite: false
+    });
+
+    const pointCloud = new THREE.Points(geometry, material);
+    this.scene.add(pointCloud);
+    this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 3.5 });
+  }
+
   /**
    * Update particle positions and fade lifetimes in frame loop.
    */

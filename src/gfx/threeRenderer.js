@@ -207,8 +207,11 @@ export class ThreeRenderer {
    * Sync 3D scene with OddUnitEngine state
    */
   updateScene(engine) {
-    // 1. Synchronize Static Stacked Board Balls with targetPos for smooth motion
+    this.engine = engine;
     const currentKeys = new Set();
+    const nextStaticMeshes = new Map();
+
+    const droppingPathsMap = engine.droppingPathsMap || new Map();
 
     for (let x = 4; x <= 20; x++) {
       for (let y = 0; y <= 19; y++) {
@@ -222,6 +225,33 @@ export class ThreeRenderer {
           const wPos = gridToWorld(x, y, SPHERE_RADIUS);
 
           let mesh = this.staticBallMeshes.get(key);
+
+          if (!mesh && droppingPathsMap.has(key)) {
+            const pathInfo = droppingPathsMap.get(key);
+            const fromKey = pathInfo.sourceKey;
+
+            if (this.staticBallMeshes.has(fromKey)) {
+              mesh = this.staticBallMeshes.get(fromKey);
+              this.staticBallMeshes.delete(fromKey);
+              mesh.material = mat;
+            } else {
+              mesh = new THREE.Mesh(this.sphereGeo, mat);
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+              this.ballsGroup.add(mesh);
+            }
+
+            mesh.worldPath = pathInfo.path.map(p => gridToWorld(p.x, p.y, SPHERE_RADIUS));
+            mesh.pathIndex = 1;
+            mesh.position.set(mesh.worldPath[0].x, mesh.worldPath[0].y, mesh.worldPath[0].z);
+            mesh.targetPos = new THREE.Vector3(
+              mesh.worldPath[mesh.worldPath.length - 1].x,
+              mesh.worldPath[mesh.worldPath.length - 1].y,
+              mesh.worldPath[mesh.worldPath.length - 1].z
+            );
+            mesh.isPathDropping = true;
+          }
+
           if (!mesh) {
             mesh = new THREE.Mesh(this.sphereGeo, mat);
             mesh.castShadow = true;
@@ -229,22 +259,27 @@ export class ThreeRenderer {
             mesh.targetPos = new THREE.Vector3(wPos.x, wPos.y, wPos.z);
             mesh.position.set(wPos.x, wPos.y, wPos.z);
             this.ballsGroup.add(mesh);
-            this.staticBallMeshes.set(key, mesh);
           } else {
             mesh.material = mat;
-            mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
+            if (!mesh.isPathDropping) {
+              mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
+            }
           }
+
+          nextStaticMeshes.set(key, mesh);
         }
       }
     }
 
     // Remove meshes no longer in ballMap
     for (const [key, mesh] of this.staticBallMeshes.entries()) {
-      if (!currentKeys.has(key)) {
+      if (!nextStaticMeshes.has(key)) {
         this.ballsGroup.remove(mesh);
-        this.staticBallMeshes.delete(key);
       }
     }
+
+    this.staticBallMeshes = nextStaticMeshes;
+    engine.droppingPathsMap = new Map();
 
     // 2. Synchronize Active Falling Piece (Re-use 4 Meshes for Butter-Smooth Motion)
     if (!this.activeMeshes || this.activeMeshes.length === 0) {
@@ -398,9 +433,32 @@ export class ThreeRenderer {
 
     const lerpSpeed = Math.min(1.0, dt * 24.0);
 
-    // Smooth Lerp Static Stacked Balls
+    // Smooth Lerp Static Stacked Balls & Animate Locks/Drops
     for (const mesh of this.staticBallMeshes.values()) {
-      if (mesh.targetPos) {
+      mesh.scale.set(1.0, 1.0, 1.0);
+
+      if (mesh.isPathDropping && mesh.worldPath && mesh.worldPath.length > 1) {
+        const zipSpeed = 35.0; // Fast zip drop speed along visual hex path
+        const targetWaypoint = mesh.worldPath[mesh.pathIndex];
+        if (targetWaypoint) {
+          const dist = mesh.position.distanceTo(targetWaypoint);
+          const step = zipSpeed * dt;
+          if (dist <= step) {
+            mesh.position.set(targetWaypoint.x, targetWaypoint.y, targetWaypoint.z);
+            mesh.pathIndex++;
+            if (mesh.pathIndex >= mesh.worldPath.length) {
+              mesh.isPathDropping = false;
+              mesh.worldPath = null;
+              if (this.engine && this.engine.onPlaySound) this.engine.onPlaySound('land');
+            }
+          } else {
+            const dir = new THREE.Vector3().subVectors(targetWaypoint, mesh.position).normalize();
+            mesh.position.addScaledVector(dir, step);
+          }
+        } else {
+          mesh.isPathDropping = false;
+        }
+      } else if (mesh.targetPos) {
         mesh.position.lerp(mesh.targetPos, lerpSpeed);
       }
     }

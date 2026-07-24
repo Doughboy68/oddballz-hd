@@ -1,26 +1,16 @@
 # Walkthrough - Oddballz HD
 
-Created a new, clean project in `d:/antigravity/oddballz-hd` featuring a full 3D rendering pipeline powered by Three.js, particle effects, ported hex game engine math from `oddballz-game.js`, and a polished glassmorphism UI.
+Enhanced `d:/antigravity/oddballz-hd` with real-time 3D hexagonal gravity drop path animations, zip-speed fall physics for unsupported balls breaking off from locked shapes, smooth piece lock-in, and full horizontal transformation precision.
 
-## Accomplished Features
+## Recent Enhancements
 
-### 1. Dedicated Page Layout Architecture
-- **Separated Viewport & Controls Bar**: Updated [index.html](file:///d:/antigravity/oddballz-hd/index.html) and [style.css](file:///d:/antigravity/oddballz-hd/src/style.css) to use a vertical flexbox layout (`#appLayout`).
-- **Upper Canvas Viewport (`#canvasContainer`)**: Occupies `flex: 1` in the upper section of the screen.
-- **Bottom Control Bar (`#bottomControlsBar`)**: Occupies `flex: 0 0 auto` physically **BELOW** the 3D playfield.
-- **Zero Overlap**: The Three.js WebGL canvas is strictly bounded inside `#canvasContainer`, ensuring the 3D hex playfield and the control buttons bar never touch or overlap on any screen resolution or aspect ratio.
+### 1. Shape Break-Apart Zip Drop Animation
+- **Locked Shape Break-Apart**: When a falling piece locks onto the grid (`stamp()`), any of its 4 balls that are unsupported break off from the shape position.
+- **Starting Position Alignment**: Fixed a bug where newly detached shape balls teleported to the bottom because they didn't exist in static mesh cache. They now initialize their 3D position directly at their break-off coordinates (`worldPath[0]`).
+- **Visual Hex Path Zip Drop**: Unsupported balls rapidly glide through their exact hexagonal path waypoints `[p0, p1, ..., pN]` at zip speed ($35.0$ world units/sec) down to their supported bottom slot.
 
-### 2. Hex Engine Core & Math Port
-- **Spatial Hex Coordinates**: [hexMath.js](file:///d:/antigravity/oddballz-hd/src/engine/hexMath.js) maps standard 1992 grid positions `(x: 4..20, y: 0..19)` into 3D world space.
-- **Engine Rules & Updates**: [oddunitEngine.js](file:///d:/antigravity/oddballz-hd/src/engine/oddunitEngine.js) ports the complete game engine:
-  - Updated piece spawn position (`startPos` tuned to `y: 3`).
-  - 50 difficulty levels.
-  - Tetramino-like hex piece shapes & transformation matrices (`rotCW`, `rotCCW`, `flipX`, `flipY`).
-  - Color cycling (`rotColors` / <kbd>F</kbd> key).
-  - Hard drop (<kbd>Space</kbd>).
-  - Dual Modes: **Color Match** (5+ parallel, 3+ perpendicular) and **Row Build** (edge-to-edge row clears).
-  - Score, level progression, and skill rating calculation.
-- **16-Bit Audio & Focus Loss Auto-Pause**: [soundEngine.js](file:///d:/antigravity/oddballz-hd/src/engine/soundEngine.js) and [main.js](file:///d:/antigravity/oddballz-hd/src/main.js) handle retro Web Audio synthesis and auto-pause when switching tabs or window focus.
+### 2. Clean Lock-In State Transition
+- **No Blinking / Scale Pulsing**: When a piece lands and locks into `ballMap`, it smoothly transitions into static grid meshes without any scale pulsing or blinking.
 
-### 3. End Game Confirmation Modal
-- Added an **"End Game"** button to the pause menu overlay and a dedicated confirmation modal (`#dialogConfirmEnd`), letting users end active games cleanly and return to the main menu.
+### 3. Horizontal Transformation Precision Fix
+- **Drift Resolution**: `transform()` adjusts floating coordinates (`targetFloatX` / `activeFloatPos`) using relative shift deltas ($\Delta X$, $\Delta Y$), eliminating leftward drift when pressing `Flip X` / `Flip Y` repeatedly while descending down-right.

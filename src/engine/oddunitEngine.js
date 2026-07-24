@@ -679,6 +679,8 @@ export class OddUnitEngine {
     let noneDropped = true;
     let flipGate = true;
 
+    if (!this.droppingPathsMap) this.droppingPathsMap = new Map();
+
     for (let y = 19; y >= 0; y--) {
       for (let x = 4; x <= 20; x++) {
         const startPts = { x: x, y: y };
@@ -689,6 +691,8 @@ export class OddUnitEngine {
             noneDropped = false;
             let current = { x: x, y: y };
             let maxDrops = 25;
+            const origKey = `${x}_${y}`;
+            const hexPath = [{ x: x, y: y }];
 
             while (!this.supported(current) && maxDrops > 0) {
               maxDrops--;
@@ -702,7 +706,7 @@ export class OddUnitEngine {
               const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
 
               if (!canMove1 && !canMove2) {
-                break; // Ball cannot fall down in either direction — break loop!
+                break;
               }
 
               let chosenTarget = null;
@@ -716,7 +720,20 @@ export class OddUnitEngine {
               this.ballMap[current.x][current.y].bzMap = 0;
               current = chosenTarget;
               this.ballMap[current.x][current.y].bzMap = saveColor;
-              if (this.onPlaySound) this.onPlaySound('drop');
+              hexPath.push({ x: current.x, y: current.y });
+            }
+
+            const targetKey = `${current.x}_${current.y}`;
+            if (targetKey !== origKey) {
+              let fullPath = hexPath;
+              if (this.droppingPathsMap.has(origKey)) {
+                const oldPathInfo = this.droppingPathsMap.get(origKey);
+                fullPath = oldPathInfo.path.concat(hexPath.slice(1));
+                this.droppingPathsMap.delete(origKey);
+                this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
+              } else {
+                this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
+              }
             }
           }
         }
