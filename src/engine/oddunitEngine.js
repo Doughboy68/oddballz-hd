@@ -591,9 +591,20 @@ export class OddUnitEngine {
    * Calculates the projected landing coordinates of the active piece (ghost piece).
    */
   getGhostPositions() {
-    const ghostMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
-    let canMove = true;
+    const curFloatY = this.activeFloatPos ? this.activeFloatPos.y : (this.oddballz.map[0] ? this.oddballz.map[0].y : 0);
+    const startRootY = Math.round(curFloatY);
+    const isDownRight = this.direction === 5;
+    const targetX = this.targetFloatX !== undefined ? this.targetFloatX : (this.oddballz.map[0] ? this.oddballz.map[0].x : 0);
+    const startRootX = isDownRight ? Math.round(targetX + (startRootY - curFloatY)) : Math.round(targetX);
 
+    const ghostMap = [];
+    for (let i = 0; i <= 3; i++) {
+      const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+      const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
+      ghostMap[i] = { x: startRootX + relX, y: startRootY + relY };
+    }
+
+    let canMove = true;
     while (canMove) {
       const nextMap = [];
       for (let i = 0; i <= 3; i++) {
