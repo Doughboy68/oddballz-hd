@@ -432,7 +432,129 @@
       return false;
     }
 
+    performFlip(isVertical = false) {
+      const newRel = [];
+      for (let i = 0; i <= 3; i++) {
+        const rx = this.oddballz.rel[i].x;
+        const ry = this.oddballz.rel[i].y;
+        if (isVertical) {
+          newRel[i] = { x: rx - ry, y: -ry };
+        } else {
+          newRel[i] = { x: ry - rx, y: ry };
+        }
+      }
+
+      const origMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
+      const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
+      const rootY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
+
+      const candidateShifts = [];
+      for (let sx = -3; sx <= 3; sx++) {
+        for (let sy = -3; sy <= 3; sy++) {
+          candidateShifts.push({ sx, sy });
+        }
+      }
+      candidateShifts.sort((a, b) => (a.sx * a.sx + a.sy * a.sy) - (b.sx * b.sx + b.sy * b.sy));
+
+      let bestShift = null;
+      let bestOverlapCount = -1;
+      let bestValidMove = null;
+
+      for (const { sx, sy } of candidateShifts) {
+        const testMap = [];
+        let valid = true;
+        for (let i = 0; i <= 3; i++) {
+          const px = rootX + newRel[i].x + sx;
+          const py = rootY + newRel[i].y + sy;
+          if (!this.checkInMap({ x: px, y: py }) || this.ballMap[px][py].bzMap !== 0) {
+            valid = false;
+            break;
+          }
+          testMap[i] = { x: px, y: py };
+        }
+        if (!valid) continue;
+
+        let overlapCount = 0;
+        for (let i = 0; i <= 3; i++) {
+          if (origMap.some(op => op.x === testMap[i].x && op.y === testMap[i].y)) {
+            overlapCount++;
+          }
+        }
+
+        if (overlapCount === 4) {
+          bestOverlapCount = 4;
+          bestShift = { sx, sy };
+          bestValidMove = testMap;
+          break;
+        }
+
+        if (overlapCount > bestOverlapCount) {
+          bestOverlapCount = overlapCount;
+          bestShift = { sx, sy };
+          bestValidMove = testMap;
+        }
+      }
+
+      if (!bestValidMove || !bestShift) {
+        return false;
+      }
+
+      if (bestOverlapCount === 4) {
+        // Footprint is identical: Physical grid cells DO NOT MOVE! Only flip ball colors!
+        const newColors = [];
+        for (let i = 0; i <= 3; i++) {
+          const origP = origMap[i];
+          const matchIdx = newRel.findIndex(nr => (rootX + nr.x + bestShift.sx) === origP.x && (rootY + nr.y + bestShift.sy) === origP.y);
+          newColors[i] = matchIdx !== -1 ? this.oddballz.image[matchIdx] : this.oddballz.image[i];
+        }
+        for (let i = 0; i <= 3; i++) {
+          this.oddballz.image[i] = newColors[i];
+        }
+      } else {
+        // Asymmetric shape: Update rel, targetRel, map, image, and active positions
+        const newColors = [];
+        for (let i = 0; i <= 3; i++) {
+          const matchIdx = newRel.findIndex(nr => (rootX + nr.x + bestShift.sx) === bestValidMove[i].x && (rootY + nr.y + bestShift.sy) === bestValidMove[i].y);
+          newColors[i] = matchIdx !== -1 ? this.oddballz.image[matchIdx] : this.oddballz.image[i];
+        }
+        for (let i = 0; i <= 3; i++) {
+          this.oddballz.image[i] = newColors[i];
+        }
+
+        const newRootX = bestValidMove[0].x;
+        const newRootY = bestValidMove[0].y;
+        this.targetFloatX = newRootX;
+        if (this.activeFloatPos) {
+          this.activeFloatPos.x = newRootX;
+          this.activeFloatPos.y = newRootY;
+        }
+
+        for (let i = 0; i <= 3; i++) {
+          const rx = bestValidMove[i].x - newRootX;
+          const ry = bestValidMove[i].y - newRootY;
+          this.oddballz.rel[i].x = rx;
+          this.oddballz.rel[i].y = ry;
+          if (this.targetRel) {
+            this.targetRel[i].x = rx;
+            this.targetRel[i].y = ry;
+          }
+          this.oddballz.map[i].x = bestValidMove[i].x;
+          this.oddballz.map[i].y = bestValidMove[i].y;
+        }
+      }
+
+      if (this.onPlaySound) this.onPlaySound('click');
+      return true;
+    }
+
     transform(tMatrix) {
+      if (tMatrix === this.flipX) {
+        return this.performFlip(false);
+      }
+      if (tMatrix === this.flipY) {
+        return this.performFlip(true);
+      }
+
       let transable = true;
       const saveMove = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
 
