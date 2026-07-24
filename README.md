@@ -1,4 +1,4 @@
-# Oddballz HD - 3D Hex Puzzle Game Engine
+# Oddballz HD - Hex Puzzle Game Engine
 
 Full 3D WebGL remake of the classic 1992 Oddballz hex puzzle game engine with Three.js sphere rendering, metallic materials, particle explosion effects, and Web Audio 16-bit sound synthesis.
 

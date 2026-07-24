@@ -3,11 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Oddballz HD - 3D Hex Puzzle Game Engine</title>
+  <!-- Cache Control Meta Tags to force fresh asset fetching on new releases -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Oddballz HD - Hex Puzzle Game Engine</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./src/style.css">
+  <link rel="stylesheet" href="./src/style.css?v=1.0.4">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -39,7 +43,7 @@
     <!-- Header Bar -->
     <header class="game-header glass-card">
       <div class="brand">
-        <h1 class="logo-text">ODDBALLZ <span class="badge-hd">HD 3D</span></h1>
+        <h1 class="logo-text">ODDBALLZ <span class="badge-hd">HD</span></h1>
       </div>
 
       <!-- Mode Selector Tabs -->
@@ -208,7 +212,7 @@
         
         <div class="about-content" style="text-align: left; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.92rem; line-height: 1.5; color: rgba(255, 255, 255, 0.9);">
           <p>
-            <strong>Oddballz HD 3D</strong> is inspired by a game designed by <strong style="white-space: nowrap;">Fred Kohler</strong> in the early 1990s and based off the Windows 1992 port by <strong style="white-space: nowrap;">Brian Semotiuk</strong>.
+            <strong>Oddballz HD</strong> is inspired by a game designed by <strong style="white-space: nowrap;">Fred Kohler</strong> in the early 1990s and based off the Windows 1992 port by <strong style="white-space: nowrap;">Brian Semotiuk</strong>.
           </p>
           <p>
             It uses the exact same algorithms and preserves authentic hexagonal strategy gameplay, enhanced with real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, and Web Audio synthesis.
@@ -223,6 +227,6 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js"></script>
+  <script src="./oddballz-app.js?v=1.0.4"></script>
 </body>
 </html>
