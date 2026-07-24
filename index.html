@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Oddballz HD - 3D Hex Puzzle Game Engine</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -24,8 +24,8 @@
       <div class="touch-cluster">
         <button id="btnTouchLeft" class="touch-btn">◀ Left</button>
         <button id="btnTouchRight" class="touch-btn">Right ▶</button>
-        <button id="btnTouchRotCW" class="touch-btn">↻ Rot CW</button>
         <button id="btnTouchRotCCW" class="touch-btn">↺ Rot CCW</button>
+        <button id="btnTouchRotCW" class="touch-btn">↻ Rot CW</button>
         <button id="btnTouchFlip" class="touch-btn">⇄ Flip X</button>
         <button id="btnTouchFlipY" class="touch-btn">⇅ Flip Y</button>
         <button id="btnTouchF" class="touch-btn btn-f">F Cycle Color</button>
@@ -103,12 +103,18 @@
         </p>
 
         <div class="mode-summary">
-          <div class="mode-info">
-            <h3>💎 Color Match Mode</h3>
+          <div id="modeCardColorMatch" class="mode-info mode-card-selectable active" role="button" tabindex="0">
+            <div class="mode-card-header">
+              <h3>💎 Color Match Mode</h3>
+              <span class="mode-select-badge">✓ ACTIVE</span>
+            </div>
             <p>Match 5+ balls in parallel lines or 3+ in perpendicular angles. Use <kbd>F</kbd> to cycle color order before dropping!</p>
           </div>
-          <div class="mode-info">
-            <h3>⚡ Row Build Mode</h3>
+          <div id="modeCardRowBuild" class="mode-info mode-card-selectable" role="button" tabindex="0">
+            <div class="mode-card-header">
+              <h3>⚡ Row Build Mode</h3>
+              <span class="mode-select-badge">SELECT</span>
+            </div>
             <p>Build complete edge-to-edge hex rows. When a full row fills up, it clears for mega points!</p>
           </div>
         </div>

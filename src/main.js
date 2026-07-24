@@ -179,12 +179,16 @@ class OddballzApp {
       }
     });
 
-    // Mode Selector Tabs
+    // Mode Selector Tabs & Title Screen Cards
     const tabColor = document.getElementById('tabColorMatch');
     const tabRow = document.getElementById('tabRowBuild');
+    const cardColor = document.getElementById('modeCardColorMatch');
+    const cardRow = document.getElementById('modeCardRowBuild');
 
-    tabColor.addEventListener('click', () => this.switchMode(true));
-    tabRow.addEventListener('click', () => this.switchMode(false));
+    if (tabColor) tabColor.addEventListener('click', () => this.switchMode(true));
+    if (tabRow) tabRow.addEventListener('click', () => this.switchMode(false));
+    if (cardColor) cardColor.addEventListener('click', () => this.switchMode(true));
+    if (cardRow) cardRow.addEventListener('click', () => this.switchMode(false));
   }
 
   initTouchControls() {
@@ -247,17 +251,57 @@ class OddballzApp {
     });
   }
 
-  switchMode(isColorMatch) {
+  setModeTabsDisabled(disabled) {
     const tabColor = document.getElementById('tabColorMatch');
     const tabRow = document.getElementById('tabRowBuild');
+    if (tabColor) {
+      tabColor.disabled = disabled;
+      if (disabled) tabColor.classList.add('disabled');
+      else tabColor.classList.remove('disabled');
+    }
+    if (tabRow) {
+      tabRow.disabled = disabled;
+      if (disabled) tabRow.classList.add('disabled');
+      else tabRow.classList.remove('disabled');
+    }
+  }
+
+  switchMode(isColorMatch) {
+    if (this.isPlaying) return;
+
+    const tabColor = document.getElementById('tabColorMatch');
+    const tabRow = document.getElementById('tabRowBuild');
+    const cardColor = document.getElementById('modeCardColorMatch');
+    const cardRow = document.getElementById('modeCardRowBuild');
+
     this.engine.matcher = isColorMatch;
 
     if (isColorMatch) {
-      tabColor.classList.add('active');
-      tabRow.classList.remove('active');
+      if (tabColor) tabColor.classList.add('active');
+      if (tabRow) tabRow.classList.remove('active');
+      if (cardColor) {
+        cardColor.classList.add('active');
+        const badge = cardColor.querySelector('.mode-select-badge');
+        if (badge) badge.textContent = '✓ ACTIVE';
+      }
+      if (cardRow) {
+        cardRow.classList.remove('active');
+        const badge = cardRow.querySelector('.mode-select-badge');
+        if (badge) badge.textContent = 'SELECT';
+      }
     } else {
-      tabRow.classList.add('active');
-      tabColor.classList.remove('active');
+      if (tabRow) tabRow.classList.add('active');
+      if (tabColor) tabColor.classList.remove('active');
+      if (cardRow) {
+        cardRow.classList.add('active');
+        const badge = cardRow.querySelector('.mode-select-badge');
+        if (badge) badge.textContent = '✓ ACTIVE';
+      }
+      if (cardColor) {
+        cardColor.classList.remove('active');
+        const badge = cardColor.querySelector('.mode-select-badge');
+        if (badge) badge.textContent = 'SELECT';
+      }
     }
 
     if (!this.isPlaying) {
@@ -277,6 +321,8 @@ class OddballzApp {
     this.moveTime = 0;
     this.accumulatedTime = 0;
     this.lastTime = performance.now();
+
+    this.setModeTabsDisabled(true);
 
     document.getElementById('overlayStart').classList.add('hidden');
     document.getElementById('overlayGameOver').classList.add('hidden');
@@ -336,6 +382,8 @@ class OddballzApp {
     this.engine.endGame = true;
     this.audio.stopBGM();
 
+    this.setModeTabsDisabled(false);
+
     document.getElementById('overlayPause').classList.add('hidden');
     document.getElementById('overlayGameOver').classList.add('hidden');
     document.getElementById('dialogConfirmEnd').classList.add('hidden');
@@ -377,6 +425,7 @@ class OddballzApp {
 
   handleGameOver() {
     this.isPlaying = false;
+    this.setModeTabsDisabled(false);
     this.updateHighScores(this.engine.score, this.engine.level, this.engine.skill);
     document.getElementById('finalScore').textContent = this.engine.score;
     document.getElementById('overlayGameOver').classList.remove('hidden');

@@ -1631,8 +1631,6 @@
       const height = this.container.clientHeight || window.innerHeight;
       const aspect = width / height;
       this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-      this.camera.position.set(0, -17.5, 21.0);
-      this.camera.lookAt(0, 0.8, 0);
 
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       this.renderer.setSize(width, height);
@@ -1643,6 +1641,7 @@
       this.renderer.toneMappingExposure = 1.1;
 
       this.container.appendChild(this.renderer.domElement);
+      this.updateCameraFraming();
 
       this.ballMaterials = [];
       this.ghostMaterials = [];
@@ -2111,12 +2110,30 @@
       this.renderer.render(this.scene, this.camera);
     }
 
-    onWindowResize() {
+    updateCameraFraming() {
       const width = this.container.clientWidth || window.innerWidth;
       const height = this.container.clientHeight || window.innerHeight;
-      this.camera.aspect = width / height;
+      const aspect = width / height;
+      this.camera.aspect = aspect;
+
+      if (aspect < 1.0) {
+        // iPhone & portrait mobile screen camera framing
+        this.camera.fov = Math.min(68, 45 / (aspect * 0.85));
+        const distFactor = (1.0 - aspect);
+        this.camera.position.set(0, -17.5 - distFactor * 3.5, 21.0 + distFactor * 8.5);
+      } else {
+        // Desktop / landscape view framing
+        this.camera.fov = 45;
+        this.camera.position.set(0, -17.5, 21.0);
+      }
+
+      this.camera.lookAt(0, 0.8, 0);
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
+    }
+
+    onWindowResize() {
+      this.updateCameraFraming();
     }
   }
 
@@ -2245,9 +2262,13 @@
 
       const tabColor = document.getElementById('tabColorMatch');
       const tabRow = document.getElementById('tabRowBuild');
+      const cardColor = document.getElementById('modeCardColorMatch');
+      const cardRow = document.getElementById('modeCardRowBuild');
 
-      tabColor.addEventListener('click', () => this.switchMode(true));
-      tabRow.addEventListener('click', () => this.switchMode(false));
+      if (tabColor) tabColor.addEventListener('click', () => this.switchMode(true));
+      if (tabRow) tabRow.addEventListener('click', () => this.switchMode(false));
+      if (cardColor) cardColor.addEventListener('click', () => this.switchMode(true));
+      if (cardRow) cardRow.addEventListener('click', () => this.switchMode(false));
     }
 
     initTouchControls() {
@@ -2296,17 +2317,57 @@
       });
     }
 
-    switchMode(isColorMatch) {
+    setModeTabsDisabled(disabled) {
       const tabColor = document.getElementById('tabColorMatch');
       const tabRow = document.getElementById('tabRowBuild');
+      if (tabColor) {
+        tabColor.disabled = disabled;
+        if (disabled) tabColor.classList.add('disabled');
+        else tabColor.classList.remove('disabled');
+      }
+      if (tabRow) {
+        tabRow.disabled = disabled;
+        if (disabled) tabRow.classList.add('disabled');
+        else tabRow.classList.remove('disabled');
+      }
+    }
+
+    switchMode(isColorMatch) {
+      if (this.isPlaying) return;
+
+      const tabColor = document.getElementById('tabColorMatch');
+      const tabRow = document.getElementById('tabRowBuild');
+      const cardColor = document.getElementById('modeCardColorMatch');
+      const cardRow = document.getElementById('modeCardRowBuild');
+
       this.engine.matcher = isColorMatch;
 
       if (isColorMatch) {
-        tabColor.classList.add('active');
-        tabRow.classList.remove('active');
+        if (tabColor) tabColor.classList.add('active');
+        if (tabRow) tabRow.classList.remove('active');
+        if (cardColor) {
+          cardColor.classList.add('active');
+          const badge = cardColor.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = '✓ ACTIVE';
+        }
+        if (cardRow) {
+          cardRow.classList.remove('active');
+          const badge = cardRow.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = 'SELECT';
+        }
       } else {
-        tabRow.classList.add('active');
-        tabColor.classList.remove('active');
+        if (tabRow) tabRow.classList.add('active');
+        if (tabColor) tabColor.classList.remove('active');
+        if (cardRow) {
+          cardRow.classList.add('active');
+          const badge = cardRow.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = '✓ ACTIVE';
+        }
+        if (cardColor) {
+          cardColor.classList.remove('active');
+          const badge = cardColor.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = 'SELECT';
+        }
       }
 
       if (!this.isPlaying) {
@@ -2326,6 +2387,8 @@
       this.moveTime = 0;
       this.accumulatedTime = 0;
       this.lastTime = performance.now();
+
+      this.setModeTabsDisabled(true);
 
       document.getElementById('overlayStart').classList.add('hidden');
       document.getElementById('overlayGameOver').classList.add('hidden');
@@ -2385,6 +2448,8 @@
       this.engine.endGame = true;
       this.audio.stopBGM();
 
+      this.setModeTabsDisabled(false);
+
       document.getElementById('overlayPause').classList.add('hidden');
       document.getElementById('overlayGameOver').classList.add('hidden');
       document.getElementById('dialogConfirmEnd').classList.add('hidden');
@@ -2424,6 +2489,7 @@
 
     handleGameOver() {
       this.isPlaying = false;
+      this.setModeTabsDisabled(false);
       this.updateHighScores(this.engine.score, this.engine.level, this.engine.skill);
       document.getElementById('finalScore').textContent = this.engine.score;
       document.getElementById('overlayGameOver').classList.remove('hidden');

@@ -19,9 +19,7 @@ export class ThreeRenderer {
     const width = this.container.clientWidth || window.innerWidth;
     const height = this.container.clientHeight || window.innerHeight;
     const aspect = width / height;
-    // Camera framing: pulled back & elevated so the entire hex board sits with generous margin inside canvas
-    this.camera.position.set(0, -17.5, 21.0);
-    this.camera.lookAt(0, 0.8, 0);
+    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
 
     // 3. Renderer Setup
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
@@ -33,6 +31,7 @@ export class ThreeRenderer {
     this.renderer.toneMappingExposure = 1.1;
 
     this.container.appendChild(this.renderer.domElement);
+    this.updateCameraFraming();
 
     // Ball Materials Cache (1..6)
     this.ballMaterials = [];
@@ -418,11 +417,29 @@ export class ThreeRenderer {
     this.renderer.render(this.scene, this.camera);
   }
 
-  onWindowResize() {
+  updateCameraFraming() {
     const width = this.container.clientWidth || window.innerWidth;
     const height = this.container.clientHeight || window.innerHeight;
-    this.camera.aspect = width / height;
+    const aspect = width / height;
+    this.camera.aspect = aspect;
+
+    if (aspect < 1.0) {
+      // iPhone & portrait mobile screen camera framing
+      this.camera.fov = Math.min(68, 45 / (aspect * 0.85));
+      const distFactor = (1.0 - aspect);
+      this.camera.position.set(0, -17.5 - distFactor * 3.5, 21.0 + distFactor * 8.5);
+    } else {
+      // Desktop / landscape view framing
+      this.camera.fov = 45;
+      this.camera.position.set(0, -17.5, 21.0);
+    }
+
+    this.camera.lookAt(0, 0.8, 0);
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+  }
+
+  onWindowResize() {
+    this.updateCameraFraming();
   }
 }
