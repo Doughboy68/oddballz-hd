@@ -32,8 +32,8 @@ export function gridToWorld(x, y, zOffset = 0) {
   const cy = y - 9.5;
 
   // Slanted hex alignment matching original game screen geometry:
-  // Each row y moves down-left, with staggered x offsets.
-  const worldX = (cx - cy * 0.5) * HEX_SPACING_X;
+  // Each row y moves down-left, with staggered x offsets. +0.75 aligns center of mass exactly to X=0.
+  const worldX = (cx - cy * 0.5) * HEX_SPACING_X + 0.75;
   const worldY = -cy * HEX_SPACING_Y;
   const worldZ = zOffset;
 

@@ -19,7 +19,7 @@
   function gridToWorld(x, y, zOffset = 0) {
     const cx = x - 12;
     const cy = y - 9.5;
-    const worldX = (cx - cy * 0.5) * HEX_SPACING_X;
+    const worldX = (cx - cy * 0.5) * HEX_SPACING_X + 0.75;
     const worldY = -cy * HEX_SPACING_Y;
     const worldZ = zOffset;
     return { x: worldX, y: worldY, z: worldZ };
