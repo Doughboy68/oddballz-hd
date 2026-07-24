@@ -611,44 +611,44 @@ input:checked + .slider::before {
   }
 
   #uiOverlay {
-    padding: 0.4rem;
-    gap: 0.3rem;
+    padding: 0.25rem 0.35rem;
+    gap: 0.2rem;
     justify-content: flex-start;
   }
 
   .game-header {
-    padding: 0.4rem 0.6rem;
+    padding: 0.3rem 0.5rem;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.25rem;
   }
 
   .logo-text {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
   }
 
   .badge-hd {
-    font-size: 0.65rem;
-    padding: 0.15rem 0.4rem;
+    font-size: 0.62rem;
+    padding: 0.12rem 0.35rem;
   }
 
   .mode-tabs {
-    padding: 0.2rem;
-    gap: 0.25rem;
+    padding: 0.15rem;
+    gap: 0.2rem;
   }
 
   .mode-tab {
-    padding: 0.35rem 0.55rem;
-    font-size: 0.74rem;
-    gap: 0.25rem;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.72rem;
+    gap: 0.2rem;
   }
 
   .header-actions {
-    gap: 0.4rem;
+    gap: 0.3rem;
   }
 
   .btn-sm {
-    padding: 0.35rem 0.55rem;
-    font-size: 0.75rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.74rem;
   }
 
   /* Horizontal sleek stats strip on mobile to keep playfield 100% visible */
@@ -662,10 +662,11 @@ input:checked + .slider::before {
     flex-direction: row;
     justify-content: space-around;
     align-items: center;
-    padding: 0.35rem 0.5rem;
+    padding: 0.25rem 0.4rem;
     min-width: unset;
-    gap: 0.4rem;
-    border-radius: 10px;
+    gap: 0.3rem;
+    margin-top: 0.15rem;
+    border-radius: 8px;
     background: rgba(12, 15, 26, 0.85);
   }
 
@@ -675,17 +676,17 @@ input:checked + .slider::before {
   }
 
   .stat-label {
-    font-size: 0.62rem;
+    font-size: 0.6rem;
   }
 
   .stat-value {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
   }
 
   /* Ergonomic 4-Column Touch Button Grid directly below 3D canvas for iPhone play */
   #bottomControlsBar {
-    padding: 0.35rem 0.4rem;
-    padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
+    padding: 0.25rem 0.3rem;
+    padding-bottom: max(0.3rem, env(safe-area-inset-bottom, 0px));
     width: 100%;
   }
 

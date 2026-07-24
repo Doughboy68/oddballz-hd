@@ -424,17 +424,18 @@ export class ThreeRenderer {
     this.camera.aspect = aspect;
 
     if (aspect < 1.0) {
-      // iPhone & portrait mobile screen camera framing
-      this.camera.fov = Math.min(68, 45 / (aspect * 0.85));
+      // iPhone & portrait mobile screen camera framing: enlarged playfield view
+      this.camera.fov = Math.min(74, 45 / (aspect * 0.95));
       const distFactor = (1.0 - aspect);
-      this.camera.position.set(0, -17.5 - distFactor * 3.5, 21.0 + distFactor * 8.5);
+      this.camera.position.set(0, -16.5 - distFactor * 2.0, 19.5 + distFactor * 4.0);
+      this.camera.lookAt(0, 0.4, 0);
     } else {
       // Desktop / landscape view framing
       this.camera.fov = 45;
       this.camera.position.set(0, -17.5, 21.0);
+      this.camera.lookAt(0, 0.8, 0);
     }
 
-    this.camera.lookAt(0, 0.8, 0);
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
   }
