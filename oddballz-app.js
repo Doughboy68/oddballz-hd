@@ -2093,11 +2093,13 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
+        // Mobile portrait mode (iPhone): previous size, shifted to the right
         const zoomFactor = 1.0 / aspect;
         this.camera.fov = Math.min(65, 42 * Math.pow(zoomFactor, 0.65));
-        this.camera.position.set(0, -18.5 - (zoomFactor - 1.0) * 3.5, 23.5 + (zoomFactor - 1.0) * 9.0);
-        this.camera.lookAt(0, 0.5, 0);
+        this.camera.position.set(-1.2, -18.5 - (zoomFactor - 1.0) * 3.5, 23.5 + (zoomFactor - 1.0) * 9.0);
+        this.camera.lookAt(-1.2, 0.5, 0);
       } else {
+        // Desktop / landscape mode
         this.camera.fov = 42;
         this.camera.position.set(0, -18.5, 23.5);
         this.camera.lookAt(0, 0.5, 0);
