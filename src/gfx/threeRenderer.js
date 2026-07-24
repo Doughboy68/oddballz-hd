@@ -424,11 +424,11 @@ export class ThreeRenderer {
     this.camera.aspect = aspect;
 
     if (aspect < 1.0) {
-      // iPhone & portrait mobile screen camera framing: enlarged playfield view
-      this.camera.fov = Math.min(74, 45 / (aspect * 0.95));
+      // iPhone & Android portrait mobile camera framing: EXTRA ENLARGED playfield view
+      this.camera.fov = Math.min(84, 45 / (aspect * 1.08));
       const distFactor = (1.0 - aspect);
-      this.camera.position.set(0, -16.5 - distFactor * 2.0, 19.5 + distFactor * 4.0);
-      this.camera.lookAt(0, 0.4, 0);
+      this.camera.position.set(0, -15.0 - distFactor * 1.5, 16.2 + distFactor * 2.2);
+      this.camera.lookAt(0, 0.2, 0);
     } else {
       // Desktop / landscape view framing
       this.camera.fov = 45;
