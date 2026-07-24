@@ -566,11 +566,15 @@
 
       if (transable) {
         const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
+        const shiftX = finalRootX - rootX;
+        const shiftY = finalRootY - rootY;
+
         if (this.activeFloatPos) {
-          this.activeFloatPos.x = finalRootX;
+          this.activeFloatPos.x += shiftX;
+          this.activeFloatPos.y += shiftY;
         }
         if (this.targetFloatX !== undefined) {
-          this.targetFloatX = finalRootX;
+          this.targetFloatX += shiftX;
         }
 
         for (let i = 0; i <= 3; i++) {
