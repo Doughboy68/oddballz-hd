@@ -455,42 +455,130 @@
 
       let transable = true;
       const saveMove = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
+      let finalRootX = rootX;
+      let finalRootY = rootY;
 
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
-
-        if (tMatrix === this.rotCW) {
+      if (tMatrix === this.rotCW) {
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
           saveMove[i] = { x: rx - ry, y: rx };
-        } else if (tMatrix === this.rotCCW) {
+        }
+      } else if (tMatrix === this.rotCCW) {
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
           saveMove[i] = { x: ry, y: ry - rx };
+        }
+      } else if (tMatrix === this.flipX || tMatrix === this.flipY) {
+        const rawReflect = [];
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
+          const mx = rx + 2, my = ry + 2;
+          if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
+          rawReflect[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
+        }
+        if (!transable) return false;
+
+        const candidateShifts = [
+          { sx: 0, sy: 0 },
+          { sx: -1, sy: 0 },
+          { sx: 1, sy: 0 },
+          { sx: 0, sy: -1 },
+          { sx: 0, sy: 1 }
+        ];
+
+        let maxOverlap = -1;
+        let minDisp = Infinity;
+        let bestShift = null;
+
+        for (const { sx, sy } of candidateShifts) {
+          const testRootX = rootX + sx;
+          const testRootY = rootY + sy;
+          let valid = true;
+
+          for (let i = 0; i <= 3; i++) {
+            const px = testRootX + rawReflect[i].x;
+            const py = testRootY + rawReflect[i].y;
+            const isSelfCell = origMap.some(op => op.x === px && op.y === py);
+            if (!this.checkInMap({ x: px, y: py }) || (!isSelfCell && this.ballMap[px][py].bzMap !== 0)) {
+              valid = false;
+              break;
+            }
+          }
+          if (!valid) continue;
+
+          let overlap = 0;
+          for (let i = 0; i <= 3; i++) {
+            const px = testRootX + rawReflect[i].x;
+            const py = testRootY + rawReflect[i].y;
+            if (origMap.some(op => op.x === px && op.y === py)) overlap++;
+          }
+          const disp = sx * sx + sy * sy;
+
+          if (overlap > maxOverlap || (overlap === maxOverlap && disp < minDisp)) {
+            maxOverlap = overlap;
+            minDisp = disp;
+            bestShift = { sx, sy };
+          }
+        }
+
+        if (bestShift) {
+          finalRootX = rootX + bestShift.sx;
+          finalRootY = rootY + bestShift.sy;
+
+          // Re-normalize saveMove so saveMove[0] is ALWAYS { x: 0, y: 0 }
+          const s0x = rawReflect[0].x;
+          const s0y = rawReflect[0].y;
+          finalRootX += s0x;
+          finalRootY += s0y;
+
+          for (let i = 0; i <= 3; i++) {
+            saveMove[i] = { x: rawReflect[i].x - s0x, y: rawReflect[i].y - s0y };
+          }
         } else {
-          // flipX / flipY and custom matrix: exact 1992 Pascal hex matrix lookup
+          transable = false;
+        }
+      } else {
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
           const mx = rx + 2, my = ry + 2;
           if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
           saveMove[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
         }
+      }
 
-        const pts = {
-          x: rootX + saveMove[i].x,
-          y: rootY + saveMove[i].y
-        };
-
-        // Allow moving into a cell currently occupied by this piece (self-swap)
-        const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
-        if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
-          transable = false;
-          break;
+      if (transable) {
+        for (let i = 0; i <= 3; i++) {
+          const pts = {
+            x: finalRootX + saveMove[i].x,
+            y: finalRootY + saveMove[i].y
+          };
+          const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
+          if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
+            transable = false;
+            break;
+          }
         }
       }
 
       if (transable) {
         const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
+        if (this.activeFloatPos) {
+          this.activeFloatPos.x = finalRootX;
+          this.activeFloatPos.y = finalRootY;
+        }
+        if (this.targetFloatX !== undefined) {
+          this.targetFloatX = finalRootX;
+        }
+
         for (let i = 0; i <= 3; i++) {
           this.oddballz.rel[i].x = saveMove[i].x;
           this.oddballz.rel[i].y = saveMove[i].y;
-          this.oddballz.map[i].x = rootX + saveMove[i].x;
-          this.oddballz.map[i].y = rootY + saveMove[i].y;
+          this.oddballz.map[i].x = finalRootX + saveMove[i].x;
+          this.oddballz.map[i].y = finalRootY + saveMove[i].y;
           if (this.targetRel) {
             this.targetRel[i].x = saveMove[i].x;
             this.targetRel[i].y = saveMove[i].y;
