@@ -1546,10 +1546,7 @@
 
       const width = this.container.clientWidth || window.innerWidth;
       const height = this.container.clientHeight || window.innerHeight;
-      const aspect = width / height;
-      this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-      this.camera.position.set(0, -17.5, 21.0);
-      this.camera.lookAt(0, 0.8, 0);
+      this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
 
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       this.renderer.setSize(width, height);
@@ -1560,6 +1557,7 @@
       this.renderer.toneMappingExposure = 1.1;
 
       this.container.appendChild(this.renderer.domElement);
+      this.updateCameraProjection();
 
       this.ballMaterials = [];
       this.ghostMaterials = [];
@@ -2088,12 +2086,30 @@
       this.renderer.render(this.scene, this.camera);
     }
 
+    updateCameraProjection() {
+      const width = this.container.clientWidth || window.innerWidth;
+      const height = this.container.clientHeight || window.innerHeight;
+      const aspect = width / height;
+      this.camera.aspect = aspect;
+
+      if (aspect < 1.0) {
+        const zoomFactor = 1.0 / aspect;
+        this.camera.fov = Math.min(65, 42 * Math.pow(zoomFactor, 0.65));
+        this.camera.position.set(0, -18.5 - (zoomFactor - 1.0) * 3.5, 23.5 + (zoomFactor - 1.0) * 9.0);
+        this.camera.lookAt(0, 0.5, 0);
+      } else {
+        this.camera.fov = 42;
+        this.camera.position.set(0, -18.5, 23.5);
+        this.camera.lookAt(0, 0.5, 0);
+      }
+      this.camera.updateProjectionMatrix();
+    }
+
     onWindowResize() {
       const width = this.container.clientWidth || window.innerWidth;
       const height = this.container.clientHeight || window.innerHeight;
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
+      this.updateCameraProjection();
     }
   }
 
@@ -2254,11 +2270,9 @@
       bindTouch('btnTouchRight', () => this.engine.moveOBall(4));
       bindTouch('btnTouchRotCW', () => this.engine.transform(this.engine.rotCW));
       bindTouch('btnTouchRotCCW', () => this.engine.transform(this.engine.rotCCW));
-      bindTouch('btnTouchFlip', () => {
-        if (!this.engine.transform(this.engine.flipX)) {
-          this.engine.transform(this.engine.flipY);
-        }
-      });
+      bindTouch('btnTouchFlipY', () => this.engine.transform(this.engine.flipY));
+      bindTouch('btnTouchFlipX', () => this.engine.transform(this.engine.flipX));
+      bindTouch('btnTouchFlip', () => this.engine.transform(this.engine.flipX));
       bindTouch('btnTouchF', () => this.engine.rotColors());
       bindTouch('btnTouchSpace', () => this.engine.zip());
 
