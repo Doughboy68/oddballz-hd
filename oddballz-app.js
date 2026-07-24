@@ -300,9 +300,136 @@
       const rotCount = Math.floor(Math.random() * 6);
       for (let i = 0; i < rotCount; i++) this.transform(this.rotCW);
       if (Math.random() < 0.5) this.transform(this.flipX);
-      if (Math.random() < 0.5) this.transform(this.flipY);
+      this.activeFloatPos = {
+        x: this.oddballz.map[0].x,
+        y: this.oddballz.map[0].y
+      };
+      this.targetFloatX = this.oddballz.map[0].x;
 
+      this.activeRel = [];
+      this.targetRel = [];
+      for (let i = 0; i <= 3; i++) {
+        this.activeRel[i] = { x: this.oddballz.rel[i].x, y: this.oddballz.rel[i].y };
+        this.targetRel[i] = { x: this.oddballz.rel[i].x, y: this.oddballz.rel[i].y };
+      }
+
+      this.isZipping = false;
       this.ballCount++;
+    }
+
+    updateContinuous(dt) {
+      if (this.endGame || !this.oddballz || !this.activeFloatPos) return false;
+
+      const steerLerpSpeed = Math.min(1.0, dt * 18.0);
+      this.activeFloatPos.x += (this.targetFloatX - this.activeFloatPos.x) * steerLerpSpeed;
+
+      const rotLerpSpeed = Math.min(1.0, dt * 24.0);
+      if (this.activeRel && this.targetRel) {
+        for (let i = 0; i <= 3; i++) {
+          this.activeRel[i].x += (this.targetRel[i].x - this.activeRel[i].x) * rotLerpSpeed;
+          this.activeRel[i].y += (this.targetRel[i].y - this.activeRel[i].y) * rotLerpSpeed;
+        }
+      }
+
+      const baseSpeed = 1.0 + (this.level - 1) * 0.12;
+      const speed = this.isZipping ? 35.0 : baseSpeed;
+
+      // Direction 2 = down-left (Y+1), Direction 5 = down-right (X+1, Y+1)
+      const isDownRight = this.direction === 5;
+
+      const curFloatY = this.activeFloatPos.y;
+      const nextFloatY = curFloatY + speed * dt;
+
+      // Per-step collision: check each integer row the piece would cross this frame
+      const curRowY = Math.floor(curFloatY);
+      const nextRowY = Math.floor(nextFloatY);
+      let landingRowY = -1;
+
+      outerLoop:
+      for (let gy = curRowY + 1; gy <= nextRowY + 1; gy++) {
+        // For direction 5, X advances proportionally with Y from the float position
+        const rootXAtRow = isDownRight
+          ? Math.round(this.targetFloatX + (gy - curFloatY))
+          : Math.round(this.targetFloatX);
+
+        for (let i = 0; i <= 3; i++) {
+          const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+          const relY = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+          const testX = rootXAtRow + relX;
+          const testY = gy + relY;
+          if (!this.checkInMap({ x: testX, y: testY }) || this.ballMap[testX][testY].bzMap !== 0) {
+            landingRowY = gy - 1;
+            break outerLoop;
+          }
+        }
+      }
+
+      if (landingRowY !== -1) {
+        const targetX = isDownRight
+          ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
+          : Math.round(this.targetFloatX);
+        const targetY = landingRowY;
+
+        this.activeFloatPos.x = targetX;
+        this.activeFloatPos.y = targetY;
+        this.targetFloatX = targetX;
+
+        this.oddballz.map[0].x = targetX;
+        this.oddballz.map[0].y = targetY;
+
+        for (let i = 1; i <= 3; i++) {
+          const rx = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+          const ry = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+          this.oddballz.map[i].x = targetX + rx;
+          this.oddballz.map[i].y = targetY + ry;
+          this.oddballz.rel[i].x = rx;
+          this.oddballz.rel[i].y = ry;
+          if (this.activeRel) {
+            this.activeRel[i].x = rx;
+            this.activeRel[i].y = ry;
+          }
+          if (this.targetRel) {
+            this.targetRel[i].x = rx;
+            this.targetRel[i].y = ry;
+          }
+        }
+
+        this.stamp();
+        if (this.onPlaySound) this.onPlaySound('drop');
+
+        if (this.matcher) {
+          this.checkMatches();
+        }
+
+        this.checkAdvance();
+
+        if (this.checkGameOver()) {
+          return true;
+        } else {
+          this.build();
+        }
+        return true;
+      }
+
+      // No collision — advance smoothly
+      this.activeFloatPos.y = nextFloatY;
+      if (isDownRight) {
+        this.activeFloatPos.x += speed * dt;
+        this.targetFloatX += speed * dt;
+      }
+
+      const curX = Math.round(this.activeFloatPos.x);
+      const curY = Math.round(this.activeFloatPos.y);
+
+      this.oddballz.map[0].x = curX;
+      this.oddballz.map[0].y = curY;
+
+      for (let i = 1; i <= 3; i++) {
+        this.oddballz.map[i].x = curX + (this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x);
+        this.oddballz.map[i].y = curY + (this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y);
+      }
+
+      return false;
     }
 
     transform(tMatrix) {
@@ -318,9 +445,12 @@
         }
         saveMove[i].x = tMatrix[ry][rx].x;
         saveMove[i].y = tMatrix[ry][rx].y;
+
+        const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : this.oddballz.map[0].x);
+        const rootY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
         const pts = {
-          x: this.oddballz.map[0].x + saveMove[i].x,
-          y: this.oddballz.map[0].y + saveMove[i].y
+          x: rootX + saveMove[i].x,
+          y: rootY + saveMove[i].y
         };
 
         if (!this.checkInMap(pts) || this.ballMap[pts.x][pts.y].bzMap !== 0) {
@@ -335,6 +465,10 @@
           this.oddballz.rel[i].y = saveMove[i].y;
           this.oddballz.map[i].x = this.oddballz.map[0].x + saveMove[i].x;
           this.oddballz.map[i].y = this.oddballz.map[0].y + saveMove[i].y;
+          if (this.targetRel) {
+            this.targetRel[i].x = saveMove[i].x;
+            this.targetRel[i].y = saveMove[i].y;
+          }
         }
       }
       return transable;
@@ -344,8 +478,13 @@
       let moveable = true;
       const saveMove = [];
 
+      const curX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
+      const curY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
+
       for (let i = 0; i <= 3; i++) {
-        const pts = { x: this.oddballz.map[i].x, y: this.oddballz.map[i].y };
+        const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+        const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
+        const pts = { x: curX + relX, y: curY + relY };
         moveInDirection(pts, dir);
         if (this.checkInMap(pts) && this.ballMap[pts.x][pts.y].bzMap === 0) {
           saveMove[i] = { x: pts.x, y: pts.y };
@@ -356,6 +495,17 @@
       }
 
       if (moveable) {
+        if (dir === 1) {
+          this.targetFloatX -= 1.0;
+        } else if (dir === 4) {
+          this.targetFloatX += 1.0;
+        } else if (dir === 0) {
+          this.targetFloatX -= 1.0;
+          if (this.activeFloatPos) this.activeFloatPos.y -= 1.0;
+        } else if (dir === 3) {
+          this.targetFloatX += 1.0;
+          if (this.activeFloatPos) this.activeFloatPos.y -= 1.0;
+        }
         for (let i = 0; i <= 3; i++) {
           this.oddballz.map[i].x = saveMove[i].x;
           this.oddballz.map[i].y = saveMove[i].y;
@@ -400,14 +550,8 @@
     }
 
     zip() {
-      let zipBonus = false;
-      if (this.moveOBall(this.direction)) {
-        zipBonus = true;
-      }
-      while (this.moveOBall(this.direction)) {
-        if (this.onPlaySound) this.onPlaySound('zip');
-      }
-      if (zipBonus) this.score += 1;
+      this.isZipping = true;
+      if (this.onPlaySound) this.onPlaySound('zip');
     }
 
     stamp() {
@@ -675,14 +819,74 @@
       }
       return false;
     }
-  }
-
-  // --- 3. SOUND SYNTHESIS ---
+  }  // --- 3. SOUND SYNTHESIS (128-STEP AMIGA TRACKER GAME SOUNDTRACK) ---
   class SoundEngine {
     constructor() {
       this.ctx = null;
       this.enabled = true;
       this.freq = [25, 27, 28, 30, 32, 33, 35, 37, 39, 40, 42, 44, 45, 47, 49, 51, 52, 54, 56];
+      this.bgmPlaying = false;
+      this.bgmTimer = null;
+      this.bgmStep = 0;
+      this.bgmTempo = 76; // Deep, slow, floating cosmic space ambient tempo
+
+      // Note frequency mapping (Complete 12-Tone Equal Temperament Across 6 Octaves)
+      const C1 = 32.70, Cs1 = 34.65, D1 = 36.71, Eb1 = 38.89, Ds1 = 38.89, E1 = 41.20, F1 = 43.65, Fs1 = 46.25, G1 = 49.00, Ab1 = 51.91, A1 = 55.00, Bb1 = 58.27, B1 = 61.74;
+      const C2 = 65.41, Cs2 = 69.30, D2 = 73.42, Eb2 = 77.78, Ds2 = 77.78, E2 = 82.41, F2 = 87.31, Fs2 = 92.50, G2 = 98.00, Ab2 = 103.83, A2 = 110.00, Bb2 = 116.54, B2 = 123.47;
+      const C3 = 130.81, Cs3 = 138.59, D3 = 146.83, Eb3 = 155.56, Ds3 = 155.56, E3 = 164.81, F3 = 174.61, Fs3 = 185.00, G3 = 196.00, Ab3 = 207.65, A3 = 220.00, Bb3 = 233.08, B3 = 246.94;
+      const C4 = 261.63, Cs4 = 277.18, D4 = 293.66, Eb4 = 311.13, Ds4 = 311.13, E4 = 329.63, F4 = 349.23, Fs4 = 369.99, G4 = 392.00, Ab4 = 415.30, A4 = 440.00, Bb4 = 466.16, B4 = 493.88;
+      const C5 = 523.25, Cs5 = 554.37, D5 = 587.33, Eb5 = 622.25, Ds5 = 622.25, E5 = 659.25, F5 = 698.46, Fs5 = 739.99, G5 = 783.99, Ab5 = 830.61, A5 = 880.00, Bb5 = 932.33, B5 = 987.77;
+      const C6 = 1046.50, Cs6 = 1108.73, D6 = 1174.66, Eb6 = 1244.51, Ds6 = 1244.51, E6 = 1318.51, F6 = 1396.91, Fs6 = 1479.98, G6 = 1567.98, A6 = 1760.00, B6 = 1975.53;
+
+      // 128-Step Deep Space Sub-Bass Drones (Slow, continuous, non-repetitive swell)
+      this.bassPattern = [
+        E1, 0, 0, 0, 0, 0, 0, 0, E1, 0, 0, 0, 0, 0, 0, 0,
+        C1, 0, 0, 0, 0, 0, 0, 0, C1, 0, 0, 0, 0, 0, 0, 0,
+        D1, 0, 0, 0, 0, 0, 0, 0, D1, 0, 0, 0, 0, 0, 0, 0,
+        B1, 0, 0, 0, 0, 0, 0, 0, E1, 0, 0, 0, 0, 0, 0, 0,
+        E1, 0, 0, 0, 0, 0, 0, 0, G1, 0, 0, 0, 0, 0, 0, 0,
+        C1, 0, 0, 0, 0, 0, 0, 0, A1, 0, 0, 0, 0, 0, 0, 0,
+        D1, 0, 0, 0, 0, 0, 0, 0, Fs1,0, 0, 0, 0, 0, 0, 0,
+        E1, 0, 0, 0, 0, 0, 0, 0, E1, 0, 0, 0, 0, 0, 0, 0
+      ];
+
+      // Occasional Lead Guitar Solos (Spaced out, floating, 3-second legato notes)
+      this.guitarLeadPattern = [
+        // Measure 1-2: Silence / Ambient Space Float
+        0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        // Measure 3: Soaring E5 Lead Solo note enters and echoes into space
+        E5,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        // Measure 4: B5 Solo swell
+        B5,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        // Measure 5-6: Silence / Space Ambient Drift
+        0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        // Measure 7: Soaring C6 -> D6 Solo Cry
+        C6,  0, 0, 0, 0, 0, 0, 0, D6, 0, 0, 0, 0, 0, 0, 0,
+        // Measure 8: High E6 Climax & Long Echo Dissipate
+        E6,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      ];
+
+      // Warm Floating Ambient Space Pad Walls
+      this.guitarPowerChords = [
+        [E2, B2, E3, G3], [C2, G2, C3, E3], [D2, A2, D3, Fs3], [B1, Fs2, B2, D3],
+        [E2, B2, E3, G3], [C2, G2, C3, E3], [D2, A2, D3, Fs3], [E2, B2, E3, G3]
+      ];
+
+      this.distortionCurve = this.makeDistortionCurve(16);
+    }
+
+    makeDistortionCurve(amount = 16) {
+      const k = amount;
+      const n_samples = 44100;
+      const curve = new Float32Array(n_samples);
+      const deg = Math.PI / 180;
+      for (let i = 0; i < n_samples; ++i) {
+        const x = (i * 2) / n_samples - 1;
+        curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+      }
+      return curve;
     }
 
     init() {
@@ -693,6 +897,206 @@
       if (this.ctx && this.ctx.state === 'suspended') {
         this.ctx.resume();
       }
+    }
+
+    startBGM() {
+      if (this.bgmPlaying || !this.enabled) return;
+      this.init();
+      if (!this.ctx) return;
+      this.bgmPlaying = true;
+      this.bgmStep = 0;
+      const stepDuration = 60 / this.bgmTempo / 4;
+      this.bgmTimer = setInterval(() => {
+        if (!this.bgmPlaying || !this.enabled || !this.ctx) return;
+        this.playAmigaStep(this.bgmStep);
+        this.bgmStep = (this.bgmStep + 1) % 128;
+      }, stepDuration * 1000);
+    }
+
+    stopBGM() {
+      this.bgmPlaying = false;
+      if (this.bgmTimer) {
+        clearInterval(this.bgmTimer);
+        this.bgmTimer = null;
+      }
+    }
+
+    playAmigaStep(step) {
+      if (!this.ctx || this.ctx.state !== 'running') return;
+      const now = this.ctx.currentTime;
+      const stepInBar = step % 16;
+      const barIndex = Math.floor(step / 16);
+
+      // 1. COSMIC AMBIENT PULSE & SOFT SPACE SHIMMER (No loud rhythmic drums!)
+      if (stepInBar === 0 && (barIndex % 2 === 0)) {
+        // Distant Sub-Space Pulse
+        const pulseOsc = this.ctx.createOscillator();
+        const pulseGain = this.ctx.createGain();
+        pulseOsc.type = 'sine';
+        pulseOsc.frequency.setValueAtTime(80, now);
+        pulseOsc.frequency.exponentialRampToValueAtTime(22, now + 0.35);
+        pulseGain.gain.setValueAtTime(0.20, now);
+        pulseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        pulseOsc.connect(pulseGain); pulseGain.connect(this.ctx.destination);
+        pulseOsc.start(now); pulseOsc.stop(now + 0.35);
+
+        // Soft Solar Cymbal Shimmer
+        const bufferSize = this.ctx.sampleRate * 0.50;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const output = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const crash = this.ctx.createBufferSource();
+        crash.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'highpass'; filter.frequency.value = 7000;
+        const crashGain = this.ctx.createGain();
+        crashGain.gain.setValueAtTime(0.04, now);
+        crashGain.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
+        crash.connect(filter); filter.connect(crashGain); crashGain.connect(this.ctx.destination);
+        crash.start(now); crash.stop(now + 0.50);
+      }
+
+      // 2. CONTINUOUS SUB-BASS SPACE DRONE
+      const bassFreq = this.bassPattern[step % this.bassPattern.length];
+      if (bassFreq && bassFreq > 0) {
+        const osc = this.ctx.createOscillator();
+        const subOsc = this.ctx.createOscillator();
+        const filter = this.ctx.createBiquadFilter();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(bassFreq, now);
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(bassFreq * 0.5, now);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(280, now); // Warm lowpass drone
+
+        gain.gain.setValueAtTime(0.16, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+        osc.connect(filter);
+        subOsc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now); osc.stop(now + 0.30);
+        subOsc.start(now); subOsc.stop(now + 0.30);
+      }
+
+      // 3. FLOATING SPACE AMBIENT PAD SWELLS (Sustaining 3.0 Seconds)
+      if (stepInBar === 0) {
+        const pChordIndex = barIndex % this.guitarPowerChords.length;
+        const pChord = this.guitarPowerChords[pChordIndex];
+        if (pChord) {
+          for (const noteFreq of pChord) {
+            const osc = this.ctx.createOscillator();
+            const dist = this.ctx.createWaveShaper();
+            const cabFilter = this.ctx.createBiquadFilter();
+            const gain = this.ctx.createGain();
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(noteFreq, now);
+            dist.curve = this.distortionCurve;
+
+            cabFilter.type = 'lowpass';
+            cabFilter.frequency.setValueAtTime(1100, now); // Soft warm ambient pad filter
+
+            gain.gain.setValueAtTime(0.04, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 3.00); // 3-second long ambient swell
+
+            osc.connect(dist); dist.connect(cabFilter); cabFilter.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now); osc.stop(now + 3.00);
+          }
+        }
+      }
+
+      // 4. OCCASIONAL SOARING LEAD GUITAR SOLOS (3.5s Sustain + 450ms Space Echo Delay)
+      const guitarNote = this.guitarLeadPattern[step % this.guitarLeadPattern.length];
+      if (guitarNote && guitarNote > 0) {
+        const dur = 3.50; // Long 3.5-second soaring lead sustain
+
+        const oscRoot = this.ctx.createOscillator();
+        const oscChorus = this.ctx.createOscillator();
+        const distortion = this.ctx.createWaveShaper();
+        const ampFilter = this.ctx.createBiquadFilter();
+        const leadGain = this.ctx.createGain();
+        const delayNode = this.ctx.createDelay();
+        const delayFeedback = this.ctx.createGain();
+
+        oscRoot.type = 'sawtooth';
+        oscRoot.frequency.setValueAtTime(guitarNote, now);
+
+        oscChorus.type = 'sawtooth';
+        oscChorus.frequency.setValueAtTime(guitarNote * 1.004, now); // Warm chorus detune
+
+        distortion.curve = this.distortionCurve;
+        distortion.oversample = '4x';
+
+        ampFilter.type = 'lowpass';
+        ampFilter.frequency.setValueAtTime(1400, now);
+        ampFilter.frequency.exponentialRampToValueAtTime(2600, now + 0.50); // Soft legato swell
+        ampFilter.Q.value = 1.6;
+
+        leadGain.gain.setValueAtTime(0.09, now);
+        leadGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        // 450ms Space Echo Delay
+        delayNode.delayTime.value = 0.45;
+        delayFeedback.gain.value = 0.35;
+
+        oscRoot.connect(distortion);
+        oscChorus.connect(distortion);
+        distortion.connect(ampFilter);
+        ampFilter.connect(leadGain);
+
+        leadGain.connect(this.ctx.destination);
+        leadGain.connect(delayNode);
+        delayNode.connect(delayFeedback);
+        oscRoot.start(now); oscRoot.stop(now + dur);
+        oscChorus.start(now); oscChorus.stop(now + dur);
+      }
+    }
+
+    playChimeTone(noteFreq, startTime, dur, vol = 0.05) {
+      if (!this.ctx) return;
+      const oscSine = this.ctx.createOscillator();
+      const oscTri  = this.ctx.createOscillator();
+      const lfo     = this.ctx.createOscillator();
+      const lfoGain = this.ctx.createGain();
+      const filter  = this.ctx.createBiquadFilter();
+      const gain    = this.ctx.createGain();
+
+      oscSine.type = 'sine';
+      oscSine.frequency.setValueAtTime(noteFreq, startTime);
+      oscSine.frequency.exponentialRampToValueAtTime(noteFreq * 1.008, startTime + dur);
+
+      oscTri.type = 'triangle';
+      oscTri.frequency.setValueAtTime(noteFreq * 1.002, startTime);
+
+      lfo.frequency.value = 8;
+      lfoGain.gain.value = 5;
+      lfo.connect(oscSine.frequency);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(950, startTime);
+      filter.frequency.exponentialRampToValueAtTime(2200, startTime + 0.10);
+      filter.frequency.exponentialRampToValueAtTime(750, startTime + dur);
+      filter.Q.value = 1.8;
+
+      gain.gain.setValueAtTime(0.001, startTime);
+      gain.gain.linearRampToValueAtTime(vol, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+
+      oscSine.connect(filter);
+      oscTri.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      lfo.start(startTime); lfo.stop(startTime + dur);
+      oscSine.start(startTime); oscSine.stop(startTime + dur);
+      oscTri.start(startTime);  oscTri.stop(startTime + dur);
     }
 
     playSound(type, param = 0) {
@@ -717,47 +1121,148 @@
           break;
         }
         case 'drop': {
-          const osc = this.ctx.createOscillator();
-          const gain = this.ctx.createGain();
+          // Subtle Cushioned Socket Snap (Drop into Place)
           const fIndex = Math.min(Math.max(param, 0), this.freq.length - 1);
-          const pitch = (this.freq[fIndex] || 30) * 12;
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(pitch, now);
-          osc.frequency.exponentialRampToValueAtTime(pitch * 0.5, now + 0.06);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
-          osc.connect(gain);
+          const basePitch = 160 + (fIndex * 8); // Subtle 160Hz - 240Hz range
+          const dur = 0.08;
+
+          // Soft low-frequency cushioned seating thud
+          const oscSine = this.ctx.createOscillator();
+          const filter  = this.ctx.createBiquadFilter();
+          const gain    = this.ctx.createGain();
+
+          oscSine.type = 'sine';
+          oscSine.frequency.setValueAtTime(basePitch * 1.3, now);
+          oscSine.frequency.exponentialRampToValueAtTime(basePitch * 0.8, now + dur);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(500, now);
+          filter.frequency.exponentialRampToValueAtTime(140, now + dur);
+
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.linearRampToValueAtTime(0.04, now + 0.005); // Very soft 0.04 volume
+          gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+          oscSine.connect(filter);
+          filter.connect(gain);
           gain.connect(this.ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.06);
+
+          oscSine.start(now);
+          oscSine.stop(now + dur);
           break;
         }
         case 'pop': {
-          const osc = this.ctx.createOscillator();
-          const gain = this.ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(400, now);
-          osc.frequency.exponentialRampToValueAtTime(1400, now + 0.14);
-          gain.gain.setValueAtTime(0.35, now);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
-          osc.connect(gain);
-          gain.connect(this.ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.14);
+          // Multi-Variation Animated Ball Match Sound Engine (4 Randomized Patterns + Micro-detune)
+          const color = Math.max(1, Math.min(6, param || 1));
+          const basePitches = [523.25, 587.33, 659.25, 783.99, 880.00, 987.77];
+          const detuneFactor = 0.97 + Math.random() * 0.06; // Random micro-detune +/- 3%
+          const rootFreq = (basePitches[color - 1] || 523.25) * detuneFactor;
+
+          // Pick 1 of 4 randomized chime variation styles
+          const patternType = Math.floor(Math.random() * 4);
+          const dur = 0.65;
+
+          if (patternType === 0) {
+            // Pattern A: Ascending Crystal Arpeggio (4 steps)
+            const intervals = [1.0, 1.25, 1.5, 2.0];
+            for (let i = 0; i < 4; i++) {
+              const noteFreq = rootFreq * intervals[i];
+              const startTime = now + i * 0.04;
+              this.playChimeTone(noteFreq, startTime, dur, 0.05);
+            }
+          } else if (patternType === 1) {
+            // Pattern B: Descending Space Echo Chime (4 steps)
+            const intervals = [2.0, 1.5, 1.25, 1.0];
+            for (let i = 0; i < 4; i++) {
+              const noteFreq = rootFreq * intervals[i];
+              const startTime = now + i * 0.045;
+              this.playChimeTone(noteFreq, startTime, dur, 0.045);
+            }
+          } else if (patternType === 2) {
+            // Pattern C: Simultaneous Harmonized Space Chord (3 notes together)
+            const intervals = [1.0, 1.25, 1.5];
+            for (let i = 0; i < 3; i++) {
+              const noteFreq = rootFreq * intervals[i];
+              this.playChimeTone(noteFreq, now, dur + 0.1, 0.04);
+            }
+          } else {
+            // Pattern D: Pitch-Bending Glissando Chime (Bends up by 5th)
+            const oscSine = this.ctx.createOscillator();
+            const oscTri  = this.ctx.createOscillator();
+            const filter  = this.ctx.createBiquadFilter();
+            const gain    = this.ctx.createGain();
+
+            oscSine.type = 'sine';
+            oscSine.frequency.setValueAtTime(rootFreq * 0.8, now);
+            oscSine.frequency.exponentialRampToValueAtTime(rootFreq * 1.5, now + 0.25);
+
+            oscTri.type = 'triangle';
+            oscTri.frequency.setValueAtTime(rootFreq * 1.0, now);
+            oscTri.frequency.exponentialRampToValueAtTime(rootFreq * 1.875, now + 0.25);
+
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(900, now);
+            filter.frequency.exponentialRampToValueAtTime(2400, now + 0.12);
+            filter.frequency.exponentialRampToValueAtTime(700, now + dur);
+            filter.Q.value = 2.0;
+
+            gain.gain.setValueAtTime(0.001, now);
+            gain.gain.linearRampToValueAtTime(0.06, now + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+            oscSine.connect(filter); oscTri.connect(filter);
+            filter.connect(gain); gain.connect(this.ctx.destination);
+            oscSine.start(now); oscSine.stop(now + dur);
+            oscTri.start(now);  oscTri.stop(now + dur);
+          }
           break;
         }
         case 'zip': {
-          const osc = this.ctx.createOscillator();
+          // Warm Lower-Register Animated Zip Tinkle (440Hz -> 880Hz with Filter & Pitch Animation)
+          const osc1 = this.ctx.createOscillator();
+          const osc2 = this.ctx.createOscillator();
+          const lfo = this.ctx.createOscillator();
+          const lfoGain = this.ctx.createGain();
+          const filter = this.ctx.createBiquadFilter();
           const gain = this.ctx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(850, now);
-          osc.frequency.linearRampToValueAtTime(150, now + 0.05);
-          gain.gain.setValueAtTime(0.15, now);
-          gain.gain.linearRampToValueAtTime(0.01, now + 0.05);
-          osc.connect(gain);
+
+          const dur = 0.38; // 0.38s animated sustain
+
+          // Smooth warm triangle/sine blend in mid-register (A4 -> A5)
+          osc1.type = 'triangle';
+          osc1.frequency.setValueAtTime(440, now);
+          osc1.frequency.exponentialRampToValueAtTime(720, now + 0.12);
+          osc1.frequency.exponentialRampToValueAtTime(880, now + dur);
+
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(554.37, now); // Cs5 3rd harmony
+          osc2.frequency.exponentialRampToValueAtTime(900, now + 0.12);
+          osc2.frequency.exponentialRampToValueAtTime(1108.73, now + dur);
+
+          // 12Hz Vibrato LFO for animated pitch shimmer
+          lfo.frequency.value = 12;
+          lfoGain.gain.value = 18;
+          lfo.connect(osc1.frequency);
+          lfo.connect(osc2.frequency);
+
+          // Resonant Filter Animation Sweep (500Hz -> 1800Hz -> 600Hz)
+          filter.type = 'bandpass';
+          filter.frequency.setValueAtTime(500, now);
+          filter.frequency.exponentialRampToValueAtTime(1800, now + 0.15);
+          filter.frequency.exponentialRampToValueAtTime(600, now + dur);
+          filter.Q.value = 3.2;
+
+          gain.gain.setValueAtTime(0.08, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+          osc1.connect(filter);
+          osc2.connect(filter);
+          filter.connect(gain);
           gain.connect(this.ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.05);
+
+          lfo.start(now); lfo.stop(now + dur);
+          osc1.start(now); osc1.stop(now + dur);
+          osc2.start(now); osc2.stop(now + dur);
           break;
         }
         case 'levelup': {
@@ -775,17 +1280,67 @@
           break;
         }
         case 'gameover': {
-          const osc = this.ctx.createOscillator();
-          const gain = this.ctx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(900, now);
-          osc.frequency.linearRampToValueAtTime(80, now + 0.6);
-          gain.gain.setValueAtTime(0.25, now);
-          gain.gain.linearRampToValueAtTime(0.01, now + 0.6);
-          osc.connect(gain);
-          gain.connect(this.ctx.destination);
-          osc.start(now);
-          osc.stop(now + 0.6);
+          this.stopBGM();
+          // Epic Deep Space Minor Cadence & Weeping Guitar Lead Echo
+          const dur = 1.80;
+
+          // 1. Descending Minor Cadence Chords (Em -> Cm -> Am -> Low E0 Sub)
+          const chordNotes = [329.63, 261.63, 220.00, 41.20]; // E4 -> C4 -> A3 -> E1
+          for (let i = 0; i < chordNotes.length; i++) {
+            const startTime = now + i * 0.35;
+            const osc = this.ctx.createOscillator();
+            const filter = this.ctx.createBiquadFilter();
+            const gain = this.ctx.createGain();
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(chordNotes[i], startTime);
+            osc.frequency.exponentialRampToValueAtTime(chordNotes[i] * 0.95, startTime + 0.9);
+
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(900, startTime);
+            filter.frequency.exponentialRampToValueAtTime(250, startTime + 0.9);
+
+            gain.gain.setValueAtTime(0.001, startTime);
+            gain.gain.linearRampToValueAtTime(0.07, startTime + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.9);
+
+            osc.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+            osc.start(startTime); osc.stop(startTime + 0.9);
+          }
+
+          // 2. Weeping Space Lead Echo Tail
+          const leadOsc = this.ctx.createOscillator();
+          const leadDist = this.ctx.createWaveShaper();
+          const leadFilter = this.ctx.createBiquadFilter();
+          const leadGain = this.ctx.createGain();
+          const delayNode = this.ctx.createDelay();
+          const delayFeedback = this.ctx.createGain();
+
+          leadOsc.type = 'sawtooth';
+          leadOsc.frequency.setValueAtTime(659.25, now); // E5 weeping bend
+          leadOsc.frequency.exponentialRampToValueAtTime(523.25, now + 1.2); // Bend down to C5
+
+          leadDist.curve = this.distortionCurve;
+
+          leadFilter.type = 'lowpass';
+          leadFilter.frequency.setValueAtTime(1400, now);
+          leadFilter.frequency.exponentialRampToValueAtTime(400, now + dur);
+
+          leadGain.gain.setValueAtTime(0.001, now);
+          leadGain.gain.linearRampToValueAtTime(0.08, now + 0.05);
+          leadGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+          delayNode.delayTime.value = 0.40;
+          delayFeedback.gain.value = 0.30;
+
+          leadOsc.connect(leadDist); leadDist.connect(leadFilter); leadFilter.connect(leadGain);
+          leadGain.connect(this.ctx.destination);
+          leadGain.connect(delayNode);
+          delayNode.connect(delayFeedback);
+          delayFeedback.connect(delayNode);
+          delayFeedback.connect(this.ctx.destination);
+
+          leadOsc.start(now); leadOsc.stop(now + dur);
           break;
         }
       }
@@ -928,13 +1483,15 @@
       this.scene.background = new THREE.Color(0x0a0c16);
       this.scene.fog = new THREE.FogExp2(0x0a0c16, 0.025);
 
-      const aspect = window.innerWidth / window.innerHeight;
+      const width = this.container.clientWidth || window.innerWidth;
+      const height = this.container.clientHeight || window.innerHeight;
+      const aspect = width / height;
       this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-      this.camera.position.set(0, -14.5, 17.5);
-      this.camera.lookAt(0, 1.2, 0);
+      this.camera.position.set(0, -17.5, 21.0);
+      this.camera.lookAt(0, 0.8, 0);
 
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.renderer.setSize(width, height);
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -961,6 +1518,7 @@
 
       this.initLights();
       this.build3DBoard();
+      this.build3DStarfield();
 
       this.staticBallMeshes = new Map();
       window.addEventListener('resize', () => this.onWindowResize());
@@ -968,12 +1526,12 @@
 
     initMaterials() {
       const colors = [
-        { main: 0x00d2ff, roughness: 0.15, metalness: 0.3, emissive: 0x003366 },
-        { main: 0xff2a5f, roughness: 0.15, metalness: 0.3, emissive: 0x550011 },
-        { main: 0x00e676, roughness: 0.2,  metalness: 0.2, emissive: 0x004411 },
-        { main: 0xffc107, roughness: 0.2,  metalness: 0.4, emissive: 0x553300 },
-        { main: 0xb030ff, roughness: 0.15, metalness: 0.3, emissive: 0x330055 },
-        { main: 0xff00b7, roughness: 0.15, metalness: 0.3, emissive: 0x550033 }
+        { main: 0x0099ff, roughness: 0.15, metalness: 0.35, emissive: 0x002266 }, // 1: Electric Azure Cyan-Blue
+        { main: 0xff2a5f, roughness: 0.15, metalness: 0.30, emissive: 0x550011 }, // 2: Neon Ruby Red
+        { main: 0x00f055, roughness: 0.18, metalness: 0.25, emissive: 0x005511 }, // 3: Vibrant Emerald Green
+        { main: 0xffc107, roughness: 0.20, metalness: 0.40, emissive: 0x553300 }, // 4: Amber Gold
+        { main: 0xb030ff, roughness: 0.15, metalness: 0.30, emissive: 0x330055 }, // 5: Electric Amethyst Purple
+        { main: 0xff00b7, roughness: 0.15, metalness: 0.30, emissive: 0x550033 }  // 6: Hot Magenta
       ];
 
       colors.forEach(c => {
@@ -1057,12 +1615,7 @@
         }
       }
 
-      const chassisGeo = new THREE.BoxGeometry(22, 22, 0.4);
-      const chassisMat = new THREE.MeshStandardMaterial({ color: 0x090c15, roughness: 0.8, metalness: 0.2 });
-      const chassisMesh = new THREE.Mesh(chassisGeo, chassisMat);
-      chassisMesh.position.set(0, 0, -0.5);
-      chassisMesh.receiveShadow = true;
-      this.boardGroup.add(chassisMesh);
+      // NO chassis plate — open hexagon grid floating cleanly in space!
     }
 
     updateScene(engine) {
@@ -1077,18 +1630,20 @@
             currentKeys.add(key);
             const colorIdx = (val - 1) % this.ballMaterials.length;
             const mat = this.ballMaterials[colorIdx];
+            const wPos = gridToWorld(x, y, SPHERE_RADIUS);
 
             let mesh = this.staticBallMeshes.get(key);
             if (!mesh) {
               mesh = new THREE.Mesh(this.sphereGeo, mat);
               mesh.castShadow = true;
               mesh.receiveShadow = true;
-              const wPos = gridToWorld(x, y, SPHERE_RADIUS);
+              mesh.targetPos = new THREE.Vector3(wPos.x, wPos.y, wPos.z);
               mesh.position.set(wPos.x, wPos.y, wPos.z);
               this.ballsGroup.add(mesh);
               this.staticBallMeshes.set(key, mesh);
             } else {
               mesh.material = mat;
+              mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
             }
           }
         }
@@ -1101,29 +1656,60 @@
         }
       }
 
-      this.activeGroup.clear();
+      if (!this.activeMeshes || this.activeMeshes.length === 0) {
+        this.activeMeshes = [];
+        for (let i = 0; i < 4; i++) {
+          const mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+          mesh.castShadow = true;
+          mesh.targetPos = new THREE.Vector3();
+          mesh.initialized = false;
+          this.activeGroup.add(mesh);
+          this.activeMeshes.push(mesh);
+        }
+      }
+
       if (!engine.endGame && engine.oddballz) {
         let avgX = 0, avgY = 0, avgZ = 0;
+
+        const rootFloatX = engine.activeFloatPos ? engine.activeFloatPos.x : engine.oddballz.map[0].x;
+        const rootFloatY = engine.activeFloatPos ? engine.activeFloatPos.y : engine.oddballz.map[0].y;
+
         for (let i = 0; i <= 3; i++) {
-          const mapPts = engine.oddballz.map[i];
           const val = engine.oddballz.image[i];
+          const mesh = this.activeMeshes[i];
 
           if (val > 0) {
+            mesh.visible = true;
             const colorIdx = (val - 1) % this.ballMaterials.length;
-            const mat = this.ballMaterials[colorIdx];
-            const mesh = new THREE.Mesh(this.sphereGeo, mat);
-            mesh.castShadow = true;
+            mesh.material = this.ballMaterials[colorIdx];
 
-            const wPos = gridToWorld(mapPts.x, mapPts.y, SPHERE_RADIUS);
-            mesh.position.set(wPos.x, wPos.y, wPos.z);
-            this.activeGroup.add(mesh);
+            const relX = engine.activeRel ? engine.activeRel[i].x : engine.oddballz.rel[i].x;
+            const relY = engine.activeRel ? engine.activeRel[i].y : engine.oddballz.rel[i].y;
+            const floatX = rootFloatX + relX;
+            const floatY = rootFloatY + relY;
+            const wPos = gridToWorld(floatX, floatY, SPHERE_RADIUS);
+            mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
 
-            avgX += wPos.x; avgY += wPos.y; avgZ += wPos.z;
+            if (!mesh.initialized) {
+              mesh.position.set(wPos.x, wPos.y, wPos.z);
+              mesh.initialized = true;
+            }
+
+            avgX += mesh.position.x; avgY += mesh.position.y; avgZ += mesh.position.z;
+          } else {
+            mesh.visible = false;
           }
         }
 
         avgX /= 4; avgY /= 4; avgZ /= 4;
         this.activePointLight.position.set(avgX, avgY, avgZ + 1.5);
+      } else {
+        for (let i = 0; i < 4; i++) {
+          if (this.activeMeshes[i]) {
+            this.activeMeshes[i].visible = false;
+            this.activeMeshes[i].initialized = false;
+          }
+        }
       }
 
       this.ghostGroup.clear();
@@ -1146,13 +1732,235 @@
       }
     }
 
-    render() {
+    build3DStarfield() {
+      // === 3D SPACE FLIGHT ENVIRONMENT ===
+      this.spaceFlightGroup = new THREE.Group();
+      // Tilt space flight container to match the exact camera & board perspective angle (~40 degrees)
+      this.spaceFlightGroup.rotation.x = -0.70;
+
+      // 1. DENSE 3D STARFIELD (3000 Stars streaming parallel to platform plane)
+      const starCount = 3000;
+      const starPositions = new Float32Array(starCount * 3);
+      const starColors = new Float32Array(starCount * 3);
+
+      this.flightStars = [];
+      const palette = [
+        new THREE.Color(0x00f0ff), // Cyan
+        new THREE.Color(0xa855f7), // Purple
+        new THREE.Color(0x3b82f6), // Blue
+        new THREE.Color(0xffffff), // White
+        new THREE.Color(0xfcbd2c), // Gold
+        new THREE.Color(0xf43f5e)  // Rose
+      ];
+
+      for (let i = 0; i < starCount; i++) {
+        const x = (Math.random() - 0.5) * 240;
+        const y = (Math.random() - 0.5) * 240;
+        const z = (Math.random() - 0.5) * 140 - 10;
+        const color = palette[Math.floor(Math.random() * palette.length)];
+
+        this.flightStars.push({
+          x, y, z,
+          speed: 15 + Math.random() * 25, // Flight speed parallel to board
+          color
+        });
+
+        starPositions[i * 3]     = x;
+        starPositions[i * 3 + 1] = y;
+        starPositions[i * 3 + 2] = z;
+
+        starColors[i * 3]     = color.r;
+        starColors[i * 3 + 1] = color.g;
+        starColors[i * 3 + 2] = color.b;
+      }
+
+      const starGeo = new THREE.BufferGeometry();
+      starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+      starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+
+      const starMat = new THREE.PointsMaterial({
+        size: 0.45,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+
+      this.starPointsMesh = new THREE.Points(starGeo, starMat);
+      this.spaceFlightGroup.add(this.starPointsMesh);
+
+      // 2. FLOATING ASTEROIDS & SPACE ROCKS (Streaming parallel to board tilt)
+      this.flightAsteroids = [];
+      const rockMat = new THREE.MeshStandardMaterial({
+        color: 0x3a3f58,
+        roughness: 0.9,
+        metalness: 0.2,
+        flatShading: true
+      });
+
+      for (let i = 0; i < 20; i++) {
+        const size = 0.8 + Math.random() * 2.5;
+        const rockGeo = new THREE.DodecahedronGeometry(size, 1);
+        const posAttr = rockGeo.attributes.position;
+        for (let v = 0; v < posAttr.count; v++) {
+          posAttr.setXYZ(
+            v,
+            posAttr.getX(v) * (0.8 + Math.random() * 0.4),
+            posAttr.getY(v) * (0.8 + Math.random() * 0.4),
+            posAttr.getZ(v) * (0.8 + Math.random() * 0.4)
+          );
+        }
+        rockGeo.computeVertexNormals();
+
+        const rock = new THREE.Mesh(rockGeo, rockMat);
+        const side = Math.random() < 0.5 ? -1 : 1;
+        rock.position.set(
+          side * (16 + Math.random() * 45),
+          (Math.random() - 0.5) * 120,
+          -40 + Math.random() * 80
+        );
+
+        rock.userData = {
+          speedY: 18 + Math.random() * 28,
+          spinX: (Math.random() - 0.5) * 1.5,
+          spinY: (Math.random() - 0.5) * 1.5,
+          spinZ: (Math.random() - 0.5) * 1.5
+        };
+
+        this.spaceFlightGroup.add(rock);
+        this.flightAsteroids.push(rock);
+      }
+
+      // 3. DISTANT BACKGROUND PLANETS (Aligned with space tilt)
+      const planetGroup = new THREE.Group();
+      const planetGeo = new THREE.SphereGeometry(14, 32, 32);
+      const planetMat = new THREE.MeshStandardMaterial({
+        color: 0x1e3a8a,
+        roughness: 0.7,
+        metalness: 0.1,
+        emissive: 0x0f172a
+      });
+      const planet = new THREE.Mesh(planetGeo, planetMat);
+      planet.position.set(70, 100, -80);
+
+      const ringGeo = new THREE.RingGeometry(17, 26, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.4
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 2.8;
+      planet.add(ring);
+      planetGroup.add(planet);
+
+      const moonGeo = new THREE.SphereGeometry(5, 24, 24);
+      const moonMat = new THREE.MeshStandardMaterial({
+        color: 0xc084fc,
+        roughness: 0.4,
+        emissive: 0x581c87,
+        emissiveIntensity: 0.5
+      });
+      const moon = new THREE.Mesh(moonGeo, moonMat);
+      moon.position.set(-80, 110, -100);
+      planetGroup.add(moon);
+
+      this.spaceFlightGroup.add(planetGroup);
+
+      this.scene.add(this.spaceFlightGroup);
+      this._flightTime = 0;
+    }
+
+    render(dt = 0.016) {
+      this._flightTime = (this._flightTime || 0) + dt;
+
+      // === MAGIC-CARPET FLIGHT HOVER BOBBING FOR PLAYFIELD ===
+      const hoverRoll = Math.sin(this._flightTime * 0.8) * 0.015;
+      const hoverPitch = Math.cos(this._flightTime * 0.6) * 0.012;
+      const hoverZ = Math.sin(this._flightTime * 1.2) * 0.15;
+
+      this.boardGroup.rotation.x = hoverPitch;
+      this.boardGroup.rotation.y = hoverRoll;
+      this.boardGroup.position.z = hoverZ;
+
+      this.ballsGroup.rotation.x = hoverPitch;
+      this.ballsGroup.rotation.y = hoverRoll;
+      this.ballsGroup.position.z = hoverZ;
+
+      this.activeGroup.rotation.x = hoverPitch;
+      this.activeGroup.rotation.y = hoverRoll;
+      this.activeGroup.position.z = hoverZ;
+
+      this.ghostGroup.rotation.x = hoverPitch;
+      this.ghostGroup.rotation.y = hoverRoll;
+      this.ghostGroup.position.z = hoverZ;
+
+      // === 3D SPACE FLIGHT MOTION (ALIGNED WITH BOARD PERSPECTIVE TILT) ===
+      const isZip = this.engine && this.engine.isZipping;
+      const flightSpeedMult = isZip ? 2.5 : 1.0;
+
+      // 1. Move Stars smoothly parallel to board plane
+      if (this.flightStars && this.starPointsMesh) {
+        const posAttr = this.starPointsMesh.geometry.attributes.position;
+        for (let i = 0; i < this.flightStars.length; i++) {
+          const star = this.flightStars[i];
+          star.y -= star.speed * flightSpeedMult * dt;
+
+          if (star.y < -120) {
+            star.y = 120;
+            star.x = (Math.random() - 0.5) * 240;
+            star.z = (Math.random() - 0.5) * 140 - 10;
+          }
+
+          posAttr.array[i * 3]     = star.x;
+          posAttr.array[i * 3 + 1] = star.y;
+          posAttr.array[i * 3 + 2] = star.z;
+        }
+        posAttr.needsUpdate = true;
+      }
+
+      // 2. Stream Asteroids parallel to board plane
+      if (this.flightAsteroids) {
+        for (const rock of this.flightAsteroids) {
+          const u = rock.userData;
+          rock.position.y -= u.speedY * flightSpeedMult * dt;
+          rock.rotation.x += u.spinX * dt;
+          rock.rotation.y += u.spinY * dt;
+          rock.rotation.z += u.spinZ * dt;
+
+          if (rock.position.y < -110) {
+            rock.position.y = 110;
+            const side = Math.random() < 0.5 ? -1 : 1;
+            rock.position.x = side * (16 + Math.random() * 45);
+            rock.position.z = -40 + Math.random() * 80;
+          }
+        }
+      }
+
+      const lerpSpeed = Math.min(1.0, dt * 24.0);
+
+      for (const mesh of this.staticBallMeshes.values()) {
+        if (mesh.targetPos) {
+          mesh.position.lerp(mesh.targetPos, lerpSpeed);
+        }
+      }
+
+      if (this.activeMeshes) {
+        for (const mesh of this.activeMeshes) {
+          if (mesh.visible && mesh.targetPos) {
+            mesh.position.lerp(mesh.targetPos, lerpSpeed);
+          }
+        }
+      }
+
       this.renderer.render(this.scene, this.camera);
     }
 
     onWindowResize() {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
+      const width = this.container.clientWidth || window.innerWidth;
+      const height = this.container.clientHeight || window.innerHeight;
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
@@ -1198,12 +2006,19 @@
     initEventListeners() {
       window.addEventListener('keydown', (e) => {
         const code = e.code;
-        if (code === 'Enter') {
+        const key = e.key;
+
+        if (key === 'Enter' || code === 'Enter' || code === 'NumpadEnter') {
+          const modal = document.getElementById('gameDialogView');
+          if (modal && !modal.classList.contains('hidden')) {
+            this.closeHighScoresModal();
+            e.preventDefault(); return;
+          }
           if (!this.isPlaying || this.engine.endGame) this.startGame();
           e.preventDefault(); return;
         }
 
-        if (code === 'KeyM') {
+        if (code === 'KeyM' || key === 'm' || key === 'M') {
           const toggle = document.getElementById('toggleSound');
           toggle.checked = !toggle.checked;
           this.audio.enabled = toggle.checked;
@@ -1212,7 +2027,7 @@
 
         if (!this.isPlaying) return;
 
-        if (code === 'KeyP') {
+        if (code === 'KeyP' || key === 'p' || key === 'P') {
           this.togglePause(); e.preventDefault(); return;
         }
 
@@ -1240,8 +2055,16 @@
         this.renderer.updateScene(this.engine);
       });
 
-      document.getElementById('btnOverlayStart').addEventListener('click', () => this.startGame());
-      document.getElementById('btnRestart').addEventListener('click', () => this.startGame());
+      const bindStartBtn = (id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('click', (e) => {
+          this.startGame();
+        });
+      };
+
+      bindStartBtn('btnOverlayStart');
+      bindStartBtn('btnRestart');
       document.getElementById('btnPause').addEventListener('click', () => this.togglePause());
       document.getElementById('btnResume').addEventListener('click', () => this.togglePause());
       document.getElementById('btnPauseEnd').addEventListener('click', () => this.promptEndGame());
@@ -1253,10 +2076,18 @@
         if (btn) btn.addEventListener('click', () => this.showHighScoresModal());
       });
 
-      document.getElementById('btnCloseModal').addEventListener('click', () => this.closeHighScoresModal());
+      ['btnCloseModal', 'btnRecordsClose'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.closeHighScoresModal());
+      });
 
       document.getElementById('toggleSound').addEventListener('change', (e) => {
         this.audio.enabled = e.target.checked;
+        if (this.audio.enabled && this.isPlaying && !this.isPaused) {
+          this.audio.startBGM();
+        } else {
+          this.audio.stopBGM();
+        }
       });
 
       const tabColor = document.getElementById('tabColorMatch');
@@ -1301,27 +2132,16 @@
       bindTouch('btnTouchF', () => this.engine.rotColors());
       bindTouch('btnTouchSpace', () => this.engine.zip());
 
-      // Auto-pause when window or browser tab loses focus
-      const handleFocusLoss = () => {
-        if (this.isPlaying && !this.isPaused) {
-          this.togglePause();
-        }
-      };
-
-      const handleFocusGain = () => {
-        if (this.audio) {
-          this.audio.init();
-        }
-      };
-
-      window.addEventListener('blur', handleFocusLoss);
-      window.addEventListener('focus', handleFocusGain);
-
+      // Auto-pause ONLY when browser tab is hidden (visibilitychange)
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-          handleFocusLoss();
+          if (this.isPlaying && !this.isPaused) {
+            this.togglePause();
+          }
         } else {
-          handleFocusGain();
+          if (this.audio) {
+            this.audio.init();
+          }
         }
       });
     }
@@ -1364,6 +2184,7 @@
 
       this.renderer.updateScene(this.engine);
       this.updateUI();
+      this.audio.startBGM();
     }
 
     togglePause() {
@@ -1372,10 +2193,12 @@
 
       if (this.isPaused) {
         document.getElementById('overlayPause').classList.remove('hidden');
+        this.audio.stopBGM();
       } else {
         document.getElementById('overlayPause').classList.add('hidden');
         document.getElementById('dialogConfirmEnd').classList.add('hidden');
         this.lastTime = performance.now();
+        this.audio.startBGM();
       }
     }
 
@@ -1410,6 +2233,7 @@
       this.wasPausedByModal = false;
       this.wasPausedByFocusLoss = false;
       this.engine.endGame = true;
+      this.audio.stopBGM();
 
       document.getElementById('overlayPause').classList.add('hidden');
       document.getElementById('overlayGameOver').classList.add('hidden');
@@ -1426,51 +2250,24 @@
       this.lastTime = currentTime;
 
       if (this.isPlaying && !this.isPaused) {
-        this.accumulatedTime += dt * 1000;
-        const tickDelay = Math.max(16, this.engine.pauseTime);
-
-        if (this.accumulatedTime >= tickDelay) {
-          this.accumulatedTime = 0;
-          this.moveTime++;
-
-          if (this.moveTime >= 8) {
-            this.moveTime = 0;
-
-            if (!this.engine.moveOBall(this.engine.direction)) {
-              this.engine.stamp();
-
-              if (this.engine.matcher) {
-                this.engine.checkMatches();
-              }
-
-              const prevLevel = this.engine.level;
-              this.engine.checkAdvance();
-
-              if (this.engine.level > prevLevel && typeof window.confetti === 'function') {
-                window.confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-              }
-
-              if (this.engine.checkGameOver()) {
-                this.handleGameOver();
-              } else {
-                this.engine.build();
-              }
-            }
-          }
-
-          this.renderer.updateScene(this.engine);
-          this.updateUI();
+        const stamped = this.engine.updateContinuous(dt);
+        if (stamped && this.engine.endGame) {
+          this.handleGameOver();
         }
 
+        this.renderer.updateScene(this.engine);
+        this.updateUI();
+
         if (this.engine.oddballz && Math.random() < 0.3) {
-          const lead = this.engine.oddballz.map[0];
-          const wPos = gridToWorld(lead.x, lead.y, SPHERE_RADIUS);
+          const rootFloatX = this.engine.activeFloatPos ? this.engine.activeFloatPos.x : this.engine.oddballz.map[0].x;
+          const rootFloatY = this.engine.activeFloatPos ? this.engine.activeFloatPos.y : this.engine.oddballz.map[0].y;
+          const wPos = gridToWorld(rootFloatX, rootFloatY, SPHERE_RADIUS);
           this.particles.spawnTrailParticle(wPos, this.engine.oddballz.image[0]);
         }
       }
 
       this.particles.update(Math.min(dt, 0.1));
-      this.renderer.render();
+      this.renderer.render(Math.min(dt, 0.1));
 
       requestAnimationFrame((t) => this.gameLoop(t));
     }
@@ -1512,6 +2309,11 @@
     }
 
     showHighScoresModal() {
+      if (this.isPlaying && !this.isPaused) {
+        this.wasPausedByModal = true;
+        this.isPaused = true;
+      }
+
       const tbody = document.getElementById('recordsTableBody');
       if (tbody) {
         tbody.innerHTML = '';
@@ -1537,6 +2339,14 @@
     closeHighScoresModal() {
       const modal = document.getElementById('gameDialogView');
       if (modal) modal.classList.add('hidden');
+
+      if (this.wasPausedByModal) {
+        this.wasPausedByModal = false;
+        if (this.isPlaying && this.isPaused) {
+          this.isPaused = false;
+          this.lastTime = performance.now();
+        }
+      }
     }
   }
 

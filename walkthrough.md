@@ -4,29 +4,23 @@ Created a new, clean project in `d:/antigravity/oddballz-hd` featuring a full 3D
 
 ## Accomplished Features
 
-### 1. Hex Engine Core & Math Port
+### 1. Dedicated Page Layout Architecture
+- **Separated Viewport & Controls Bar**: Updated [index.html](file:///d:/antigravity/oddballz-hd/index.html) and [style.css](file:///d:/antigravity/oddballz-hd/src/style.css) to use a vertical flexbox layout (`#appLayout`).
+- **Upper Canvas Viewport (`#canvasContainer`)**: Occupies `flex: 1` in the upper section of the screen.
+- **Bottom Control Bar (`#bottomControlsBar`)**: Occupies `flex: 0 0 auto` physically **BELOW** the 3D playfield.
+- **Zero Overlap**: The Three.js WebGL canvas is strictly bounded inside `#canvasContainer`, ensuring the 3D hex playfield and the control buttons bar never touch or overlap on any screen resolution or aspect ratio.
+
+### 2. Hex Engine Core & Math Port
 - **Spatial Hex Coordinates**: [hexMath.js](file:///d:/antigravity/oddballz-hd/src/engine/hexMath.js) maps standard 1992 grid positions `(x: 4..20, y: 0..19)` into 3D world space.
-- **Engine Rules & Recent Updates**: [oddunitEngine.js](file:///d:/antigravity/oddballz-hd/src/engine/oddunitEngine.js) ports the complete game engine:
+- **Engine Rules & Updates**: [oddunitEngine.js](file:///d:/antigravity/oddballz-hd/src/engine/oddunitEngine.js) ports the complete game engine:
   - Updated piece spawn position (`startPos` tuned to `y: 3`).
   - 50 difficulty levels.
   - Tetramino-like hex piece shapes & transformation matrices (`rotCW`, `rotCCW`, `flipX`, `flipY`).
   - Color cycling (`rotColors` / <kbd>F</kbd> key).
   - Hard drop (<kbd>Space</kbd>).
-  - Gravity drop physics & gap resolution (`checkGaps`).
   - Dual Modes: **Color Match** (5+ parallel, 3+ perpendicular) and **Row Build** (edge-to-edge row clears).
   - Score, level progression, and skill rating calculation.
-- **16-Bit Audio Synthesizer & Focus Loss Protection**: [soundEngine.js](file:///d:/antigravity/oddballz-hd/src/engine/soundEngine.js) and [main.js](file:///d:/antigravity/oddballz-hd/src/main.js) generate retro Web Audio sound effects, automatically pausing audio and game state on window blur / tab focus loss.
+- **16-Bit Audio & Focus Loss Auto-Pause**: [soundEngine.js](file:///d:/antigravity/oddballz-hd/src/engine/soundEngine.js) and [main.js](file:///d:/antigravity/oddballz-hd/src/main.js) handle retro Web Audio synthesis and auto-pause when switching tabs or window focus.
 
-### 2. Three.js 3D Sphere & Board Graphics
-- **3D WebGL Scene**: [threeRenderer.js](file:///d:/antigravity/oddballz-hd/src/gfx/threeRenderer.js) renders high-definition glossy/crystalline PBR sphere meshes with dynamic key lighting, rim lighting, and a tracking point light.
-- **3D Hex Board**: Extruded 3D hex pedestals with glowing neon cell borders.
-- **Ghost Piece Landing Projection**: Semi-transparent preview showing where active pieces will land.
-
-### 3. 3D Particle Systems & Visual Effects
-- **Explosion Particles**: [particleSystem.js](file:///d:/antigravity/oddballz-hd/src/gfx/particleSystem.js) spawns color-matched 3D particle bursts on ball matches and row clears.
-- **Active Piece Trails**: Sparkle trails follow falling pieces as they descend.
-- **Level-Up Fanfare**: Confetti fireworks trigger on level up.
-
-### 4. Glassmorphism HUD & Mobile Touch Controls
-- **Standalone `file://` & HTTP Compatibility**: `index.html` and `oddballz-app.js` allow double-clicking `index.html` in File Explorer.
-- **Touch & Mobile Controls**: Debounced pointer/touch controls with dedicated Flip button (<kbd>⇄ Flip</kbd>).
+### 3. End Game Confirmation Modal
+- Added an **"End Game"** button to the pause menu overlay and a dedicated confirmation modal (`#dialogConfirmEnd`), letting users end active games cleanly and return to the main menu.

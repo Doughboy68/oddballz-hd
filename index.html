@@ -14,10 +14,26 @@
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
 <body>
-  <!-- 3D Three.js Canvas Container -->
-  <div id="canvasContainer"></div>
+  <!-- App Layout Grid: Canvas Viewport Top, Dedicated Controls Bar Bottom -->
+  <div id="appLayout">
+    <!-- 3D Three.js Canvas Container -->
+    <main id="canvasContainer"></main>
 
-  <!-- HUD Glassmorphic Overlay -->
+    <!-- Dedicated Controls Panel Physically Below 3D Playfield -->
+    <footer id="bottomControlsBar" class="glass-card">
+      <div class="touch-cluster">
+        <button id="btnTouchLeft" class="touch-btn">◀ Left</button>
+        <button id="btnTouchRight" class="touch-btn">Right ▶</button>
+        <button id="btnTouchRotCW" class="touch-btn">↻ Rot CW</button>
+        <button id="btnTouchRotCCW" class="touch-btn">↺ Rot CCW</button>
+        <button id="btnTouchFlip" class="touch-btn">⇄ Flip</button>
+        <button id="btnTouchF" class="touch-btn btn-f">F Cycle Color</button>
+        <button id="btnTouchSpace" class="touch-btn btn-zip">⚡ HARD DROP</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- HUD Glassmorphic Overlay (Header, Stats, Modals) -->
   <div id="uiOverlay">
     <!-- Header Bar -->
     <header class="game-header glass-card">
@@ -75,19 +91,6 @@
       <div class="key-row"><kbd>X</kbd> <kbd>Y</kbd> Flip X / Y</div>
       <div class="key-row"><kbd class="key-highlight">F</kbd> Cycle Color Order</div>
       <div class="key-row"><kbd class="key-space">Space</kbd> Hard Drop (Zip)</div>
-    </div>
-
-    <!-- On-Screen Touch / Mouse Action Controls -->
-    <div class="touch-controls">
-      <div class="touch-cluster">
-        <button id="btnTouchLeft" class="touch-btn">◀ Left</button>
-        <button id="btnTouchRight" class="touch-btn">Right ▶</button>
-        <button id="btnTouchRotCW" class="touch-btn">↻ Rot CW</button>
-        <button id="btnTouchRotCCW" class="touch-btn">↺ Rot CCW</button>
-        <button id="btnTouchFlip" class="touch-btn">⇄ Flip</button>
-        <button id="btnTouchF" class="touch-btn btn-f">F Cycle Color</button>
-        <button id="btnTouchSpace" class="touch-btn btn-zip">⚡ HARD DROP</button>
-      </div>
     </div>
 
     <!-- Start Overlay Modal -->
@@ -156,7 +159,7 @@
     </div>
 
     <!-- High Scores Modal -->
-    <div id="gameDialogView" class="modal-dialog hidden flex-center">
+    <div id="gameDialogView" class="overlay-modal flex-center hidden">
       <div class="modal-card glass-card">
         <div class="modal-header">
           <h2>🏆 HALL OF FAME</h2>
@@ -175,6 +178,7 @@
             <!-- Dynamic rows -->
           </tbody>
         </table>
+        <button id="btnRecordsClose" class="btn btn-secondary btn-lg" style="margin-top:1rem; align-self:center;">Close</button>
       </div>
     </div>
   </div>

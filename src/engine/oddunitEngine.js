@@ -264,12 +264,141 @@ export class OddUnitEngine {
       this.oddballz.map[i].y = this.oddballz.map[0].y + this.ballShapes[config][i - 1].y;
     }
 
-    const rotCount = Math.floor(Math.random() * 6);
-    for (let i = 0; i < rotCount; i++) this.transform(this.rotCW);
-    if (Math.random() < 0.5) this.transform(this.flipX);
-    if (Math.random() < 0.5) this.transform(this.flipY);
+    this.activeFloatPos = {
+      x: this.oddballz.map[0].x,
+      y: this.oddballz.map[0].y
+    };
+    this.targetFloatX = this.oddballz.map[0].x;
 
+    this.activeRel = [];
+    this.targetRel = [];
+    for (let i = 0; i <= 3; i++) {
+      this.activeRel[i] = { x: this.oddballz.rel[i].x, y: this.oddballz.rel[i].y };
+      this.targetRel[i] = { x: this.oddballz.rel[i].x, y: this.oddballz.rel[i].y };
+    }
+
+    this.isZipping = false;
     this.ballCount++;
+  }
+
+  /**
+   * Continuous Trajectory Downward Motion & Sub-Pixel Smooth Steering
+   */
+  updateContinuous(dt) {
+    if (this.endGame || !this.oddballz || !this.activeFloatPos) return false;
+
+    // Smooth Lerp Steering Float X towards targetFloatX
+    const steerLerpSpeed = Math.min(1.0, dt * 18.0);
+    this.activeFloatPos.x += (this.targetFloatX - this.activeFloatPos.x) * steerLerpSpeed;
+
+    // Smooth Lerp Relative Offsets for Rotations/Flips
+    const rotLerpSpeed = Math.min(1.0, dt * 24.0);
+    if (this.activeRel && this.targetRel) {
+      for (let i = 0; i <= 3; i++) {
+        this.activeRel[i].x += (this.targetRel[i].x - this.activeRel[i].x) * rotLerpSpeed;
+        this.activeRel[i].y += (this.targetRel[i].y - this.activeRel[i].y) * rotLerpSpeed;
+      }
+    }
+
+    const baseSpeed = 1.0 + (this.level - 1) * 0.12;
+    const speed = this.isZipping ? 35.0 : baseSpeed;
+
+    // Direction 2 = down-left (Y+1), Direction 5 = down-right (X+1, Y+1)
+    const isDownRight = this.direction === 5;
+
+    const curFloatY = this.activeFloatPos.y;
+    let nextFloatY = curFloatY + speed * dt;
+
+    // --- Per-step collision: check each integer row the piece would cross this frame ---
+    const curRowY = Math.floor(curFloatY);
+    const nextRowY = Math.floor(nextFloatY);
+    let landingRowY = -1; // -1 = no collision this frame
+
+    outerLoop:
+    for (let gy = curRowY + 1; gy <= nextRowY + 1; gy++) {
+      // For direction 5, X advances proportionally with Y from the float position
+      const rootXAtRow = isDownRight
+        ? Math.round(this.targetFloatX + (gy - curFloatY))
+        : Math.round(this.targetFloatX);
+
+      for (let i = 0; i <= 3; i++) {
+        const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+        const relY = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+        const testX = rootXAtRow + relX;
+        const testY = gy + relY;
+        if (!this.checkInMap({ x: testX, y: testY }) || this.ballMap[testX][testY].bzMap !== 0) {
+          landingRowY = gy - 1; // land on the row above the blocker
+          break outerLoop;
+        }
+      }
+    }
+
+    if (landingRowY !== -1) {
+      const targetX = isDownRight
+        ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
+        : Math.round(this.targetFloatX);
+      const targetY = landingRowY;
+
+      this.activeFloatPos.x = targetX;
+      this.activeFloatPos.y = targetY;
+      this.targetFloatX = targetX;
+
+      this.oddballz.map[0].x = targetX;
+      this.oddballz.map[0].y = targetY;
+
+      for (let i = 1; i <= 3; i++) {
+        const rx = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+        const ry = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+        this.oddballz.map[i].x = targetX + rx;
+        this.oddballz.map[i].y = targetY + ry;
+        this.oddballz.rel[i].x = rx;
+        this.oddballz.rel[i].y = ry;
+        if (this.activeRel) {
+          this.activeRel[i].x = rx;
+          this.activeRel[i].y = ry;
+        }
+        if (this.targetRel) {
+          this.targetRel[i].x = rx;
+          this.targetRel[i].y = ry;
+        }
+      }
+
+      this.stamp();
+      if (this.onPlaySound) this.onPlaySound('drop');
+
+      if (this.matcher) {
+        this.checkMatches();
+      }
+
+      this.checkAdvance();
+
+      if (this.checkGameOver()) {
+        return true;
+      } else {
+        this.build();
+      }
+      return true;
+    }
+
+    // No collision — advance smoothly
+    this.activeFloatPos.y = nextFloatY;
+    if (isDownRight) {
+      this.activeFloatPos.x += speed * dt;
+      this.targetFloatX += speed * dt;
+    }
+
+    const curX = Math.round(this.activeFloatPos.x);
+    const curY = Math.round(this.activeFloatPos.y);
+
+    this.oddballz.map[0].x = curX;
+    this.oddballz.map[0].y = curY;
+
+    for (let i = 1; i <= 3; i++) {
+      this.oddballz.map[i].x = curX + (this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x);
+      this.oddballz.map[i].y = curY + (this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y);
+    }
+
+    return false;
   }
 
   transform(tMatrix) {
@@ -302,6 +431,10 @@ export class OddUnitEngine {
         this.oddballz.rel[i].y = saveMove[i].y;
         this.oddballz.map[i].x = this.oddballz.map[0].x + saveMove[i].x;
         this.oddballz.map[i].y = this.oddballz.map[0].y + saveMove[i].y;
+        if (this.targetRel) {
+          this.targetRel[i].x = saveMove[i].x;
+          this.targetRel[i].y = saveMove[i].y;
+        }
       }
     }
     return transable;
@@ -311,8 +444,13 @@ export class OddUnitEngine {
     let moveable = true;
     const saveMove = [];
 
+    const curX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
+    const curY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
+
     for (let i = 0; i <= 3; i++) {
-      const pts = { x: this.oddballz.map[i].x, y: this.oddballz.map[i].y };
+      const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+      const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
+      const pts = { x: curX + relX, y: curY + relY };
       moveInDirection(pts, dir);
       if (this.checkInMap(pts) && this.ballMap[pts.x][pts.y].bzMap === 0) {
         saveMove[i] = { x: pts.x, y: pts.y };
@@ -323,12 +461,28 @@ export class OddUnitEngine {
     }
 
     if (moveable) {
+      if (dir === 1) {
+        this.targetFloatX -= 1.0;
+      } else if (dir === 4) {
+        this.targetFloatX += 1.0;
+      } else if (dir === 0) {
+        this.targetFloatX -= 1.0;
+        this.activeFloatPos.y -= 1.0;
+      } else if (dir === 3) {
+        this.targetFloatX += 1.0;
+        this.activeFloatPos.y -= 1.0;
+      }
       for (let i = 0; i <= 3; i++) {
         this.oddballz.map[i].x = saveMove[i].x;
         this.oddballz.map[i].y = saveMove[i].y;
       }
     }
     return moveable;
+  }
+
+  zip() {
+    this.isZipping = true;
+    if (this.onPlaySound) this.onPlaySound('zip');
   }
 
   /**

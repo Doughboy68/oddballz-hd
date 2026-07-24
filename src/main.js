@@ -63,6 +63,13 @@ class OddballzApp {
       const code = e.code;
 
       if (code === 'Enter') {
+        const modal = document.getElementById('gameDialogView');
+        if (modal && !modal.classList.contains('hidden')) {
+          this.closeHighScoresModal();
+          e.preventDefault();
+          return;
+        }
+
         if (!this.isPlaying || this.engine.endGame) {
           this.startGame();
         }
@@ -157,11 +164,19 @@ class OddballzApp {
       if (btn) btn.addEventListener('click', () => this.showHighScoresModal());
     });
 
-    document.getElementById('btnCloseModal').addEventListener('click', () => this.closeHighScoresModal());
+    ['btnCloseModal', 'btnRecordsClose'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', () => this.closeHighScoresModal());
+    });
 
     // Sound Toggle
     document.getElementById('toggleSound').addEventListener('change', (e) => {
       this.audio.enabled = e.target.checked;
+      if (this.audio.enabled && this.isPlaying && !this.isPaused) {
+        this.audio.startBGM();
+      } else {
+        this.audio.stopBGM();
+      }
     });
 
     // Mode Selector Tabs
@@ -273,6 +288,7 @@ class OddballzApp {
 
     this.renderer.updateScene(this.engine);
     this.updateUI();
+    this.audio.startBGM();
   }
 
   togglePause() {
@@ -281,10 +297,12 @@ class OddballzApp {
 
     if (this.isPaused) {
       document.getElementById('overlayPause').classList.remove('hidden');
+      this.audio.stopBGM();
     } else {
       document.getElementById('overlayPause').classList.add('hidden');
       document.getElementById('dialogConfirmEnd').classList.add('hidden');
       this.lastTime = performance.now();
+      this.audio.startBGM();
     }
   }
 
@@ -319,6 +337,7 @@ class OddballzApp {
     this.wasPausedByModal = false;
     this.wasPausedByFocusLoss = false;
     this.engine.endGame = true;
+    this.audio.stopBGM();
 
     document.getElementById('overlayPause').classList.add('hidden');
     document.getElementById('overlayGameOver').classList.add('hidden');
@@ -335,56 +354,26 @@ class OddballzApp {
     this.lastTime = currentTime;
 
     if (this.isPlaying && !this.isPaused) {
-      this.accumulatedTime += dt * 1000;
-
-      // Authentic Pascal Game Tick: PauseTime (100ms at Level 1, 20ms at Level 50)
-      const tickDelay = Math.max(16, this.engine.pauseTime);
-
-      if (this.accumulatedTime >= tickDelay) {
-        this.accumulatedTime = 0;
-        this.moveTime++;
-
-        if (this.moveTime >= 8) {
-          this.moveTime = 0;
-
-          if (!this.engine.moveOBall(this.engine.direction)) {
-            this.engine.stamp();
-
-            if (this.engine.matcher) {
-              this.engine.checkMatches();
-            }
-
-            const prevLevel = this.engine.level;
-            this.engine.checkAdvance();
-
-            // Trigger Level-up confetti & sound
-            if (this.engine.level > prevLevel) {
-              confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-            }
-
-            if (this.engine.checkGameOver()) {
-              this.handleGameOver();
-            } else {
-              this.engine.build();
-            }
-          }
-        }
-
-        this.renderer.updateScene(this.engine);
-        this.updateUI();
+      const stamped = this.engine.updateContinuous(dt);
+      if (stamped && this.engine.endGame) {
+        this.handleGameOver();
       }
+
+      this.renderer.updateScene(this.engine);
+      this.updateUI();
 
       // Active piece trailing particles
       if (this.engine.oddballz && Math.random() < 0.3) {
-        const lead = this.engine.oddballz.map[0];
-        const wPos = gridToWorld(lead.x, lead.y, SPHERE_RADIUS);
+        const rootFloatX = this.engine.activeFloatPos ? this.engine.activeFloatPos.x : this.engine.oddballz.map[0].x;
+        const rootFloatY = this.engine.activeFloatPos ? this.engine.activeFloatPos.y : this.engine.oddballz.map[0].y;
+        const wPos = gridToWorld(rootFloatX, rootFloatY, SPHERE_RADIUS);
         this.particles.spawnTrailParticle(wPos, this.engine.oddballz.image[0]);
       }
     }
 
     // Update particles & render 3D WebGL scene every frame
     this.particles.update(Math.min(dt, 0.1));
-    this.renderer.render();
+    this.renderer.render(Math.min(dt, 0.1));
 
     requestAnimationFrame((t) => this.gameLoop(t));
   }
@@ -426,6 +415,11 @@ class OddballzApp {
   }
 
   showHighScoresModal() {
+    if (this.isPlaying && !this.isPaused) {
+      this.wasPausedByModal = true;
+      this.isPaused = true;
+    }
+
     const tbody = document.getElementById('recordsTableBody');
     if (tbody) {
       tbody.innerHTML = '';
@@ -453,6 +447,14 @@ class OddballzApp {
   closeHighScoresModal() {
     const modal = document.getElementById('gameDialogView');
     if (modal) modal.classList.add('hidden');
+
+    if (this.wasPausedByModal) {
+      this.wasPausedByModal = false;
+      if (this.isPlaying && this.isPaused) {
+        this.isPaused = false;
+        this.lastTime = performance.now();
+      }
+    }
   }
 }
 

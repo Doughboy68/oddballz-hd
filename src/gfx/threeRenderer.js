@@ -16,15 +16,16 @@ export class ThreeRenderer {
     this.scene.fog = new THREE.FogExp2(0x0a0c16, 0.025);
 
     // 2. Camera Setup
-    const aspect = window.innerWidth / window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
-    // Position camera for elevated view of hex grid clearing bottom UI bar
-    this.camera.position.set(0, -14.5, 17.5);
-    this.camera.lookAt(0, 1.2, 0);
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
+    const aspect = width / height;
+    // Camera framing: pulled back & elevated so the entire hex board sits with generous margin inside canvas
+    this.camera.position.set(0, -17.5, 21.0);
+    this.camera.lookAt(0, 0.8, 0);
 
     // 3. Renderer Setup
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -55,7 +56,8 @@ export class ThreeRenderer {
     // Lights
     this.initLights();
 
-    // Build 3D Board Pedestals
+    // Build 3D Board Pedestals & 3D Starfield Backdrop
+    this.build3DStarfield();
     this.build3DBoard();
 
     // Cache of static ball meshes in grid: key "x_y" -> Mesh
@@ -70,12 +72,12 @@ export class ThreeRenderer {
   initMaterials() {
     // 6 Distinct Vibrant Metallic & Crystal Ball Color Palettes
     const colors = [
-      { main: 0x00d2ff, roughness: 0.15, metalness: 0.3, emissive: 0x003366 }, // 1: Cyan Crystal
-      { main: 0xff2a5f, roughness: 0.15, metalness: 0.3, emissive: 0x550011 }, // 2: Neon Ruby
-      { main: 0x00e676, roughness: 0.2,  metalness: 0.2, emissive: 0x004411 }, // 3: Emerald Gold
-      { main: 0xffc107, roughness: 0.2,  metalness: 0.4, emissive: 0x553300 }, // 4: Amber Gold
-      { main: 0xb030ff, roughness: 0.15, metalness: 0.3, emissive: 0x330055 }, // 5: Electric Amethyst
-      { main: 0xff00b7, roughness: 0.15, metalness: 0.3, emissive: 0x550033 }  // 6: Deep Magenta
+      { main: 0x0099ff, roughness: 0.15, metalness: 0.35, emissive: 0x002266 }, // 1: Electric Azure Cyan-Blue
+      { main: 0xff2a5f, roughness: 0.15, metalness: 0.30, emissive: 0x550011 }, // 2: Neon Ruby Red
+      { main: 0x00f055, roughness: 0.18, metalness: 0.25, emissive: 0x005511 }, // 3: Vibrant Emerald Green
+      { main: 0xffc107, roughness: 0.20, metalness: 0.40, emissive: 0x553300 }, // 4: Amber Gold
+      { main: 0xb030ff, roughness: 0.15, metalness: 0.30, emissive: 0x330055 }, // 5: Electric Amethyst Purple
+      { main: 0xff00b7, roughness: 0.15, metalness: 0.30, emissive: 0x550033 }  // 6: Hot Magenta
     ];
 
     colors.forEach(c => {
@@ -206,7 +208,7 @@ export class ThreeRenderer {
    * Sync 3D scene with OddUnitEngine state
    */
   updateScene(engine) {
-    // 1. Synchronize Static Stacked Board Balls
+    // 1. Synchronize Static Stacked Board Balls with targetPos for smooth motion
     const currentKeys = new Set();
 
     for (let x = 4; x <= 20; x++) {
@@ -218,19 +220,20 @@ export class ThreeRenderer {
           currentKeys.add(key);
           const colorIdx = (val - 1) % this.ballMaterials.length;
           const mat = this.ballMaterials[colorIdx];
+          const wPos = gridToWorld(x, y, SPHERE_RADIUS);
 
           let mesh = this.staticBallMeshes.get(key);
           if (!mesh) {
             mesh = new THREE.Mesh(this.sphereGeo, mat);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            const wPos = gridToWorld(x, y, SPHERE_RADIUS);
+            mesh.targetPos = new THREE.Vector3(wPos.x, wPos.y, wPos.z);
             mesh.position.set(wPos.x, wPos.y, wPos.z);
             this.ballsGroup.add(mesh);
             this.staticBallMeshes.set(key, mesh);
           } else {
-            // Update material if color changed
             mesh.material = mat;
+            mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
           }
         }
       }
@@ -244,36 +247,63 @@ export class ThreeRenderer {
       }
     }
 
-    // 2. Synchronize Active Falling Piece
-    // Clear old active meshes
-    this.activeGroup.clear();
+    // 2. Synchronize Active Falling Piece (Re-use 4 Meshes for Butter-Smooth Motion)
+    if (!this.activeMeshes || this.activeMeshes.length === 0) {
+      this.activeMeshes = [];
+      for (let i = 0; i < 4; i++) {
+        const mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+        mesh.castShadow = true;
+        mesh.targetPos = new THREE.Vector3();
+        mesh.initialized = false;
+        this.activeGroup.add(mesh);
+        this.activeMeshes.push(mesh);
+      }
+    }
 
     if (!engine.endGame && engine.oddballz) {
       let avgX = 0, avgY = 0, avgZ = 0;
 
+      const rootFloatX = engine.activeFloatPos ? engine.activeFloatPos.x : engine.oddballz.map[0].x;
+      const rootFloatY = engine.activeFloatPos ? engine.activeFloatPos.y : engine.oddballz.map[0].y;
+
       for (let i = 0; i <= 3; i++) {
-        const mapPts = engine.oddballz.map[i];
         const val = engine.oddballz.image[i];
+        const mesh = this.activeMeshes[i];
 
         if (val > 0) {
+          mesh.visible = true;
           const colorIdx = (val - 1) % this.ballMaterials.length;
-          const mat = this.ballMaterials[colorIdx];
-          const mesh = new THREE.Mesh(this.sphereGeo, mat);
-          mesh.castShadow = true;
+          mesh.material = this.ballMaterials[colorIdx];
 
-          const wPos = gridToWorld(mapPts.x, mapPts.y, SPHERE_RADIUS);
-          mesh.position.set(wPos.x, wPos.y, wPos.z);
-          this.activeGroup.add(mesh);
+          const relX = engine.activeRel ? engine.activeRel[i].x : engine.oddballz.rel[i].x;
+          const relY = engine.activeRel ? engine.activeRel[i].y : engine.oddballz.rel[i].y;
+          const floatX = rootFloatX + relX;
+          const floatY = rootFloatY + relY;
+          const wPos = gridToWorld(floatX, floatY, SPHERE_RADIUS);
+          mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
 
-          avgX += wPos.x;
-          avgY += wPos.y;
-          avgZ += wPos.z;
+          if (!mesh.initialized) {
+            mesh.position.set(wPos.x, wPos.y, wPos.z);
+            mesh.initialized = true;
+          }
+
+          avgX += mesh.position.x;
+          avgY += mesh.position.y;
+          avgZ += mesh.position.z;
+        } else {
+          mesh.visible = false;
         }
       }
 
-      // Move point light to track active piece center
       avgX /= 4; avgY /= 4; avgZ /= 4;
       this.activePointLight.position.set(avgX, avgY, avgZ + 1.5);
+    } else {
+      for (let i = 0; i < 4; i++) {
+        if (this.activeMeshes[i]) {
+          this.activeMeshes[i].visible = false;
+          this.activeMeshes[i].initialized = false;
+        }
+      }
     }
 
     // 3. Synchronize Ghost Landing Preview
@@ -298,13 +328,99 @@ export class ThreeRenderer {
     }
   }
 
-  render() {
+  build3DStarfield() {
+    this.starfieldGroup = new THREE.Group();
+    const starCount = 1800;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(starCount * 3);
+    const colors = new Float32Array(starCount * 3);
+
+    const palette = [
+      new THREE.Color(0x00f0ff), // Cyan
+      new THREE.Color(0xf43f5e), // Pink
+      new THREE.Color(0xa855f7), // Purple
+      new THREE.Color(0xf59e0b), // Gold
+      new THREE.Color(0xffffff)  // White
+    ];
+
+    for (let i = 0; i < starCount; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 120;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 120;
+      positions[i * 3 + 2] = -15 - Math.random() * 45;
+
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 0.35,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending
+    });
+
+    const starPoints = new THREE.Points(geometry, material);
+    this.starfieldGroup.add(starPoints);
+
+    // Floating Wireframe Cosmic Crystals
+    const crystalGeo = new THREE.IcosahedronGeometry(1.2, 0);
+    const crystalMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.25
+    });
+
+    for (let i = 0; i < 8; i++) {
+      const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+      crystal.position.set(
+        (Math.random() - 0.5) * 50,
+        (Math.random() - 0.5) * 50,
+        -10 - Math.random() * 25
+      );
+      crystal.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+      this.starfieldGroup.add(crystal);
+    }
+
+    this.scene.add(this.starfieldGroup);
+  }
+
+  render(dt = 0.016) {
+    if (this.starfieldGroup) {
+      this.starfieldGroup.rotation.y += dt * 0.04;
+      this.starfieldGroup.rotation.z += dt * 0.015;
+    }
+
+    const lerpSpeed = Math.min(1.0, dt * 24.0);
+
+    // Smooth Lerp Static Stacked Balls
+    for (const mesh of this.staticBallMeshes.values()) {
+      if (mesh.targetPos) {
+        mesh.position.lerp(mesh.targetPos, lerpSpeed);
+      }
+    }
+
+    // Smooth Lerp Active Falling Spheres
+    if (this.activeMeshes) {
+      for (const mesh of this.activeMeshes) {
+        if (mesh.visible && mesh.targetPos) {
+          mesh.position.lerp(mesh.targetPos, lerpSpeed);
+        }
+      }
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
   onWindowResize() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
