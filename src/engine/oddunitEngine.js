@@ -316,12 +316,13 @@ export class OddUnitEngine {
     const nextRowY = Math.floor(nextFloatY);
     let landingRowY = -1; // -1 = no collision this frame
 
+    const startRootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
+    const startRootY = Math.round(curFloatY);
+
     outerLoop:
     for (let gy = curRowY + 1; gy <= nextRowY + 1; gy++) {
-      // For direction 5, X advances proportionally with Y from the float position
-      const rootXAtRow = isDownRight
-        ? Math.round(this.targetFloatX + (gy - curFloatY))
-        : Math.round(this.targetFloatX);
+      const dy = gy - startRootY;
+      const rootXAtRow = isDownRight ? (startRootX + dy) : startRootX;
 
       for (let i = 0; i <= 3; i++) {
         const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
@@ -329,16 +330,15 @@ export class OddUnitEngine {
         const testX = rootXAtRow + relX;
         const testY = gy + relY;
         if (!this.checkInMap({ x: testX, y: testY }) || this.ballMap[testX][testY].bzMap !== 0) {
-          landingRowY = gy - 1; // land on the row above the blocker
+          landingRowY = gy - 1;
           break outerLoop;
         }
       }
     }
 
     if (landingRowY !== -1) {
-      const targetX = isDownRight
-        ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
-        : Math.round(this.targetFloatX);
+      const dy = landingRowY - startRootY;
+      const targetX = isDownRight ? (startRootX + dy) : startRootX;
       const targetY = landingRowY;
 
       this.activeFloatPos.x = targetX;
@@ -406,133 +406,42 @@ export class OddUnitEngine {
 
     let transable = true;
     const saveMove = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
-    let finalRootX = rootX;
-    let finalRootY = rootY;
 
-    if (tMatrix === this.rotCW) {
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
+    for (let i = 0; i <= 3; i++) {
+      const rx = this.oddballz.rel[i].x;
+      const ry = this.oddballz.rel[i].y;
+
+      if (tMatrix === this.rotCW) {
         saveMove[i] = { x: rx - ry, y: rx };
-      }
-    } else if (tMatrix === this.rotCCW) {
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
+      } else if (tMatrix === this.rotCCW) {
         saveMove[i] = { x: ry, y: ry - rx };
-      }
-    } else if (tMatrix === this.flipX || tMatrix === this.flipY) {
-      const rawReflect = [];
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
-        const mx = rx + 2, my = ry + 2;
-        if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
-        rawReflect[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
-      }
-      if (!transable) return false;
-
-      const candidateShifts = [
-        { sx: 0, sy: 0 },
-        { sx: -1, sy: 0 },
-        { sx: 1, sy: 0 },
-        { sx: 0, sy: -1 },
-        { sx: 0, sy: 1 }
-      ];
-
-      let maxOverlap = -1;
-      let minDisp = Infinity;
-      let bestShift = null;
-
-      for (const { sx, sy } of candidateShifts) {
-        const testRootX = rootX + sx;
-        const testRootY = rootY + sy;
-        let valid = true;
-
-        for (let i = 0; i <= 3; i++) {
-          const px = testRootX + rawReflect[i].x;
-          const py = testRootY + rawReflect[i].y;
-          const isSelfCell = origMap.some(op => op.x === px && op.y === py);
-          if (!this.checkInMap({ x: px, y: py }) || (!isSelfCell && this.ballMap[px][py].bzMap !== 0)) {
-            valid = false;
-            break;
-          }
-        }
-        if (!valid) continue;
-
-        let overlap = 0;
-        for (let i = 0; i <= 3; i++) {
-          const px = testRootX + rawReflect[i].x;
-          const py = testRootY + rawReflect[i].y;
-          if (origMap.some(op => op.x === px && op.y === py)) overlap++;
-        }
-        const disp = sx * sx + sy * sy;
-
-        if (overlap > maxOverlap || (overlap === maxOverlap && disp < minDisp)) {
-          maxOverlap = overlap;
-          minDisp = disp;
-          bestShift = { sx, sy };
-        }
-      }
-
-      if (bestShift) {
-        finalRootX = rootX + bestShift.sx;
-        finalRootY = rootY + bestShift.sy;
-
-        // Re-normalize saveMove so saveMove[0] is ALWAYS { x: 0, y: 0 }
-        const s0x = rawReflect[0].x;
-        const s0y = rawReflect[0].y;
-        finalRootX += s0x;
-        finalRootY += s0y;
-
-        for (let i = 0; i <= 3; i++) {
-          saveMove[i] = { x: rawReflect[i].x - s0x, y: rawReflect[i].y - s0y };
-        }
       } else {
-        transable = false;
-      }
-    } else {
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
+        // flipX / flipY and any other matrix: use hex matrix lookup
         const mx = rx + 2, my = ry + 2;
         if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
         saveMove[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
       }
-    }
 
-    if (transable) {
-      for (let i = 0; i <= 3; i++) {
-        const pts = {
-          x: finalRootX + saveMove[i].x,
-          y: finalRootY + saveMove[i].y
-        };
-        const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
-        if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
-          transable = false;
-          break;
-        }
+      const pts = {
+        x: rootX + saveMove[i].x,
+        y: rootY + saveMove[i].y
+      };
+
+      // Allow moving into a cell currently occupied by this piece (self-swap)
+      const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
+      if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
+        transable = false;
+        break;
       }
     }
 
     if (transable) {
       const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
-      const shiftX = finalRootX - rootX;
-      const shiftY = finalRootY - rootY;
-
-      if (this.activeFloatPos) {
-        this.activeFloatPos.x += shiftX;
-        this.activeFloatPos.y += shiftY;
-      }
-      if (this.targetFloatX !== undefined) {
-        this.targetFloatX += shiftX;
-      }
-
       for (let i = 0; i <= 3; i++) {
         this.oddballz.rel[i].x = saveMove[i].x;
         this.oddballz.rel[i].y = saveMove[i].y;
-        this.oddballz.map[i].x = finalRootX + saveMove[i].x;
-        this.oddballz.map[i].y = finalRootY + saveMove[i].y;
+        this.oddballz.map[i].x = rootX + saveMove[i].x;
+        this.oddballz.map[i].y = rootY + saveMove[i].y;
         if (this.targetRel) {
           this.targetRel[i].x = saveMove[i].x;
           this.targetRel[i].y = saveMove[i].y;
@@ -554,8 +463,8 @@ export class OddUnitEngine {
     const curY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
 
     for (let i = 0; i <= 3; i++) {
-      const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
-      const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
+      const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+      const relY = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
       const pts = { x: curX + relX, y: curY + relY };
       moveInDirection(pts, dir);
       if (this.checkInMap(pts) && this.ballMap[pts.x][pts.y].bzMap === 0) {
@@ -573,10 +482,10 @@ export class OddUnitEngine {
         this.targetFloatX += 1.0;
       } else if (dir === 0) {
         this.targetFloatX -= 1.0;
-        this.activeFloatPos.y -= 1.0;
+        if (this.activeFloatPos) this.activeFloatPos.y -= 1.0;
       } else if (dir === 3) {
         this.targetFloatX += 1.0;
-        this.activeFloatPos.y -= 1.0;
+        if (this.activeFloatPos) this.activeFloatPos.y -= 1.0;
       }
       for (let i = 0; i <= 3; i++) {
         this.oddballz.map[i].x = saveMove[i].x;
@@ -586,35 +495,15 @@ export class OddUnitEngine {
     return moveable;
   }
 
-  zip() {
-    this.isZipping = true;
-    if (this.onPlaySound) this.onPlaySound('zip');
-  }
-
-  /**
-   * Calculates the projected landing coordinates of the active piece (ghost piece).
-   */
   getGhostPositions() {
-    const curFloatY = this.activeFloatPos ? this.activeFloatPos.y : (this.oddballz.map[0] ? this.oddballz.map[0].y : 0);
-    const startRootY = Math.round(curFloatY);
-    const isDownRight = this.direction === 5;
-    const targetX = this.targetFloatX !== undefined ? this.targetFloatX : (this.oddballz.map[0] ? this.oddballz.map[0].x : 0);
-    const startRootX = isDownRight ? Math.round(targetX + (startRootY - curFloatY)) : Math.round(targetX);
-
-    const ghostMap = [];
-    for (let i = 0; i <= 3; i++) {
-      const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
-      const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
-      ghostMap[i] = { x: startRootX + relX, y: startRootY + relY };
-    }
-
+    const ghostMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
     let canMove = true;
+
     while (canMove) {
       const nextMap = [];
       for (let i = 0; i <= 3; i++) {
         const pts = { x: ghostMap[i].x, y: ghostMap[i].y };
         moveInDirection(pts, this.direction);
-        // Allow moving into a cell occupied by the ghost piece itself (those cells are vacated this step)
         const isSelfCell = ghostMap.some(g => g.x === pts.x && g.y === pts.y);
         if (this.checkInMap(pts) && (isSelfCell || this.ballMap[pts.x][pts.y].bzMap === 0)) {
           nextMap[i] = pts;
@@ -677,62 +566,70 @@ export class OddUnitEngine {
 
   checkGaps() {
     let noneDropped = true;
-    let flipGate = true;
+    let passNoneDropped = false;
 
     if (!this.droppingPathsMap) this.droppingPathsMap = new Map();
 
-    for (let y = 19; y >= 0; y--) {
-      for (let x = 4; x <= 20; x++) {
-        const startPts = { x: x, y: y };
-        const saveColor = this.ballMap[x][y].bzMap;
+    let loopLimit = 20;
+    while (!passNoneDropped && loopLimit > 0) {
+      loopLimit--;
+      passNoneDropped = true;
 
-        if (this.checkInMap(startPts) && saveColor !== 0) {
-          if (!this.supported(startPts)) {
-            noneDropped = false;
-            let current = { x: x, y: y };
-            let maxDrops = 25;
-            const origKey = `${x}_${y}`;
-            const hexPath = [{ x: x, y: y }];
+      for (let y = 0; y <= 19; y++) {
+        for (let x = 4; x <= 20; x++) {
+          const startPts = { x: x, y: y };
+          const saveColor = this.ballMap[x][y].bzMap;
 
-            while (!this.supported(current) && maxDrops > 0) {
-              maxDrops--;
+          if (this.checkInMap(startPts) && saveColor !== 0) {
+            if (!this.supported(startPts)) {
+              noneDropped = false;
+              passNoneDropped = false;
+              let current = { x: x, y: y };
+              let maxDrops = 25;
+              const origKey = `${x}_${y}`;
+              const hexPath = [{ x: x, y: y }];
 
-              const p1 = { x: current.x, y: current.y };
-              const p2 = { x: current.x, y: current.y };
-              moveInDirection(p1, 2);
-              moveInDirection(p2, 5);
+              while (!this.supported(current) && maxDrops > 0) {
+                maxDrops--;
 
-              const canMove1 = this.checkInMap(p1) && this.ballMap[p1.x][p1.y].bzMap === 0;
-              const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
+                const p1 = { x: current.x, y: current.y };
+                const p2 = { x: current.x, y: current.y };
+                moveInDirection(p1, 2);
+                moveInDirection(p2, 5);
 
-              if (!canMove1 && !canMove2) {
-                break;
+                const canMove1 = this.checkInMap(p1) && this.ballMap[p1.x][p1.y].bzMap === 0;
+                const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
+
+                if (!canMove1 && !canMove2) {
+                  break;
+                }
+
+                let chosenTarget = null;
+                if (this.flipGate === undefined) this.flipGate = true;
+                if (this.flipGate) {
+                  chosenTarget = canMove1 ? p1 : p2;
+                } else {
+                  chosenTarget = canMove2 ? p2 : p1;
+                }
+                this.flipGate = !this.flipGate;
+
+                this.ballMap[current.x][current.y].bzMap = 0;
+                current = chosenTarget;
+                this.ballMap[current.x][current.y].bzMap = saveColor;
+                hexPath.push({ x: current.x, y: current.y });
               }
 
-              let chosenTarget = null;
-              if (flipGate) {
-                chosenTarget = canMove1 ? p1 : p2;
-              } else {
-                chosenTarget = canMove2 ? p2 : p1;
-              }
-              flipGate = !flipGate;
-
-              this.ballMap[current.x][current.y].bzMap = 0;
-              current = chosenTarget;
-              this.ballMap[current.x][current.y].bzMap = saveColor;
-              hexPath.push({ x: current.x, y: current.y });
-            }
-
-            const targetKey = `${current.x}_${current.y}`;
-            if (targetKey !== origKey) {
-              let fullPath = hexPath;
-              if (this.droppingPathsMap.has(origKey)) {
-                const oldPathInfo = this.droppingPathsMap.get(origKey);
-                fullPath = oldPathInfo.path.concat(hexPath.slice(1));
-                this.droppingPathsMap.delete(origKey);
-                this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
-              } else {
-                this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
+              const targetKey = `${current.x}_${current.y}`;
+              if (targetKey !== origKey) {
+                let fullPath = hexPath;
+                if (this.droppingPathsMap.has(origKey)) {
+                  const oldPathInfo = this.droppingPathsMap.get(origKey);
+                  fullPath = oldPathInfo.path.concat(hexPath.slice(1));
+                  this.droppingPathsMap.delete(origKey);
+                  this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
+                } else {
+                  this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
+                }
               }
             }
           }
