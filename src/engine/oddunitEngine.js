@@ -519,7 +519,6 @@ export class OddUnitEngine {
       const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
       if (this.activeFloatPos) {
         this.activeFloatPos.x = finalRootX;
-        this.activeFloatPos.y = finalRootY;
       }
       if (this.targetFloatX !== undefined) {
         this.targetFloatX = finalRootX;
