@@ -345,16 +345,13 @@ export class OddUnitEngine {
       this.activeFloatPos.y = targetY;
       this.targetFloatX = targetX;
 
-      this.oddballz.map[0].x = targetX;
-      this.oddballz.map[0].y = targetY;
-
-      for (let i = 1; i <= 3; i++) {
+      for (let i = 0; i <= 3; i++) {
         const rx = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
         const ry = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
-        this.oddballz.map[i].x = targetX + rx;
-        this.oddballz.map[i].y = targetY + ry;
         this.oddballz.rel[i].x = rx;
         this.oddballz.rel[i].y = ry;
+        this.oddballz.map[i].x = targetX + rx;
+        this.oddballz.map[i].y = targetY + ry;
         if (this.activeRel) {
           this.activeRel[i].x = rx;
           this.activeRel[i].y = ry;
@@ -389,15 +386,14 @@ export class OddUnitEngine {
       this.targetFloatX += speed * dt;
     }
 
-    const curX = Math.round(this.activeFloatPos.x);
     const curY = Math.round(this.activeFloatPos.y);
+    const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : Math.round(this.activeFloatPos.x));
 
-    this.oddballz.map[0].x = curX;
-    this.oddballz.map[0].y = curY;
-
-    for (let i = 1; i <= 3; i++) {
-      this.oddballz.map[i].x = curX + (this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x);
-      this.oddballz.map[i].y = curY + (this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y);
+    for (let i = 0; i <= 3; i++) {
+      const rx = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+      const ry = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+      this.oddballz.map[i].x = rootX + rx;
+      this.oddballz.map[i].y = curY + ry;
     }
 
     return false;
@@ -491,7 +487,6 @@ export class OddUnitEngine {
           this.activeRel[i].y = origActiveRel[i].y;
         }
       }
-      if (this.onPlaySound) this.onPlaySound('click');
       return true;
     }
 
@@ -535,7 +530,6 @@ export class OddUnitEngine {
           this.targetRel[i].y = saveMove[i].y;
         }
       }
-      if (this.onPlaySound) this.onPlaySound('click');
     }
     return transable;
   }
@@ -597,7 +591,9 @@ export class OddUnitEngine {
       for (let i = 0; i <= 3; i++) {
         const pts = { x: ghostMap[i].x, y: ghostMap[i].y };
         moveInDirection(pts, this.direction);
-        if (this.checkInMap(pts) && this.ballMap[pts.x][pts.y].bzMap === 0) {
+        // Allow moving into a cell occupied by the ghost piece itself (those cells are vacated this step)
+        const isSelfCell = ghostMap.some(g => g.x === pts.x && g.y === pts.y);
+        if (this.checkInMap(pts) && (isSelfCell || this.ballMap[pts.x][pts.y].bzMap === 0)) {
           nextMap[i] = pts;
         } else {
           canMove = false;
