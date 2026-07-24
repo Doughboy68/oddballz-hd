@@ -400,97 +400,10 @@ export class OddUnitEngine {
   }
 
   transform(tMatrix) {
-    const isFlip = (tMatrix === this.flipX || tMatrix === this.flipY);
     const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
     const rootY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
-
     const origMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
 
-    if (isFlip) {
-      const rawReflect = [];
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
-        if (tMatrix === this.flipX) {
-          rawReflect[i] = { x: ry - rx, y: ry };
-        } else {
-          rawReflect[i] = { x: rx - ry, y: -ry };
-        }
-      }
-
-      // Evaluate candidate shifts to keep the flipped shape in place with maximum overlap
-      const candidateShifts = [
-        { sx: 0, sy: 0 },
-        { sx: -1, sy: 0 },
-        { sx: 1, sy: 0 },
-        { sx: 0, sy: -1 },
-        { sx: 0, sy: 1 },
-        { sx: -1, sy: -1 },
-        { sx: 1, sy: 1 }
-      ];
-
-      let bestShift = null;
-      let maxOverlap = -1;
-      let minDisp = Infinity;
-      let bestSaveMove = null;
-
-      for (const { sx, sy } of candidateShifts) {
-        const testMove = [];
-        let valid = true;
-        for (let i = 0; i <= 3; i++) {
-          const px = rootX + rawReflect[i].x + sx;
-          const py = rootY + rawReflect[i].y + sy;
-          const isSelfCell = origMap.some(op => op.x === px && op.y === py);
-          if (!this.checkInMap({ x: px, y: py }) || (!isSelfCell && this.ballMap[px][py].bzMap !== 0)) {
-            valid = false;
-            break;
-          }
-          testMove[i] = { x: rawReflect[i].x + sx, y: rawReflect[i].y + sy };
-        }
-        if (!valid) continue;
-
-        let overlap = 0;
-        let centerDx = 0, centerDy = 0;
-        for (let i = 0; i <= 3; i++) {
-          const px = rootX + testMove[i].x;
-          const py = rootY + testMove[i].y;
-          if (origMap.some(op => op.x === px && op.y === py)) overlap++;
-          centerDx += (testMove[i].x - this.oddballz.rel[i].x);
-          centerDy += (testMove[i].y - this.oddballz.rel[i].y);
-        }
-        const disp = centerDx * centerDx + centerDy * centerDy;
-
-        if (overlap > maxOverlap || (overlap === maxOverlap && disp < minDisp)) {
-          maxOverlap = overlap;
-          minDisp = disp;
-          bestShift = { sx, sy };
-          bestSaveMove = testMove;
-        }
-      }
-
-      if (!bestSaveMove) return false;
-
-      // Apply the in-place flipped relative positions
-      const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
-
-      for (let i = 0; i <= 3; i++) {
-        this.oddballz.rel[i].x = bestSaveMove[i].x;
-        this.oddballz.rel[i].y = bestSaveMove[i].y;
-        this.oddballz.map[i].x = rootX + bestSaveMove[i].x;
-        this.oddballz.map[i].y = rootY + bestSaveMove[i].y;
-        if (this.targetRel) {
-          this.targetRel[i].x = bestSaveMove[i].x;
-          this.targetRel[i].y = bestSaveMove[i].y;
-        }
-        if (this.activeRel && origActiveRel) {
-          this.activeRel[i].x = origActiveRel[i].x;
-          this.activeRel[i].y = origActiveRel[i].y;
-        }
-      }
-      return true;
-    }
-
-    // Pure vector rotation for rotCW / rotCCW
     let transable = true;
     const saveMove = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
 
@@ -503,6 +416,7 @@ export class OddUnitEngine {
       } else if (tMatrix === this.rotCCW) {
         saveMove[i] = { x: ry, y: ry - rx };
       } else {
+        // flipX / flipY and custom matrix: exact 1992 Pascal hex matrix lookup
         const mx = rx + 2, my = ry + 2;
         if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
         saveMove[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
@@ -513,13 +427,16 @@ export class OddUnitEngine {
         y: rootY + saveMove[i].y
       };
 
-      if (!this.checkInMap(pts) || this.ballMap[pts.x][pts.y].bzMap !== 0) {
+      // Allow moving into a cell currently occupied by this piece (self-swap)
+      const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
+      if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
         transable = false;
         break;
       }
     }
 
     if (transable) {
+      const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
       for (let i = 0; i <= 3; i++) {
         this.oddballz.rel[i].x = saveMove[i].x;
         this.oddballz.rel[i].y = saveMove[i].y;
@@ -528,6 +445,10 @@ export class OddUnitEngine {
         if (this.targetRel) {
           this.targetRel[i].x = saveMove[i].x;
           this.targetRel[i].y = saveMove[i].y;
+        }
+        if (this.activeRel && origActiveRel) {
+          this.activeRel[i].x = origActiveRel[i].x;
+          this.activeRel[i].y = origActiveRel[i].y;
         }
       }
     }
