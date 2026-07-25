@@ -2093,15 +2093,17 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // Mobile portrait (iPhone): restored v1.0 baseline camera — FOV 45, same position as original
+        // iPhone & Android portrait: centered on true board world-X center (~-0.8)
+        // Board spans worldX -8.25 to +6.75, center = -0.75. Pull back z slightly vs before.
+        this.camera.fov = Math.min(80, 43 / (aspect * 1.05));
+        const distFactor = (1.0 - aspect);
+        this.camera.position.set(-0.8, -15.5 - distFactor * 1.5, 17.8 + distFactor * 2.0);
+        this.camera.lookAt(-0.8, 0.2, 0);
+      } else {
+        // Desktop / landscape view framing
         this.camera.fov = 45;
         this.camera.position.set(0, -17.5, 21.0);
         this.camera.lookAt(0, 0.8, 0);
-      } else {
-        // Desktop / landscape view: kept EXACTLY as it was!
-        this.camera.fov = 42;
-        this.camera.position.set(0, -18.5, 23.5);
-        this.camera.lookAt(0, 0.5, 0);
       }
       this.camera.updateProjectionMatrix();
     }
