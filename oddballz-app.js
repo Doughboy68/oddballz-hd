@@ -2093,10 +2093,10 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // Mobile / phone screen (aspect < 1.0): expand FOV dynamically so board tips touch screen edges
-        const targetWorldWidth = 16.8;
-        const camY = -12.0;
-        const camZ = 16.0;
+        // Mobile / phone screen (aspect < 1.0): 120% zoomed-in playfield presentation
+        const targetWorldWidth = 14.0;
+        const camY = -10.5;
+        const camZ = 14.0;
         const distance = Math.sqrt(camY * camY + camZ * camZ);
 
         const halfFovRad = Math.atan((targetWorldWidth / 2.0) / (distance * aspect));
