@@ -2093,10 +2093,10 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // Mobile portrait mode (iPhone): sized to fill nicely, centered
-        this.camera.fov = 52;
-        this.camera.position.set(0, -10.0, 20.0);
-        this.camera.lookAt(0, -1.5, 0);
+        // Mobile portrait (iPhone): restored v1.0 baseline camera — FOV 45, same position as original
+        this.camera.fov = 45;
+        this.camera.position.set(0, -17.5, 21.0);
+        this.camera.lookAt(0, 0.8, 0);
       } else {
         // Desktop / landscape view: kept EXACTLY as it was!
         this.camera.fov = 42;
