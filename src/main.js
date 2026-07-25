@@ -116,25 +116,25 @@ class OddballzApp {
           break;
 
         case 'ArrowUp':
-          this.engine.transformCentered('rotCW');
+          this.engine.transform(this.engine.rotCCW);
           e.preventDefault();
           break;
 
         case 'ArrowDown':
         case 'KeyV':
-          this.engine.transformCentered('rotCCW');
+          this.engine.transform(this.engine.rotCW);
           e.preventDefault();
           break;
 
         case 'KeyX':
         case 'Home':
-          this.engine.transformCentered('flipX');
+          this.engine.transform(this.engine.flipX);
           e.preventDefault();
           break;
 
         case 'KeyY':
         case 'End':
-          this.engine.transformCentered('flipY');
+          this.engine.transform(this.engine.flipY);
           e.preventDefault();
           break;
 
@@ -218,10 +218,10 @@ class OddballzApp {
 
     bindTouch('btnTouchLeft', () => this.engine.moveOBall(1));
     bindTouch('btnTouchRight', () => this.engine.moveOBall(4));
-    bindTouch('btnTouchRotCW',  () => this.engine.transformCentered('rotCW'));
-    bindTouch('btnTouchRotCCW', () => this.engine.transformCentered('rotCCW'));
-    bindTouch('btnTouchFlip',   () => this.engine.transformCentered('flipX'));
-    bindTouch('btnTouchFlipY',  () => this.engine.transformCentered('flipY'));
+    bindTouch('btnTouchRotCW', () => this.engine.transform(this.engine.rotCW));
+    bindTouch('btnTouchRotCCW', () => this.engine.transform(this.engine.rotCCW));
+    bindTouch('btnTouchFlip', () => this.engine.transform(this.engine.flipX));
+    bindTouch('btnTouchFlipY', () => this.engine.transform(this.engine.flipY));
     bindTouch('btnTouchF', () => this.engine.rotColors());
     bindTouch('btnTouchSpace', () => this.engine.zip());
 

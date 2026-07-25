@@ -19,7 +19,7 @@
   function gridToWorld(x, y, zOffset = 0) {
     const cx = x - 12;
     const cy = y - 9.5;
-    const worldX = (cx - cy * 0.5) * HEX_SPACING_X;
+    const worldX = (cx - cy * 0.5) * HEX_SPACING_X + 1.25;
     const worldY = -cy * HEX_SPACING_Y;
     const worldZ = zOffset;
     return { x: worldX, y: worldY, z: worldZ };
@@ -318,10 +318,21 @@
       for (let i = 0; i < rotCount; i++) this.transform(this.rotCW);
       if (Math.random() < 0.5) this.transform(this.flipX);
 
-      // Re-sync activeFloatPos/targetFloatX to map[0] after transform (rel[0] may have shifted)
+      // Re-sync activeFloatPos/targetFloatX/activeRel/targetRel after initial transforms so shape is crisp
       this.activeFloatPos.x = this.oddballz.map[0].x;
       this.activeFloatPos.y = this.oddballz.map[0].y;
       this.targetFloatX = this.oddballz.map[0].x;
+
+      for (let i = 0; i <= 3; i++) {
+        if (this.activeRel) {
+          this.activeRel[i].x = this.oddballz.rel[i].x;
+          this.activeRel[i].y = this.oddballz.rel[i].y;
+        }
+        if (this.targetRel) {
+          this.targetRel[i].x = this.oddballz.rel[i].x;
+          this.targetRel[i].y = this.oddballz.rel[i].y;
+        }
+      }
 
       this.isZipping = false;
       this.ballCount++;
@@ -348,20 +359,18 @@
       const isDownRight = this.direction === 5;
 
       const curFloatY = this.activeFloatPos.y;
-      const nextFloatY = curFloatY + speed * dt;
+      let nextFloatY = curFloatY + speed * dt;
 
-      // Per-step collision: check each integer row the piece would cross this frame
+      // --- Per-step collision: check each integer row the piece would cross this frame ---
       const curRowY = Math.floor(curFloatY);
       const nextRowY = Math.floor(nextFloatY);
-      let landingRowY = -1;
-
-      const startRootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
-      const startRootY = Math.round(curFloatY);
+      let landingRowY = -1; // -1 = no collision this frame
 
       outerLoop:
       for (let gy = curRowY + 1; gy <= nextRowY + 1; gy++) {
-        const dy = gy - startRootY;
-        const rootXAtRow = isDownRight ? (startRootX + dy) : startRootX;
+        const rootXAtRow = isDownRight
+          ? Math.round(this.targetFloatX + (gy - curFloatY))
+          : Math.round(this.targetFloatX);
 
         for (let i = 0; i <= 3; i++) {
           const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
@@ -369,15 +378,16 @@
           const testX = rootXAtRow + relX;
           const testY = gy + relY;
           if (!this.checkInMap({ x: testX, y: testY }) || this.ballMap[testX][testY].bzMap !== 0) {
-            landingRowY = gy - 1;
+            landingRowY = gy - 1; // land on the row above the blocker
             break outerLoop;
           }
         }
       }
 
       if (landingRowY !== -1) {
-        const dy = landingRowY - startRootY;
-        const targetX = isDownRight ? (startRootX + dy) : startRootX;
+        const targetX = isDownRight
+          ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
+          : Math.round(this.targetFloatX);
         const targetY = landingRowY;
 
         this.activeFloatPos.x = targetX;
@@ -445,42 +455,133 @@
 
       let transable = true;
       const saveMove = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
+      let finalRootX = rootX;
+      let finalRootY = rootY;
 
-      for (let i = 0; i <= 3; i++) {
-        const rx = this.oddballz.rel[i].x;
-        const ry = this.oddballz.rel[i].y;
-
-        if (tMatrix === this.rotCW) {
+      if (tMatrix === this.rotCW) {
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
           saveMove[i] = { x: rx - ry, y: rx };
-        } else if (tMatrix === this.rotCCW) {
+        }
+      } else if (tMatrix === this.rotCCW) {
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
           saveMove[i] = { x: ry, y: ry - rx };
+        }
+      } else if (tMatrix === this.flipX || tMatrix === this.flipY) {
+        const rawReflect = [];
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
+          const mx = rx + 2, my = ry + 2;
+          if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
+          rawReflect[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
+        }
+        if (!transable) return false;
+
+        const candidateShifts = [
+          { sx: 0, sy: 0 },
+          { sx: -1, sy: 0 },
+          { sx: 1, sy: 0 },
+          { sx: 0, sy: -1 },
+          { sx: 0, sy: 1 }
+        ];
+
+        let maxOverlap = -1;
+        let minDisp = Infinity;
+        let bestShift = null;
+
+        for (const { sx, sy } of candidateShifts) {
+          const testRootX = rootX + sx;
+          const testRootY = rootY + sy;
+          let valid = true;
+
+          for (let i = 0; i <= 3; i++) {
+            const px = testRootX + rawReflect[i].x;
+            const py = testRootY + rawReflect[i].y;
+            const isSelfCell = origMap.some(op => op.x === px && op.y === py);
+            if (!this.checkInMap({ x: px, y: py }) || (!isSelfCell && this.ballMap[px][py].bzMap !== 0)) {
+              valid = false;
+              break;
+            }
+          }
+          if (!valid) continue;
+
+          let overlap = 0;
+          for (let i = 0; i <= 3; i++) {
+            const px = testRootX + rawReflect[i].x;
+            const py = testRootY + rawReflect[i].y;
+            if (origMap.some(op => op.x === px && op.y === py)) overlap++;
+          }
+          const disp = sx * sx + sy * sy;
+
+          if (overlap > maxOverlap || (overlap === maxOverlap && disp < minDisp)) {
+            maxOverlap = overlap;
+            minDisp = disp;
+            bestShift = { sx, sy };
+          }
+        }
+
+        if (bestShift) {
+          finalRootX = rootX + bestShift.sx;
+          finalRootY = rootY + bestShift.sy;
+
+          // Re-normalize saveMove so saveMove[0] is ALWAYS { x: 0, y: 0 }
+          const s0x = rawReflect[0].x;
+          const s0y = rawReflect[0].y;
+          finalRootX += s0x;
+          finalRootY += s0y;
+
+          for (let i = 0; i <= 3; i++) {
+            saveMove[i] = { x: rawReflect[i].x - s0x, y: rawReflect[i].y - s0y };
+          }
         } else {
-          // flipX / flipY and any other matrix: use hex matrix lookup
+          transable = false;
+        }
+      } else {
+        for (let i = 0; i <= 3; i++) {
+          const rx = this.oddballz.rel[i].x;
+          const ry = this.oddballz.rel[i].y;
           const mx = rx + 2, my = ry + 2;
           if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
           saveMove[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
         }
+      }
 
-        const pts = {
-          x: rootX + saveMove[i].x,
-          y: rootY + saveMove[i].y
-        };
-
-        // Allow moving into a cell currently occupied by this piece (self-swap)
-        const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
-        if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
-          transable = false;
-          break;
+      if (transable) {
+        for (let i = 0; i <= 3; i++) {
+          const pts = {
+            x: finalRootX + saveMove[i].x,
+            y: finalRootY + saveMove[i].y
+          };
+          const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
+          if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
+            transable = false;
+            break;
+          }
         }
       }
 
       if (transable) {
         const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
+        const shiftX = finalRootX - rootX;
+        const shiftY = finalRootY - rootY;
+
+        if (this.activeFloatPos) {
+          this.activeFloatPos.x += shiftX;
+          this.activeFloatPos.y += shiftY;
+        }
+        if (this.targetFloatX !== undefined) {
+          this.targetFloatX += shiftX;
+        }
+
         for (let i = 0; i <= 3; i++) {
           this.oddballz.rel[i].x = saveMove[i].x;
           this.oddballz.rel[i].y = saveMove[i].y;
-          this.oddballz.map[i].x = rootX + saveMove[i].x;
-          this.oddballz.map[i].y = rootY + saveMove[i].y;
+          this.oddballz.map[i].x = finalRootX + saveMove[i].x;
+          this.oddballz.map[i].y = finalRootY + saveMove[i].y;
           if (this.targetRel) {
             this.targetRel[i].x = saveMove[i].x;
             this.targetRel[i].y = saveMove[i].y;
@@ -502,8 +603,8 @@
       const curY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
 
       for (let i = 0; i <= 3; i++) {
-        const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
-        const relY = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+        const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+        const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
         const pts = { x: curX + relX, y: curY + relY };
         moveInDirection(pts, dir);
         if (this.checkInMap(pts) && this.ballMap[pts.x][pts.y].bzMap === 0) {
@@ -535,9 +636,20 @@
     }
 
     getGhostPositions() {
-      const ghostMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
-      let canMove = true;
+      const curFloatY = this.activeFloatPos ? this.activeFloatPos.y : (this.oddballz.map[0] ? this.oddballz.map[0].y : 0);
+      const startRootY = Math.round(curFloatY);
+      const isDownRight = this.direction === 5;
+      const targetX = this.targetFloatX !== undefined ? this.targetFloatX : (this.oddballz.map[0] ? this.oddballz.map[0].x : 0);
+      const startRootX = isDownRight ? Math.round(targetX + (startRootY - curFloatY)) : Math.round(targetX);
 
+      const ghostMap = [];
+      for (let i = 0; i <= 3; i++) {
+        const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+        const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
+        ghostMap[i] = { x: startRootX + relX, y: startRootY + relY };
+      }
+
+      let canMove = true;
       while (canMove) {
         const nextMap = [];
         for (let i = 0; i <= 3; i++) {
@@ -599,70 +711,62 @@
 
     checkGaps() {
       let noneDropped = true;
-      let passNoneDropped = false;
+      let flipGate = true;
 
       if (!this.droppingPathsMap) this.droppingPathsMap = new Map();
 
-      let loopLimit = 20;
-      while (!passNoneDropped && loopLimit > 0) {
-        loopLimit--;
-        passNoneDropped = true;
+      for (let y = 19; y >= 0; y--) {
+        for (let x = 4; x <= 20; x++) {
+          const startPts = { x: x, y: y };
+          const saveColor = this.ballMap[x][y].bzMap;
 
-        for (let y = 0; y <= 19; y++) {
-          for (let x = 4; x <= 20; x++) {
-            const startPts = { x: x, y: y };
-            const saveColor = this.ballMap[x][y].bzMap;
+          if (this.checkInMap(startPts) && saveColor !== 0) {
+            if (!this.supported(startPts)) {
+              noneDropped = false;
+              let current = { x: x, y: y };
+              let maxDrops = 25;
+              const origKey = `${x}_${y}`;
+              const hexPath = [{ x: x, y: y }];
 
-            if (this.checkInMap(startPts) && saveColor !== 0) {
-              if (!this.supported(startPts)) {
-                noneDropped = false;
-                passNoneDropped = false;
-                let current = { x: x, y: y };
-                let maxDrops = 25;
-                const origKey = `${x}_${y}`;
-                const hexPath = [{ x: x, y: y }];
+              while (!this.supported(current) && maxDrops > 0) {
+                maxDrops--;
 
-                while (!this.supported(current) && maxDrops > 0) {
-                  maxDrops--;
+                const p1 = { x: current.x, y: current.y };
+                const p2 = { x: current.x, y: current.y };
+                moveInDirection(p1, 2);
+                moveInDirection(p2, 5);
 
-                  const p1 = { x: current.x, y: current.y };
-                  const p2 = { x: current.x, y: current.y };
-                  moveInDirection(p1, 2);
-                  moveInDirection(p2, 5);
+                const canMove1 = this.checkInMap(p1) && this.ballMap[p1.x][p1.y].bzMap === 0;
+                const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
 
-                  const canMove1 = this.checkInMap(p1) && this.ballMap[p1.x][p1.y].bzMap === 0;
-                  const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
-
-                  if (!canMove1 && !canMove2) {
-                    break;
-                  }
-
-                  let chosenTarget = null;
-                  if (this.flipGate === undefined) this.flipGate = true;
-                  if (this.flipGate) {
-                    chosenTarget = canMove1 ? p1 : p2;
-                  } else {
-                    chosenTarget = canMove2 ? p2 : p1;
-                  }
-                  this.flipGate = !this.flipGate;
-
-                  this.ballMap[current.x][current.y].bzMap = 0;
-                  current = chosenTarget;
-                  this.ballMap[current.x][current.y].bzMap = saveColor;
-                  hexPath.push({ x: current.x, y: current.y });
+                if (!canMove1 && !canMove2) {
+                  break;
                 }
 
-                const targetKey = `${current.x}_${current.y}`;
-                if (targetKey !== origKey) {
-                  let fullPath = hexPath;
-                  if (this.droppingPathsMap.has(origKey)) {
-                    const oldPathInfo = this.droppingPathsMap.get(origKey);
-                    fullPath = oldPathInfo.path.concat(hexPath.slice(1));
-                    this.droppingPathsMap.delete(origKey);
-                    this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
-                  } else {
-                    this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
-                  }
+                let chosenTarget = null;
+                if (flipGate) {
+                  chosenTarget = canMove1 ? p1 : p2;
+                } else {
+                  chosenTarget = canMove2 ? p2 : p1;
+                }
+                flipGate = !flipGate;
+
+                this.ballMap[current.x][current.y].bzMap = 0;
+                current = chosenTarget;
+                this.ballMap[current.x][current.y].bzMap = saveColor;
+                hexPath.push({ x: current.x, y: current.y });
+              }
+
+              const targetKey = `${current.x}_${current.y}`;
+              if (targetKey !== origKey) {
+                let fullPath = hexPath;
+                if (this.droppingPathsMap.has(origKey)) {
+                  const oldPathInfo = this.droppingPathsMap.get(origKey);
+                  fullPath = oldPathInfo.path.concat(hexPath.slice(1));
+                  this.droppingPathsMap.delete(origKey);
+                  this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
+                } else {
+                  this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
                 }
               }
             }
@@ -1212,6 +1316,53 @@
           oscSine.stop(now + dur);
           break;
         }
+        case 'lock': {
+          const osc1 = this.ctx.createOscillator();
+          const osc2 = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc1.type = 'triangle';
+          osc1.frequency.setValueAtTime(440, now);
+          osc1.frequency.exponentialRampToValueAtTime(880, now + 0.05);
+
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(220, now);
+          osc2.frequency.exponentialRampToValueAtTime(440, now + 0.05);
+
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc1.start(now); osc1.stop(now + 0.06);
+          osc2.start(now); osc2.stop(now + 0.06);
+          break;
+        }
+        case 'land': {
+          const osc = this.ctx.createOscillator();
+          const filter = this.ctx.createBiquadFilter();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.exponentialRampToValueAtTime(90, now + 0.07);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(400, now);
+          filter.frequency.exponentialRampToValueAtTime(100, now + 0.07);
+
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.005, now + 0.07);
+
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now); osc.stop(now + 0.07);
+          break;
+        }
         case 'pop': {
           // Multi-Variation Animated Ball Match Sound Engine (4 Randomized Patterns + Micro-detune)
           const color = Math.max(1, Math.min(6, param || 1));
@@ -1502,6 +1653,76 @@
       });
     }
 
+    spawnLockSparks(worldPos, colorIndex = 1, count = 16) {
+      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = worldPos.x;
+        positions[i * 3 + 1] = worldPos.y;
+        positions[i * 3 + 2] = worldPos.z + 0.1;
+
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+        const speed = 1.8 + Math.random() * 2.2;
+        velocities.push(
+          Math.cos(angle) * speed,
+          Math.sin(angle) * speed,
+          1.2 + Math.random() * 1.5
+        );
+      }
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: color,
+        size: 0.22,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        opacity: 1.0,
+        depthWrite: false
+      });
+
+      const pointCloud = new THREE.Points(geometry, material);
+      this.scene.add(pointCloud);
+      this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 3.2 });
+    }
+
+    spawnLandDust(worldPos, count = 10) {
+      const color = new THREE.Color(0xffffff);
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = worldPos.x;
+        positions[i * 3 + 1] = worldPos.y;
+        positions[i * 3 + 2] = worldPos.z;
+
+        const angle = (i / count) * Math.PI * 2;
+        const speed = 0.8 + Math.random() * 1.2;
+        velocities.push(
+          Math.cos(angle) * speed,
+          Math.sin(angle) * speed,
+          0.5 + Math.random() * 0.8
+        );
+      }
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: color,
+        size: 0.18,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        opacity: 0.7,
+        depthWrite: false
+      });
+
+      const pointCloud = new THREE.Points(geometry, material);
+      this.scene.add(pointCloud);
+      this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 3.5 });
+    }
+
     update(dt) {
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const p = this.particles[i];
@@ -1546,7 +1767,8 @@
 
       const width = this.container.clientWidth || window.innerWidth;
       const height = this.container.clientHeight || window.innerHeight;
-      this.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
+      const aspect = width / height;
+      this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
 
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       this.renderer.setSize(width, height);
@@ -1557,7 +1779,7 @@
       this.renderer.toneMappingExposure = 1.1;
 
       this.container.appendChild(this.renderer.domElement);
-      this.updateCameraProjection();
+      this.updateCameraFraming();
 
       this.ballMaterials = [];
       this.ghostMaterials = [];
@@ -2045,7 +2267,6 @@
 
       const lerpSpeed = Math.min(1.0, dt * 24.0);
 
-      // Smooth Lerp Static Stacked Balls & Animate Path Drops
       for (const mesh of this.staticBallMeshes.values()) {
         mesh.scale.set(1.0, 1.0, 1.0);
 
@@ -2086,33 +2307,31 @@
       this.renderer.render(this.scene, this.camera);
     }
 
-    updateCameraProjection() {
+    updateCameraFraming() {
       const width = this.container.clientWidth || window.innerWidth;
       const height = this.container.clientHeight || window.innerHeight;
       const aspect = width / height;
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // iPhone & Android portrait: centered on true board world-X center (~-0.8)
-        // Board spans worldX -8.25 to +6.75, center = -0.75. Pull back z slightly vs before.
-        this.camera.fov = Math.min(80, 43 / (aspect * 1.05));
+        // iPhone & Android portrait mobile camera framing: Ergonomic scaled view showing full board & all tips
+        this.camera.fov = Math.min(68, 42 / (aspect * 1.15));
         const distFactor = (1.0 - aspect);
-        this.camera.position.set(-0.8, -15.5 - distFactor * 1.5, 17.8 + distFactor * 2.0);
-        this.camera.lookAt(-0.8, 0.2, 0);
+        this.camera.position.set(0.4, -16.5 - distFactor * 2.0, 18.0 + distFactor * 2.5);
+        this.camera.lookAt(0.4, 0.4, 0);
       } else {
         // Desktop / landscape view framing
         this.camera.fov = 45;
-        this.camera.position.set(0, -17.5, 21.0);
-        this.camera.lookAt(0, 0.8, 0);
+        this.camera.position.set(0.4, -17.5, 21.0);
+        this.camera.lookAt(0.4, 0.8, 0);
       }
+
       this.camera.updateProjectionMatrix();
+      this.renderer.setSize(width, height);
     }
 
     onWindowResize() {
-      const width = this.container.clientWidth || window.innerWidth;
-      const height = this.container.clientHeight || window.innerHeight;
-      this.renderer.setSize(width, height);
-      this.updateCameraProjection();
+      this.updateCameraFraming();
     }
   }
 
@@ -2190,9 +2409,9 @@
           case 'ArrowRight': case 'KeyG':
             this.engine.moveOBall(4); e.preventDefault(); break;
           case 'ArrowUp': case 'KeyW':
-            this.engine.transform(this.engine.rotCW); e.preventDefault(); break;
-          case 'ArrowDown': case 'KeyV': case 'KeyS':
             this.engine.transform(this.engine.rotCCW); e.preventDefault(); break;
+          case 'ArrowDown': case 'KeyV': case 'KeyS':
+            this.engine.transform(this.engine.rotCW); e.preventDefault(); break;
           case 'KeyX': case 'Home':
             this.engine.transform(this.engine.flipX); e.preventDefault(); break;
           case 'KeyY': case 'End':
@@ -2230,6 +2449,16 @@
         if (btn) btn.addEventListener('click', () => this.closeHighScoresModal());
       });
 
+      ['btnAbout', 'btnStartCredits'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.showAboutModal());
+      });
+
+      ['btnCloseAbout', 'btnAboutClose'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.closeAboutModal());
+      });
+
       document.getElementById('toggleSound').addEventListener('change', (e) => {
         this.audio.enabled = e.target.checked;
         if (this.audio.enabled && this.isPlaying && !this.isPaused) {
@@ -2241,9 +2470,13 @@
 
       const tabColor = document.getElementById('tabColorMatch');
       const tabRow = document.getElementById('tabRowBuild');
+      const cardColor = document.getElementById('modeCardColorMatch');
+      const cardRow = document.getElementById('modeCardRowBuild');
 
-      tabColor.addEventListener('click', () => this.switchMode(true));
-      tabRow.addEventListener('click', () => this.switchMode(false));
+      if (tabColor) tabColor.addEventListener('click', () => this.switchMode(true));
+      if (tabRow) tabRow.addEventListener('click', () => this.switchMode(false));
+      if (cardColor) cardColor.addEventListener('click', () => this.switchMode(true));
+      if (cardRow) cardRow.addEventListener('click', () => this.switchMode(false));
     }
 
     initTouchControls() {
@@ -2273,9 +2506,8 @@
       bindTouch('btnTouchRight', () => this.engine.moveOBall(4));
       bindTouch('btnTouchRotCW', () => this.engine.transform(this.engine.rotCW));
       bindTouch('btnTouchRotCCW', () => this.engine.transform(this.engine.rotCCW));
-      bindTouch('btnTouchFlipY', () => this.engine.transform(this.engine.flipY));
-      bindTouch('btnTouchFlipX', () => this.engine.transform(this.engine.flipX));
       bindTouch('btnTouchFlip', () => this.engine.transform(this.engine.flipX));
+      bindTouch('btnTouchFlipY', () => this.engine.transform(this.engine.flipY));
       bindTouch('btnTouchF', () => this.engine.rotColors());
       bindTouch('btnTouchSpace', () => this.engine.zip());
 
@@ -2293,17 +2525,57 @@
       });
     }
 
-    switchMode(isColorMatch) {
+    setModeTabsDisabled(disabled) {
       const tabColor = document.getElementById('tabColorMatch');
       const tabRow = document.getElementById('tabRowBuild');
+      if (tabColor) {
+        tabColor.disabled = disabled;
+        if (disabled) tabColor.classList.add('disabled');
+        else tabColor.classList.remove('disabled');
+      }
+      if (tabRow) {
+        tabRow.disabled = disabled;
+        if (disabled) tabRow.classList.add('disabled');
+        else tabRow.classList.remove('disabled');
+      }
+    }
+
+    switchMode(isColorMatch) {
+      if (this.isPlaying) return;
+
+      const tabColor = document.getElementById('tabColorMatch');
+      const tabRow = document.getElementById('tabRowBuild');
+      const cardColor = document.getElementById('modeCardColorMatch');
+      const cardRow = document.getElementById('modeCardRowBuild');
+
       this.engine.matcher = isColorMatch;
 
       if (isColorMatch) {
-        tabColor.classList.add('active');
-        tabRow.classList.remove('active');
+        if (tabColor) tabColor.classList.add('active');
+        if (tabRow) tabRow.classList.remove('active');
+        if (cardColor) {
+          cardColor.classList.add('active');
+          const badge = cardColor.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = '✓ ACTIVE';
+        }
+        if (cardRow) {
+          cardRow.classList.remove('active');
+          const badge = cardRow.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = 'SELECT';
+        }
       } else {
-        tabRow.classList.add('active');
-        tabColor.classList.remove('active');
+        if (tabRow) tabRow.classList.add('active');
+        if (tabColor) tabColor.classList.remove('active');
+        if (cardRow) {
+          cardRow.classList.add('active');
+          const badge = cardRow.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = '✓ ACTIVE';
+        }
+        if (cardColor) {
+          cardColor.classList.remove('active');
+          const badge = cardColor.querySelector('.mode-select-badge');
+          if (badge) badge.textContent = 'SELECT';
+        }
       }
 
       if (!this.isPlaying) {
@@ -2323,6 +2595,8 @@
       this.moveTime = 0;
       this.accumulatedTime = 0;
       this.lastTime = performance.now();
+
+      this.setModeTabsDisabled(true);
 
       document.getElementById('overlayStart').classList.add('hidden');
       document.getElementById('overlayGameOver').classList.add('hidden');
@@ -2382,6 +2656,8 @@
       this.engine.endGame = true;
       this.audio.stopBGM();
 
+      this.setModeTabsDisabled(false);
+
       document.getElementById('overlayPause').classList.add('hidden');
       document.getElementById('overlayGameOver').classList.add('hidden');
       document.getElementById('dialogConfirmEnd').classList.add('hidden');
@@ -2421,6 +2697,7 @@
 
     handleGameOver() {
       this.isPlaying = false;
+      this.setModeTabsDisabled(false);
       this.updateHighScores(this.engine.score, this.engine.level, this.engine.skill);
       document.getElementById('finalScore').textContent = this.engine.score;
       document.getElementById('overlayGameOver').classList.remove('hidden');
@@ -2485,6 +2762,28 @@
 
     closeHighScoresModal() {
       const modal = document.getElementById('gameDialogView');
+      if (modal) modal.classList.add('hidden');
+
+      if (this.wasPausedByModal) {
+        this.wasPausedByModal = false;
+        if (this.isPlaying && this.isPaused) {
+          this.isPaused = false;
+          this.lastTime = performance.now();
+        }
+      }
+    }
+
+    showAboutModal() {
+      if (this.isPlaying && !this.isPaused) {
+        this.wasPausedByModal = true;
+        this.isPaused = true;
+      }
+      const modal = document.getElementById('gameDialogAbout');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    closeAboutModal() {
+      const modal = document.getElementById('gameDialogAbout');
       if (modal) modal.classList.add('hidden');
 
       if (this.wasPausedByModal) {

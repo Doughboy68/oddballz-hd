@@ -316,13 +316,12 @@ export class OddUnitEngine {
     const nextRowY = Math.floor(nextFloatY);
     let landingRowY = -1; // -1 = no collision this frame
 
-    const startRootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
-    const startRootY = Math.round(curFloatY);
-
     outerLoop:
     for (let gy = curRowY + 1; gy <= nextRowY + 1; gy++) {
-      const dy = gy - startRootY;
-      const rootXAtRow = isDownRight ? (startRootX + dy) : startRootX;
+      // For direction 5, X advances proportionally with Y from the float position
+      const rootXAtRow = isDownRight
+        ? Math.round(this.targetFloatX + (gy - curFloatY))
+        : Math.round(this.targetFloatX);
 
       for (let i = 0; i <= 3; i++) {
         const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
@@ -330,15 +329,16 @@ export class OddUnitEngine {
         const testX = rootXAtRow + relX;
         const testY = gy + relY;
         if (!this.checkInMap({ x: testX, y: testY }) || this.ballMap[testX][testY].bzMap !== 0) {
-          landingRowY = gy - 1;
+          landingRowY = gy - 1; // land on the row above the blocker
           break outerLoop;
         }
       }
     }
 
     if (landingRowY !== -1) {
-      const dy = landingRowY - startRootY;
-      const targetX = isDownRight ? (startRootX + dy) : startRootX;
+      const targetX = isDownRight
+        ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
+        : Math.round(this.targetFloatX);
       const targetY = landingRowY;
 
       this.activeFloatPos.x = targetX;
@@ -399,13 +399,6 @@ export class OddUnitEngine {
     return false;
   }
 
-  // ============================================================
-  // ORIGINAL ROTATE METHOD — BEGIN
-  // Locked: commit a280453 | transform() — canonical piece
-  // rotation/flip logic. rotCW: (rx-ry, rx), rotCCW: (ry, ry-rx).
-  // flipX/flipY use hex matrix lookup. Do NOT modify without
-  // creating a new named variant alongside this reference copy.
-  // ============================================================
   transform(tMatrix) {
     const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
     const rootY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
@@ -413,42 +406,133 @@ export class OddUnitEngine {
 
     let transable = true;
     const saveMove = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
+    let finalRootX = rootX;
+    let finalRootY = rootY;
 
-    for (let i = 0; i <= 3; i++) {
-      const rx = this.oddballz.rel[i].x;
-      const ry = this.oddballz.rel[i].y;
-
-      if (tMatrix === this.rotCW) {
+    if (tMatrix === this.rotCW) {
+      for (let i = 0; i <= 3; i++) {
+        const rx = this.oddballz.rel[i].x;
+        const ry = this.oddballz.rel[i].y;
         saveMove[i] = { x: rx - ry, y: rx };
-      } else if (tMatrix === this.rotCCW) {
+      }
+    } else if (tMatrix === this.rotCCW) {
+      for (let i = 0; i <= 3; i++) {
+        const rx = this.oddballz.rel[i].x;
+        const ry = this.oddballz.rel[i].y;
         saveMove[i] = { x: ry, y: ry - rx };
+      }
+    } else if (tMatrix === this.flipX || tMatrix === this.flipY) {
+      const rawReflect = [];
+      for (let i = 0; i <= 3; i++) {
+        const rx = this.oddballz.rel[i].x;
+        const ry = this.oddballz.rel[i].y;
+        const mx = rx + 2, my = ry + 2;
+        if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
+        rawReflect[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
+      }
+      if (!transable) return false;
+
+      const candidateShifts = [
+        { sx: 0, sy: 0 },
+        { sx: -1, sy: 0 },
+        { sx: 1, sy: 0 },
+        { sx: 0, sy: -1 },
+        { sx: 0, sy: 1 }
+      ];
+
+      let maxOverlap = -1;
+      let minDisp = Infinity;
+      let bestShift = null;
+
+      for (const { sx, sy } of candidateShifts) {
+        const testRootX = rootX + sx;
+        const testRootY = rootY + sy;
+        let valid = true;
+
+        for (let i = 0; i <= 3; i++) {
+          const px = testRootX + rawReflect[i].x;
+          const py = testRootY + rawReflect[i].y;
+          const isSelfCell = origMap.some(op => op.x === px && op.y === py);
+          if (!this.checkInMap({ x: px, y: py }) || (!isSelfCell && this.ballMap[px][py].bzMap !== 0)) {
+            valid = false;
+            break;
+          }
+        }
+        if (!valid) continue;
+
+        let overlap = 0;
+        for (let i = 0; i <= 3; i++) {
+          const px = testRootX + rawReflect[i].x;
+          const py = testRootY + rawReflect[i].y;
+          if (origMap.some(op => op.x === px && op.y === py)) overlap++;
+        }
+        const disp = sx * sx + sy * sy;
+
+        if (overlap > maxOverlap || (overlap === maxOverlap && disp < minDisp)) {
+          maxOverlap = overlap;
+          minDisp = disp;
+          bestShift = { sx, sy };
+        }
+      }
+
+      if (bestShift) {
+        finalRootX = rootX + bestShift.sx;
+        finalRootY = rootY + bestShift.sy;
+
+        // Re-normalize saveMove so saveMove[0] is ALWAYS { x: 0, y: 0 }
+        const s0x = rawReflect[0].x;
+        const s0y = rawReflect[0].y;
+        finalRootX += s0x;
+        finalRootY += s0y;
+
+        for (let i = 0; i <= 3; i++) {
+          saveMove[i] = { x: rawReflect[i].x - s0x, y: rawReflect[i].y - s0y };
+        }
       } else {
-        // flipX / flipY and any other matrix: use hex matrix lookup
+        transable = false;
+      }
+    } else {
+      for (let i = 0; i <= 3; i++) {
+        const rx = this.oddballz.rel[i].x;
+        const ry = this.oddballz.rel[i].y;
         const mx = rx + 2, my = ry + 2;
         if (mx < 0 || mx > 4 || my < 0 || my > 4) { transable = false; break; }
         saveMove[i] = { x: tMatrix[my][mx].x, y: tMatrix[my][mx].y };
       }
+    }
 
-      const pts = {
-        x: rootX + saveMove[i].x,
-        y: rootY + saveMove[i].y
-      };
-
-      // Allow moving into a cell currently occupied by this piece (self-swap)
-      const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
-      if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
-        transable = false;
-        break;
+    if (transable) {
+      for (let i = 0; i <= 3; i++) {
+        const pts = {
+          x: finalRootX + saveMove[i].x,
+          y: finalRootY + saveMove[i].y
+        };
+        const isSelfCell = origMap.some(op => op.x === pts.x && op.y === pts.y);
+        if (!this.checkInMap(pts) || (!isSelfCell && this.ballMap[pts.x][pts.y].bzMap !== 0)) {
+          transable = false;
+          break;
+        }
       }
     }
 
     if (transable) {
       const origActiveRel = this.activeRel ? this.activeRel.map(r => ({ x: r.x, y: r.y })) : null;
+      const shiftX = finalRootX - rootX;
+      const shiftY = finalRootY - rootY;
+
+      if (this.activeFloatPos) {
+        this.activeFloatPos.x += shiftX;
+        this.activeFloatPos.y += shiftY;
+      }
+      if (this.targetFloatX !== undefined) {
+        this.targetFloatX += shiftX;
+      }
+
       for (let i = 0; i <= 3; i++) {
         this.oddballz.rel[i].x = saveMove[i].x;
         this.oddballz.rel[i].y = saveMove[i].y;
-        this.oddballz.map[i].x = rootX + saveMove[i].x;
-        this.oddballz.map[i].y = rootY + saveMove[i].y;
+        this.oddballz.map[i].x = finalRootX + saveMove[i].x;
+        this.oddballz.map[i].y = finalRootY + saveMove[i].y;
         if (this.targetRel) {
           this.targetRel[i].x = saveMove[i].x;
           this.targetRel[i].y = saveMove[i].y;
@@ -461,142 +545,6 @@ export class OddUnitEngine {
     }
     return transable;
   }
-  // ORIGINAL ROTATE METHOD — END
-  // ============================================================
-
-  // ============================================================
-  // CENTERED ROTATE METHOD
-  // Rotates / flips the piece around its geometric centroid so
-  // the visual pivot stays at the center of the 4-ball group.
-  //
-  // Hex-lattice formulas (oblique basis at 60°, verified exhaustively):
-  //   rotCW  : newDx = dx - dy,  newDy = dx
-  //   rotCCW : newDx = dy,       newDy = dy - dx
-  //   flipX  : newDx = -dx + dy, newDy = dy
-  //   flipY  : newDx = dx - dy,  newDy = -dy
-  //
-  // flipX∘flipX = identity ✓   flipY∘flipY = identity ✓
-  // rotCW∘rotCCW = identity ✓
-  //
-  // Wall-kick: tries 7 offsets before silently failing.
-  // ============================================================
-  transformCentered(type) {
-    if (!this.activeFloatPos || !this.oddballz) return false;
-
-    // Committed (logical) root and relative positions
-    const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : this.activeFloatPos.x);
-    const rootY = Math.round(this.activeFloatPos.y);
-
-    const curPos = [];
-    for (let i = 0; i <= 3; i++) {
-      const rx = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
-      const ry = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
-      curPos[i] = { x: rootX + rx, y: rootY + ry };
-    }
-
-    // Geometric centroid (may be fractional, e.g. 7.5 for a 4-ball line)
-    const centX = (curPos[0].x + curPos[1].x + curPos[2].x + curPos[3].x) / 4;
-    const centY = (curPos[0].y + curPos[1].y + curPos[2].y + curPos[3].y) / 4;
-
-    // Apply rotation/flip formula around centroid
-    const newPos = [];
-    for (let i = 0; i <= 3; i++) {
-      const dx = curPos[i].x - centX;
-      const dy = curPos[i].y - centY;
-      let newDx, newDy;
-
-      if      (type === 'rotCW')  { newDx = dx - dy;  newDy = dx;  }
-      else if (type === 'rotCCW') { newDx = dy;        newDy = dy - dx; }
-      else if (type === 'flipX')  { newDx = -dx + dy;  newDy = dy;  }
-      else if (type === 'flipY')  { newDx = dx - dy;   newDy = -dy; }
-      else return false;
-
-      newPos[i] = {
-        x: Math.round(centX + newDx),
-        y: Math.round(centY + newDy)
-      };
-    }
-
-    // Guard: rounding may collapse two balls onto the same cell for degenerate shapes
-    const seen = new Set();
-    for (let i = 0; i <= 3; i++) {
-      const key = `${newPos[i].x}_${newPos[i].y}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-    }
-
-    // Wall-kick table: try no-kick first, then nudge in 6 hex directions
-    const kicks = [
-      { dx:  0, dy:  0 },
-      { dx: -1, dy:  0 }, { dx:  1, dy:  0 },
-      { dx:  0, dy: -1 }, { dx:  0, dy:  1 },
-      { dx: -1, dy: -1 }, { dx:  1, dy:  1 },
-    ];
-
-    const origMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
-
-    // Snapshot current visual positions (activeFloatPos + activeRel) before any changes
-    const oldActiveX = this.activeFloatPos.x;
-    const oldActiveY = this.activeFloatPos.y;
-    const savedActiveRel = this.activeRel
-      ? this.activeRel.map(r => ({ x: r.x, y: r.y }))
-      : this.oddballz.rel.map(r => ({ x: r.x, y: r.y }));
-
-    for (const kick of kicks) {
-      const kicked = newPos.map(p => ({ x: p.x + kick.dx, y: p.y + kick.dy }));
-
-      let valid = true;
-      for (let i = 0; i <= 3; i++) {
-        const isSelfCell = origMap.some(op => op.x === kicked[i].x && op.y === kicked[i].y);
-        if (!this.checkInMap(kicked[i]) || (!isSelfCell && this.ballMap[kicked[i].x][kicked[i].y].bzMap !== 0)) {
-          valid = false;
-          break;
-        }
-      }
-
-      if (valid) {
-        // New root = kicked[0]
-        const newRootX = kicked[0].x;
-        const newRootY = kicked[0].y;
-
-        for (let i = 0; i <= 3; i++) {
-          const newRx = kicked[i].x - newRootX;
-          const newRy = kicked[i].y - newRootY;
-
-          // Commit logical state
-          this.oddballz.rel[i].x = newRx;
-          this.oddballz.rel[i].y = newRy;
-          this.oddballz.map[i].x = kicked[i].x;
-          this.oddballz.map[i].y = kicked[i].y;
-
-          // Commit lerp targets
-          if (this.targetRel) {
-            this.targetRel[i].x = newRx;
-            this.targetRel[i].y = newRy;
-          }
-
-          // Re-express current visual position relative to the NEW root so the
-          // lerp animates each ball from its old screen position to its new target.
-          // Visual of ball i = activeFloatPos + activeRel[i]  (before the change)
-          // After: activeFloatPos = newRoot, activeRel[i] = oldVis[i] − newRoot
-          if (this.activeRel) {
-            this.activeRel[i].x = (oldActiveX + savedActiveRel[i].x) - newRootX;
-            this.activeRel[i].y = (oldActiveY + savedActiveRel[i].y) - newRootY;
-          }
-        }
-
-        // Snap root to new ball-0 position (gravity continues from here)
-        this.activeFloatPos.x = newRootX;
-        this.activeFloatPos.y = newRootY;
-        this.targetFloatX     = newRootX;
-
-        return true;
-      }
-    }
-
-    return false; // All kicks blocked
-  }
-  // ============================================================
 
   moveOBall(dir) {
     let moveable = true;
@@ -606,8 +554,8 @@ export class OddUnitEngine {
     const curY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
 
     for (let i = 0; i <= 3; i++) {
-      const relX = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
-      const relY = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+      const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+      const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
       const pts = { x: curX + relX, y: curY + relY };
       moveInDirection(pts, dir);
       if (this.checkInMap(pts) && this.ballMap[pts.x][pts.y].bzMap === 0) {
@@ -625,10 +573,10 @@ export class OddUnitEngine {
         this.targetFloatX += 1.0;
       } else if (dir === 0) {
         this.targetFloatX -= 1.0;
-        if (this.activeFloatPos) this.activeFloatPos.y -= 1.0;
+        this.activeFloatPos.y -= 1.0;
       } else if (dir === 3) {
         this.targetFloatX += 1.0;
-        if (this.activeFloatPos) this.activeFloatPos.y -= 1.0;
+        this.activeFloatPos.y -= 1.0;
       }
       for (let i = 0; i <= 3; i++) {
         this.oddballz.map[i].x = saveMove[i].x;
@@ -638,15 +586,35 @@ export class OddUnitEngine {
     return moveable;
   }
 
-  getGhostPositions() {
-    const ghostMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
-    let canMove = true;
+  zip() {
+    this.isZipping = true;
+    if (this.onPlaySound) this.onPlaySound('zip');
+  }
 
+  /**
+   * Calculates the projected landing coordinates of the active piece (ghost piece).
+   */
+  getGhostPositions() {
+    const curFloatY = this.activeFloatPos ? this.activeFloatPos.y : (this.oddballz.map[0] ? this.oddballz.map[0].y : 0);
+    const startRootY = Math.round(curFloatY);
+    const isDownRight = this.direction === 5;
+    const targetX = this.targetFloatX !== undefined ? this.targetFloatX : (this.oddballz.map[0] ? this.oddballz.map[0].x : 0);
+    const startRootX = isDownRight ? Math.round(targetX + (startRootY - curFloatY)) : Math.round(targetX);
+
+    const ghostMap = [];
+    for (let i = 0; i <= 3; i++) {
+      const relX = this.targetRel ? this.targetRel[i].x : this.oddballz.rel[i].x;
+      const relY = this.targetRel ? this.targetRel[i].y : this.oddballz.rel[i].y;
+      ghostMap[i] = { x: startRootX + relX, y: startRootY + relY };
+    }
+
+    let canMove = true;
     while (canMove) {
       const nextMap = [];
       for (let i = 0; i <= 3; i++) {
         const pts = { x: ghostMap[i].x, y: ghostMap[i].y };
         moveInDirection(pts, this.direction);
+        // Allow moving into a cell occupied by the ghost piece itself (those cells are vacated this step)
         const isSelfCell = ghostMap.some(g => g.x === pts.x && g.y === pts.y);
         if (this.checkInMap(pts) && (isSelfCell || this.ballMap[pts.x][pts.y].bzMap === 0)) {
           nextMap[i] = pts;
@@ -709,70 +677,62 @@ export class OddUnitEngine {
 
   checkGaps() {
     let noneDropped = true;
-    let passNoneDropped = false;
+    let flipGate = true;
 
     if (!this.droppingPathsMap) this.droppingPathsMap = new Map();
 
-    let loopLimit = 20;
-    while (!passNoneDropped && loopLimit > 0) {
-      loopLimit--;
-      passNoneDropped = true;
+    for (let y = 19; y >= 0; y--) {
+      for (let x = 4; x <= 20; x++) {
+        const startPts = { x: x, y: y };
+        const saveColor = this.ballMap[x][y].bzMap;
 
-      for (let y = 0; y <= 19; y++) {
-        for (let x = 4; x <= 20; x++) {
-          const startPts = { x: x, y: y };
-          const saveColor = this.ballMap[x][y].bzMap;
+        if (this.checkInMap(startPts) && saveColor !== 0) {
+          if (!this.supported(startPts)) {
+            noneDropped = false;
+            let current = { x: x, y: y };
+            let maxDrops = 25;
+            const origKey = `${x}_${y}`;
+            const hexPath = [{ x: x, y: y }];
 
-          if (this.checkInMap(startPts) && saveColor !== 0) {
-            if (!this.supported(startPts)) {
-              noneDropped = false;
-              passNoneDropped = false;
-              let current = { x: x, y: y };
-              let maxDrops = 25;
-              const origKey = `${x}_${y}`;
-              const hexPath = [{ x: x, y: y }];
+            while (!this.supported(current) && maxDrops > 0) {
+              maxDrops--;
 
-              while (!this.supported(current) && maxDrops > 0) {
-                maxDrops--;
+              const p1 = { x: current.x, y: current.y };
+              const p2 = { x: current.x, y: current.y };
+              moveInDirection(p1, 2);
+              moveInDirection(p2, 5);
 
-                const p1 = { x: current.x, y: current.y };
-                const p2 = { x: current.x, y: current.y };
-                moveInDirection(p1, 2);
-                moveInDirection(p2, 5);
+              const canMove1 = this.checkInMap(p1) && this.ballMap[p1.x][p1.y].bzMap === 0;
+              const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
 
-                const canMove1 = this.checkInMap(p1) && this.ballMap[p1.x][p1.y].bzMap === 0;
-                const canMove2 = this.checkInMap(p2) && this.ballMap[p2.x][p2.y].bzMap === 0;
-
-                if (!canMove1 && !canMove2) {
-                  break;
-                }
-
-                let chosenTarget = null;
-                if (this.flipGate === undefined) this.flipGate = true;
-                if (this.flipGate) {
-                  chosenTarget = canMove1 ? p1 : p2;
-                } else {
-                  chosenTarget = canMove2 ? p2 : p1;
-                }
-                this.flipGate = !this.flipGate;
-
-                this.ballMap[current.x][current.y].bzMap = 0;
-                current = chosenTarget;
-                this.ballMap[current.x][current.y].bzMap = saveColor;
-                hexPath.push({ x: current.x, y: current.y });
+              if (!canMove1 && !canMove2) {
+                break;
               }
 
-              const targetKey = `${current.x}_${current.y}`;
-              if (targetKey !== origKey) {
-                let fullPath = hexPath;
-                if (this.droppingPathsMap.has(origKey)) {
-                  const oldPathInfo = this.droppingPathsMap.get(origKey);
-                  fullPath = oldPathInfo.path.concat(hexPath.slice(1));
-                  this.droppingPathsMap.delete(origKey);
-                  this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
-                } else {
-                  this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
-                }
+              let chosenTarget = null;
+              if (flipGate) {
+                chosenTarget = canMove1 ? p1 : p2;
+              } else {
+                chosenTarget = canMove2 ? p2 : p1;
+              }
+              flipGate = !flipGate;
+
+              this.ballMap[current.x][current.y].bzMap = 0;
+              current = chosenTarget;
+              this.ballMap[current.x][current.y].bzMap = saveColor;
+              hexPath.push({ x: current.x, y: current.y });
+            }
+
+            const targetKey = `${current.x}_${current.y}`;
+            if (targetKey !== origKey) {
+              let fullPath = hexPath;
+              if (this.droppingPathsMap.has(origKey)) {
+                const oldPathInfo = this.droppingPathsMap.get(origKey);
+                fullPath = oldPathInfo.path.concat(hexPath.slice(1));
+                this.droppingPathsMap.delete(origKey);
+                this.droppingPathsMap.set(targetKey, { sourceKey: oldPathInfo.sourceKey, targetKey, path: fullPath });
+              } else {
+                this.droppingPathsMap.set(targetKey, { sourceKey: origKey, targetKey, path: fullPath });
               }
             }
           }
