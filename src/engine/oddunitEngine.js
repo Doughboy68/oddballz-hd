@@ -399,6 +399,13 @@ export class OddUnitEngine {
     return false;
   }
 
+  // ============================================================
+  // ORIGINAL ROTATE METHOD — BEGIN
+  // Locked: commit a280453 | transform() — canonical piece
+  // rotation/flip logic. rotCW: (rx-ry, rx), rotCCW: (ry, ry-rx).
+  // flipX/flipY use hex matrix lookup. Do NOT modify without
+  // creating a new named variant alongside this reference copy.
+  // ============================================================
   transform(tMatrix) {
     const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : (this.activeFloatPos ? this.activeFloatPos.x : this.oddballz.map[0].x));
     const rootY = Math.round(this.activeFloatPos ? this.activeFloatPos.y : this.oddballz.map[0].y);
@@ -454,6 +461,142 @@ export class OddUnitEngine {
     }
     return transable;
   }
+  // ORIGINAL ROTATE METHOD — END
+  // ============================================================
+
+  // ============================================================
+  // CENTERED ROTATE METHOD
+  // Rotates / flips the piece around its geometric centroid so
+  // the visual pivot stays at the center of the 4-ball group.
+  //
+  // Hex-lattice formulas (oblique basis at 60°, verified exhaustively):
+  //   rotCW  : newDx = dx - dy,  newDy = dx
+  //   rotCCW : newDx = dy,       newDy = dy - dx
+  //   flipX  : newDx = -dx + dy, newDy = dy
+  //   flipY  : newDx = dx - dy,  newDy = -dy
+  //
+  // flipX∘flipX = identity ✓   flipY∘flipY = identity ✓
+  // rotCW∘rotCCW = identity ✓
+  //
+  // Wall-kick: tries 7 offsets before silently failing.
+  // ============================================================
+  transformCentered(type) {
+    if (!this.activeFloatPos || !this.oddballz) return false;
+
+    // Committed (logical) root and relative positions
+    const rootX = Math.round(this.targetFloatX !== undefined ? this.targetFloatX : this.activeFloatPos.x);
+    const rootY = Math.round(this.activeFloatPos.y);
+
+    const curPos = [];
+    for (let i = 0; i <= 3; i++) {
+      const rx = this.targetRel ? Math.round(this.targetRel[i].x) : this.oddballz.rel[i].x;
+      const ry = this.targetRel ? Math.round(this.targetRel[i].y) : this.oddballz.rel[i].y;
+      curPos[i] = { x: rootX + rx, y: rootY + ry };
+    }
+
+    // Geometric centroid (may be fractional, e.g. 7.5 for a 4-ball line)
+    const centX = (curPos[0].x + curPos[1].x + curPos[2].x + curPos[3].x) / 4;
+    const centY = (curPos[0].y + curPos[1].y + curPos[2].y + curPos[3].y) / 4;
+
+    // Apply rotation/flip formula around centroid
+    const newPos = [];
+    for (let i = 0; i <= 3; i++) {
+      const dx = curPos[i].x - centX;
+      const dy = curPos[i].y - centY;
+      let newDx, newDy;
+
+      if      (type === 'rotCW')  { newDx = dx - dy;  newDy = dx;  }
+      else if (type === 'rotCCW') { newDx = dy;        newDy = dy - dx; }
+      else if (type === 'flipX')  { newDx = -dx + dy;  newDy = dy;  }
+      else if (type === 'flipY')  { newDx = dx - dy;   newDy = -dy; }
+      else return false;
+
+      newPos[i] = {
+        x: Math.round(centX + newDx),
+        y: Math.round(centY + newDy)
+      };
+    }
+
+    // Guard: rounding may collapse two balls onto the same cell for degenerate shapes
+    const seen = new Set();
+    for (let i = 0; i <= 3; i++) {
+      const key = `${newPos[i].x}_${newPos[i].y}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
+
+    // Wall-kick table: try no-kick first, then nudge in 6 hex directions
+    const kicks = [
+      { dx:  0, dy:  0 },
+      { dx: -1, dy:  0 }, { dx:  1, dy:  0 },
+      { dx:  0, dy: -1 }, { dx:  0, dy:  1 },
+      { dx: -1, dy: -1 }, { dx:  1, dy:  1 },
+    ];
+
+    const origMap = this.oddballz.map.map(p => ({ x: p.x, y: p.y }));
+
+    // Snapshot current visual positions (activeFloatPos + activeRel) before any changes
+    const oldActiveX = this.activeFloatPos.x;
+    const oldActiveY = this.activeFloatPos.y;
+    const savedActiveRel = this.activeRel
+      ? this.activeRel.map(r => ({ x: r.x, y: r.y }))
+      : this.oddballz.rel.map(r => ({ x: r.x, y: r.y }));
+
+    for (const kick of kicks) {
+      const kicked = newPos.map(p => ({ x: p.x + kick.dx, y: p.y + kick.dy }));
+
+      let valid = true;
+      for (let i = 0; i <= 3; i++) {
+        const isSelfCell = origMap.some(op => op.x === kicked[i].x && op.y === kicked[i].y);
+        if (!this.checkInMap(kicked[i]) || (!isSelfCell && this.ballMap[kicked[i].x][kicked[i].y].bzMap !== 0)) {
+          valid = false;
+          break;
+        }
+      }
+
+      if (valid) {
+        // New root = kicked[0]
+        const newRootX = kicked[0].x;
+        const newRootY = kicked[0].y;
+
+        for (let i = 0; i <= 3; i++) {
+          const newRx = kicked[i].x - newRootX;
+          const newRy = kicked[i].y - newRootY;
+
+          // Commit logical state
+          this.oddballz.rel[i].x = newRx;
+          this.oddballz.rel[i].y = newRy;
+          this.oddballz.map[i].x = kicked[i].x;
+          this.oddballz.map[i].y = kicked[i].y;
+
+          // Commit lerp targets
+          if (this.targetRel) {
+            this.targetRel[i].x = newRx;
+            this.targetRel[i].y = newRy;
+          }
+
+          // Re-express current visual position relative to the NEW root so the
+          // lerp animates each ball from its old screen position to its new target.
+          // Visual of ball i = activeFloatPos + activeRel[i]  (before the change)
+          // After: activeFloatPos = newRoot, activeRel[i] = oldVis[i] − newRoot
+          if (this.activeRel) {
+            this.activeRel[i].x = (oldActiveX + savedActiveRel[i].x) - newRootX;
+            this.activeRel[i].y = (oldActiveY + savedActiveRel[i].y) - newRootY;
+          }
+        }
+
+        // Snap root to new ball-0 position (gravity continues from here)
+        this.activeFloatPos.x = newRootX;
+        this.activeFloatPos.y = newRootY;
+        this.targetFloatX     = newRootX;
+
+        return true;
+      }
+    }
+
+    return false; // All kicks blocked
+  }
+  // ============================================================
 
   moveOBall(dir) {
     let moveable = true;

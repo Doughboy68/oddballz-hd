@@ -2190,9 +2190,9 @@
           case 'ArrowRight': case 'KeyG':
             this.engine.moveOBall(4); e.preventDefault(); break;
           case 'ArrowUp': case 'KeyW':
-            this.engine.transform(this.engine.rotCCW); e.preventDefault(); break;
-          case 'ArrowDown': case 'KeyV': case 'KeyS':
             this.engine.transform(this.engine.rotCW); e.preventDefault(); break;
+          case 'ArrowDown': case 'KeyV': case 'KeyS':
+            this.engine.transform(this.engine.rotCCW); e.preventDefault(); break;
           case 'KeyX': case 'Home':
             this.engine.transform(this.engine.flipX); e.preventDefault(); break;
           case 'KeyY': case 'End':
