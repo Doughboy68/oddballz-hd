@@ -2093,16 +2093,13 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // Mobile portrait mode (iPhone): exact reference size from screenshot with +0.85 X offset to align with yellow guide lines
+        // Mobile portrait mode (iPhone): centered at X=0, pulled back so hex side points fit just inside screen edges
         const zoomFactor = 1.0 / aspect;
         this.camera.fov = Math.min(65, 42 * Math.pow(zoomFactor, 0.65));
-        
-        const camX = 0.85;
         const camY = -18.5 - (zoomFactor - 1.0) * 3.5;
-        const camZ = 23.5 + (zoomFactor - 1.0) * 9.0;
-        
-        this.camera.position.set(camX, camY, camZ);
-        this.camera.lookAt(camX, 0.5, 0);
+        const camZ = 28.5 + (zoomFactor - 1.0) * 9.0;
+        this.camera.position.set(0, camY, camZ);
+        this.camera.lookAt(0, 0.5, 0);
       } else {
         // Desktop / landscape view: kept EXACTLY as it was!
         this.camera.fov = 42;
