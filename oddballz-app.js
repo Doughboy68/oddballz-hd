@@ -2093,17 +2093,14 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // Mobile / phone screen: ~110% zoom with -0.35 X offset to align bottom hexes with touch controls center seam
-        const targetWorldWidth = 15.2;
-        const camX = -0.35;
-        const camY = -11.2;
-        const camZ = 15.0;
-        const distance = Math.sqrt(camY * camY + camZ * camZ);
-
-        const halfFovRad = Math.atan((targetWorldWidth / 2.0) / (distance * aspect));
-        const fovDeg = Math.min(88, (halfFovRad * 2.0 * 180.0) / Math.PI);
-
-        this.camera.fov = fovDeg;
+        // Mobile portrait mode (iPhone): exact reference size from screenshot with +0.85 X offset to align with yellow guide lines
+        const zoomFactor = 1.0 / aspect;
+        this.camera.fov = Math.min(65, 42 * Math.pow(zoomFactor, 0.65));
+        
+        const camX = 0.85;
+        const camY = -18.5 - (zoomFactor - 1.0) * 3.5;
+        const camZ = 23.5 + (zoomFactor - 1.0) * 9.0;
+        
         this.camera.position.set(camX, camY, camZ);
         this.camera.lookAt(camX, 0.5, 0);
       } else {
