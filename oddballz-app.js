@@ -2093,18 +2093,19 @@
       this.camera.aspect = aspect;
 
       if (aspect < 1.0) {
-        // Mobile / phone screen (aspect < 1.0): 120% zoomed-in playfield presentation
-        const targetWorldWidth = 14.0;
-        const camY = -10.5;
-        const camZ = 14.0;
+        // Mobile / phone screen: ~110% zoom with -0.35 X offset to align bottom hexes with touch controls center seam
+        const targetWorldWidth = 15.2;
+        const camX = -0.35;
+        const camY = -11.2;
+        const camZ = 15.0;
         const distance = Math.sqrt(camY * camY + camZ * camZ);
 
         const halfFovRad = Math.atan((targetWorldWidth / 2.0) / (distance * aspect));
         const fovDeg = Math.min(88, (halfFovRad * 2.0 * 180.0) / Math.PI);
 
         this.camera.fov = fovDeg;
-        this.camera.position.set(0, camY, camZ);
-        this.camera.lookAt(0, 0.5, 0);
+        this.camera.position.set(camX, camY, camZ);
+        this.camera.lookAt(camX, 0.5, 0);
       } else {
         // Desktop / landscape view: kept EXACTLY as it was!
         this.camera.fov = 42;
