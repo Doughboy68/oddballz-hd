@@ -56,13 +56,9 @@
         </button>
       </div>
 
-      <!-- Quick Action Toggles -->
+      <!-- Quick Action Toggles & Audio Options -->
       <div class="header-actions">
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggleSound" checked>
-          <span class="slider"></span>
-          <span class="toggle-label">🔊 Audio</span>
-        </label>
+        <button id="btnAudioSettings" class="btn btn-secondary btn-sm" title="Audio Settings & Volume">🔊 Audio Options</button>
         <button id="btnPause" class="btn btn-secondary btn-sm" disabled>Pause (P)</button>
         <button id="btnHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
         <button id="btnAbout" class="btn btn-secondary btn-sm">ℹ️ About & Credits</button>
@@ -223,6 +219,75 @@
         </div>
 
         <button id="btnAboutClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Close</button>
+      </div>
+    </div>
+
+    <!-- Audio Options Settings Modal -->
+    <div id="gameDialogAudio" class="overlay-modal flex-center hidden">
+      <div class="modal-card glass-card text-center" style="max-width: 480px; width: 92%;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; width:100%; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.75rem;">
+          <h2 style="margin:0; font-size:1.4rem;">🔊 AUDIO SETTINGS</h2>
+          <button id="btnCloseAudio" class="btn-close">&times;</button>
+        </div>
+        
+        <div class="audio-settings-body" style="text-align: left; margin: 1.2rem 0; display: flex; flex-direction: column; gap: 1.2rem; width: 100%;">
+          
+          <!-- Master Mute Toggle -->
+          <div class="audio-group-card">
+            <div class="audio-group-header">
+              <span class="audio-group-title">🔊 Master Sound</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggleSoundMaster" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Music Settings Section -->
+          <div class="audio-group-card">
+            <div class="audio-group-header">
+              <div class="audio-group-title-wrap">
+                <span class="audio-icon">🎵</span>
+                <span class="audio-group-title">Background Music</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggleMusic" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="audio-slider-row">
+              <label for="sliderMusicVolume" class="slider-label">Music Volume</label>
+              <div class="slider-control-wrap">
+                <input type="range" id="sliderMusicVolume" class="audio-range-slider" min="0" max="100" value="70">
+                <span id="valMusicVolume" class="volume-badge">70%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sound Effects (SFX) Settings Section -->
+          <div class="audio-group-card">
+            <div class="audio-group-header">
+              <div class="audio-group-title-wrap">
+                <span class="audio-icon">⚡</span>
+                <span class="audio-group-title">Sound Effects (SFX)</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggleSFX" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="audio-slider-row">
+              <label for="sliderSFXVolume" class="slider-label">SFX Volume</label>
+              <div class="slider-control-wrap">
+                <input type="range" id="sliderSFXVolume" class="audio-range-slider" min="0" max="100" value="100">
+                <span id="valSFXVolume" class="volume-badge">100%</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <button id="btnAudioClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Done</button>
       </div>
     </div>
   </div>

@@ -30,6 +30,14 @@ class OddballzApp {
     // High Scores from localStorage
     this.highScores = JSON.parse(localStorage.getItem('oddballz_hd_hiscores') || '[]');
 
+    // Audio Settings from localStorage
+    const savedAudio = JSON.parse(localStorage.getItem('oddballz_hd_audio_settings') || '{}');
+    if (savedAudio.musicVolume !== undefined) this.audio.musicVolume = savedAudio.musicVolume;
+    if (savedAudio.sfxVolume !== undefined) this.audio.sfxVolume = savedAudio.sfxVolume;
+    if (savedAudio.musicEnabled !== undefined) this.audio.musicEnabled = savedAudio.musicEnabled;
+    if (savedAudio.sfxEnabled !== undefined) this.audio.sfxEnabled = savedAudio.sfxEnabled;
+    if (savedAudio.masterEnabled !== undefined) this.audio.enabled = savedAudio.masterEnabled;
+
     this.initHooks();
     this.initEventListeners();
     this.initTouchControls();
@@ -78,9 +86,9 @@ class OddballzApp {
       }
 
       if (code === 'KeyM') {
-        const toggle = document.getElementById('toggleSound');
-        toggle.checked = !toggle.checked;
-        this.audio.enabled = toggle.checked;
+        this.audio.setMasterEnabled(!this.audio.enabled);
+        this.syncAudioUI();
+        this.saveAudioSettings();
         e.preventDefault();
         return;
       }
@@ -169,15 +177,70 @@ class OddballzApp {
       if (btn) btn.addEventListener('click', () => this.closeHighScoresModal());
     });
 
-    // Sound Toggle
-    document.getElementById('toggleSound').addEventListener('change', (e) => {
-      this.audio.enabled = e.target.checked;
-      if (this.audio.enabled && this.isPlaying && !this.isPaused) {
-        this.audio.startBGM();
-      } else {
-        this.audio.stopBGM();
-      }
+    // Audio Options Modal & Controls
+    const btnAudio = document.getElementById('btnAudioSettings');
+    if (btnAudio) btnAudio.addEventListener('click', () => this.showAudioModal());
+
+    ['btnCloseAudio', 'btnAudioClose'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', () => this.closeAudioModal());
     });
+
+    const toggleMaster = document.getElementById('toggleSoundMaster');
+    if (toggleMaster) {
+      toggleMaster.addEventListener('change', (e) => {
+        this.audio.setMasterEnabled(e.target.checked);
+        if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && !this.isPaused) {
+          this.audio.startBGM();
+        } else {
+          this.audio.stopBGM();
+        }
+        this.saveAudioSettings();
+      });
+    }
+
+    const toggleMusic = document.getElementById('toggleMusic');
+    if (toggleMusic) {
+      toggleMusic.addEventListener('change', (e) => {
+        this.audio.setMusicEnabled(e.target.checked);
+        if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && !this.isPaused) {
+          this.audio.startBGM();
+        } else {
+          this.audio.stopBGM();
+        }
+        this.saveAudioSettings();
+      });
+    }
+
+    const toggleSFX = document.getElementById('toggleSFX');
+    if (toggleSFX) {
+      toggleSFX.addEventListener('change', (e) => {
+        this.audio.setSFXEnabled(e.target.checked);
+        this.saveAudioSettings();
+      });
+    }
+
+    const sliderMusic = document.getElementById('sliderMusicVolume');
+    if (sliderMusic) {
+      sliderMusic.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value) / 100;
+        this.audio.setMusicVolume(val);
+        const badge = document.getElementById('valMusicVolume');
+        if (badge) badge.textContent = `${e.target.value}%`;
+        this.saveAudioSettings();
+      });
+    }
+
+    const sliderSFX = document.getElementById('sliderSFXVolume');
+    if (sliderSFX) {
+      sliderSFX.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value) / 100;
+        this.audio.setSFXVolume(val);
+        const badge = document.getElementById('valSFXVolume');
+        if (badge) badge.textContent = `${e.target.value}%`;
+        this.saveAudioSettings();
+      });
+    }
 
     // Mode Selector Tabs & Title Screen Cards
     const tabColor = document.getElementById('tabColorMatch');
@@ -492,6 +555,60 @@ class OddballzApp {
 
   closeHighScoresModal() {
     const modal = document.getElementById('gameDialogView');
+    if (modal) modal.classList.add('hidden');
+
+    if (this.wasPausedByModal) {
+      this.wasPausedByModal = false;
+      if (this.isPlaying && this.isPaused) {
+        this.isPaused = false;
+        this.lastTime = performance.now();
+      }
+    }
+  }
+
+  saveAudioSettings() {
+    const settings = {
+      masterEnabled: this.audio.enabled,
+      musicEnabled: this.audio.musicEnabled,
+      sfxEnabled: this.audio.sfxEnabled,
+      musicVolume: this.audio.musicVolume,
+      sfxVolume: this.audio.sfxVolume
+    };
+    localStorage.setItem('oddballz_hd_audio_settings', JSON.stringify(settings));
+  }
+
+  syncAudioUI() {
+    const toggleMaster = document.getElementById('toggleSoundMaster');
+    const toggleMusic = document.getElementById('toggleMusic');
+    const toggleSFX = document.getElementById('toggleSFX');
+    const sliderMusic = document.getElementById('sliderMusicVolume');
+    const sliderSFX = document.getElementById('sliderSFXVolume');
+    const valMusic = document.getElementById('valMusicVolume');
+    const valSFX = document.getElementById('valSFXVolume');
+
+    if (toggleMaster) toggleMaster.checked = this.audio.enabled;
+    if (toggleMusic) toggleMusic.checked = this.audio.musicEnabled;
+    if (toggleSFX) toggleSFX.checked = this.audio.sfxEnabled;
+
+    if (sliderMusic) sliderMusic.value = Math.round(this.audio.musicVolume * 100);
+    if (sliderSFX) sliderSFX.value = Math.round(this.audio.sfxVolume * 100);
+
+    if (valMusic) valMusic.textContent = `${Math.round(this.audio.musicVolume * 100)}%`;
+    if (valSFX) valSFX.textContent = `${Math.round(this.audio.sfxVolume * 100)}%`;
+  }
+
+  showAudioModal() {
+    if (this.isPlaying && !this.isPaused) {
+      this.wasPausedByModal = true;
+      this.isPaused = true;
+    }
+    this.syncAudioUI();
+    const modal = document.getElementById('gameDialogAudio');
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  closeAudioModal() {
+    const modal = document.getElementById('gameDialogAudio');
     if (modal) modal.classList.add('hidden');
 
     if (this.wasPausedByModal) {

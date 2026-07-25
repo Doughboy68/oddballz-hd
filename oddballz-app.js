@@ -989,6 +989,12 @@
     constructor() {
       this.ctx = null;
       this.enabled = true;
+      this.musicEnabled = true;
+      this.sfxEnabled = true;
+      this.musicVolume = 0.7; // Default 70%
+      this.sfxVolume = 1.0;   // Default 100%
+      this.musicGain = null;
+      this.sfxGain = null;
       this.freq = [25, 27, 28, 30, 32, 33, 35, 37, 39, 40, 42, 44, 45, 47, 49, 51, 52, 54, 56];
       this.bgmPlaying = false;
       this.bgmTimer = null;
@@ -1059,20 +1065,72 @@
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) this.ctx = new AudioCtx();
       }
+      if (this.ctx && !this.musicGain) {
+        this.musicGain = this.ctx.createGain();
+        this.sfxGain = this.ctx.createGain();
+        this.musicGain.connect(this.ctx.destination);
+        this.sfxGain.connect(this.ctx.destination);
+        this.updateGains();
+      }
       if (this.ctx && this.ctx.state === 'suspended') {
         this.ctx.resume();
       }
     }
 
+    updateGains() {
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const effectiveMusic = (this.enabled && this.musicEnabled) ? this.musicVolume : 0;
+      const effectiveSFX = (this.enabled && this.sfxEnabled) ? this.sfxVolume : 0;
+
+      if (this.musicGain) {
+        this.musicGain.gain.setValueAtTime(effectiveMusic, now);
+      }
+      if (this.sfxGain) {
+        this.sfxGain.gain.setValueAtTime(effectiveSFX, now);
+      }
+    }
+
+    setMusicVolume(vol) {
+      this.musicVolume = Math.max(0, Math.min(1, vol));
+      this.updateGains();
+    }
+
+    setSFXVolume(vol) {
+      this.sfxVolume = Math.max(0, Math.min(1, vol));
+      this.updateGains();
+    }
+
+    setMusicEnabled(enabled) {
+      this.musicEnabled = !!enabled;
+      this.updateGains();
+      if (!this.musicEnabled) {
+        this.stopBGM();
+      }
+    }
+
+    setSFXEnabled(enabled) {
+      this.sfxEnabled = !!enabled;
+      this.updateGains();
+    }
+
+    setMasterEnabled(enabled) {
+      this.enabled = !!enabled;
+      this.updateGains();
+      if (!this.enabled) {
+        this.stopBGM();
+      }
+    }
+
     startBGM() {
-      if (this.bgmPlaying || !this.enabled) return;
+      if (this.bgmPlaying || !this.enabled || !this.musicEnabled) return;
       this.init();
       if (!this.ctx) return;
       this.bgmPlaying = true;
       this.bgmStep = 0;
       const stepDuration = 60 / this.bgmTempo / 4;
       this.bgmTimer = setInterval(() => {
-        if (!this.bgmPlaying || !this.enabled || !this.ctx) return;
+        if (!this.bgmPlaying || !this.enabled || !this.musicEnabled || !this.ctx) return;
         this.playAmigaStep(this.bgmStep);
         this.bgmStep = (this.bgmStep + 1) % 128;
       }, stepDuration * 1000);
@@ -1091,6 +1149,7 @@
       const now = this.ctx.currentTime;
       const stepInBar = step % 16;
       const barIndex = Math.floor(step / 16);
+      const out = this.musicGain || this.ctx.destination;
 
       // 1. COSMIC AMBIENT PULSE & SOFT SPACE SHIMMER (No loud rhythmic drums!)
       if (stepInBar === 0 && (barIndex % 2 === 0)) {
@@ -1102,7 +1161,7 @@
         pulseOsc.frequency.exponentialRampToValueAtTime(22, now + 0.35);
         pulseGain.gain.setValueAtTime(0.20, now);
         pulseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-        pulseOsc.connect(pulseGain); pulseGain.connect(this.ctx.destination);
+        pulseOsc.connect(pulseGain); pulseGain.connect(out);
         pulseOsc.start(now); pulseOsc.stop(now + 0.35);
 
         // Soft Solar Cymbal Shimmer
@@ -1117,7 +1176,7 @@
         const crashGain = this.ctx.createGain();
         crashGain.gain.setValueAtTime(0.04, now);
         crashGain.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
-        crash.connect(filter); filter.connect(crashGain); crashGain.connect(this.ctx.destination);
+        crash.connect(filter); filter.connect(crashGain); crashGain.connect(out);
         crash.start(now); crash.stop(now + 0.50);
       }
 
@@ -1143,7 +1202,7 @@
         osc.connect(filter);
         subOsc.connect(filter);
         filter.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(out);
 
         osc.start(now); osc.stop(now + 0.30);
         subOsc.start(now); subOsc.stop(now + 0.30);
@@ -1171,7 +1230,7 @@
             gain.gain.exponentialRampToValueAtTime(0.001, now + 3.00); // 3-second long ambient swell
 
             osc.connect(dist); dist.connect(cabFilter); cabFilter.connect(gain);
-            gain.connect(this.ctx.destination);
+            gain.connect(out);
             osc.start(now); osc.stop(now + 3.00);
           }
         }
@@ -1216,7 +1275,7 @@
         distortion.connect(ampFilter);
         ampFilter.connect(leadGain);
 
-        leadGain.connect(this.ctx.destination);
+        leadGain.connect(out);
         leadGain.connect(delayNode);
         delayNode.connect(delayFeedback);
         oscRoot.start(now); oscRoot.stop(now + dur);
@@ -1226,6 +1285,7 @@
 
     playChimeTone(noteFreq, startTime, dur, vol = 0.05) {
       if (!this.ctx) return;
+      const out = this.sfxGain || this.ctx.destination;
       const oscSine = this.ctx.createOscillator();
       const oscTri  = this.ctx.createOscillator();
       const lfo     = this.ctx.createOscillator();
@@ -1257,7 +1317,7 @@
       oscSine.connect(filter);
       oscTri.connect(filter);
       filter.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(out);
 
       lfo.start(startTime); lfo.stop(startTime + dur);
       oscSine.start(startTime); oscSine.stop(startTime + dur);
@@ -1265,10 +1325,11 @@
     }
 
     playSound(type, param = 0) {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.sfxEnabled) return;
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
+      const out = this.sfxGain || this.ctx.destination;
 
       switch (type) {
         case 'click': {
@@ -1280,7 +1341,7 @@
           gain.gain.setValueAtTime(0.15, now);
           gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
           osc.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(out);
           osc.start(now);
           osc.stop(now + 0.04);
           break;
@@ -1310,7 +1371,7 @@
 
           oscSine.connect(filter);
           filter.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(out);
 
           oscSine.start(now);
           oscSine.stop(now + dur);
@@ -1334,7 +1395,7 @@
 
           osc1.connect(gain);
           osc2.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(out);
 
           osc1.start(now); osc1.stop(now + 0.06);
           osc2.start(now); osc2.stop(now + 0.06);
@@ -1358,7 +1419,7 @@
 
           osc.connect(filter);
           filter.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(out);
 
           osc.start(now); osc.stop(now + 0.07);
           break;
@@ -1423,7 +1484,7 @@
             gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
 
             oscSine.connect(filter); oscTri.connect(filter);
-            filter.connect(gain); gain.connect(this.ctx.destination);
+            filter.connect(gain); gain.connect(out);
             oscSine.start(now); oscSine.stop(now + dur);
             oscTri.start(now);  oscTri.stop(now + dur);
           }
@@ -1470,7 +1531,7 @@
           osc1.connect(filter);
           osc2.connect(filter);
           filter.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(out);
 
           lfo.start(now); lfo.stop(now + dur);
           osc1.start(now); osc1.stop(now + dur);
@@ -1486,7 +1547,7 @@
           gain.gain.setValueAtTime(0.2, now);
           gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
           osc.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(out);
           osc.start(now);
           osc.stop(now + 0.4);
           break;
@@ -1516,7 +1577,7 @@
             gain.gain.linearRampToValueAtTime(0.07, startTime + 0.03);
             gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.9);
 
-            osc.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+            osc.connect(filter); filter.connect(gain); gain.connect(out);
             osc.start(startTime); osc.stop(startTime + 0.9);
           }
 
@@ -1546,11 +1607,11 @@
           delayFeedback.gain.value = 0.30;
 
           leadOsc.connect(leadDist); leadDist.connect(leadFilter); leadFilter.connect(leadGain);
-          leadGain.connect(this.ctx.destination);
+          leadGain.connect(out);
           leadGain.connect(delayNode);
           delayNode.connect(delayFeedback);
           delayFeedback.connect(delayNode);
-          delayFeedback.connect(this.ctx.destination);
+          delayFeedback.connect(out);
 
           leadOsc.start(now); leadOsc.stop(now + dur);
           break;
@@ -2352,6 +2413,14 @@
 
       this.highScores = JSON.parse(localStorage.getItem('oddballz_hd_hiscores') || '[]');
 
+      // Audio Settings from localStorage
+      const savedAudio = JSON.parse(localStorage.getItem('oddballz_hd_audio_settings') || '{}');
+      if (savedAudio.musicVolume !== undefined) this.audio.musicVolume = savedAudio.musicVolume;
+      if (savedAudio.sfxVolume !== undefined) this.audio.sfxVolume = savedAudio.sfxVolume;
+      if (savedAudio.musicEnabled !== undefined) this.audio.musicEnabled = savedAudio.musicEnabled;
+      if (savedAudio.sfxEnabled !== undefined) this.audio.sfxEnabled = savedAudio.sfxEnabled;
+      if (savedAudio.masterEnabled !== undefined) this.audio.enabled = savedAudio.masterEnabled;
+
       this.initHooks();
       this.initEventListeners();
       this.initTouchControls();
@@ -2387,9 +2456,9 @@
         }
 
         if (code === 'KeyM' || key === 'm' || key === 'M') {
-          const toggle = document.getElementById('toggleSound');
-          toggle.checked = !toggle.checked;
-          this.audio.enabled = toggle.checked;
+          this.audio.setMasterEnabled(!this.audio.enabled);
+          this.syncAudioUI();
+          this.saveAudioSettings();
           e.preventDefault(); return;
         }
 
@@ -2459,14 +2528,69 @@
         if (btn) btn.addEventListener('click', () => this.closeAboutModal());
       });
 
-      document.getElementById('toggleSound').addEventListener('change', (e) => {
-        this.audio.enabled = e.target.checked;
-        if (this.audio.enabled && this.isPlaying && !this.isPaused) {
-          this.audio.startBGM();
-        } else {
-          this.audio.stopBGM();
-        }
+      const btnAudio = document.getElementById('btnAudioSettings');
+      if (btnAudio) btnAudio.addEventListener('click', () => this.showAudioModal());
+
+      ['btnCloseAudio', 'btnAudioClose'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.closeAudioModal());
       });
+
+      const toggleMaster = document.getElementById('toggleSoundMaster');
+      if (toggleMaster) {
+        toggleMaster.addEventListener('change', (e) => {
+          this.audio.setMasterEnabled(e.target.checked);
+          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && !this.isPaused) {
+            this.audio.startBGM();
+          } else {
+            this.audio.stopBGM();
+          }
+          this.saveAudioSettings();
+        });
+      }
+
+      const toggleMusic = document.getElementById('toggleMusic');
+      if (toggleMusic) {
+        toggleMusic.addEventListener('change', (e) => {
+          this.audio.setMusicEnabled(e.target.checked);
+          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && !this.isPaused) {
+            this.audio.startBGM();
+          } else {
+            this.audio.stopBGM();
+          }
+          this.saveAudioSettings();
+        });
+      }
+
+      const toggleSFX = document.getElementById('toggleSFX');
+      if (toggleSFX) {
+        toggleSFX.addEventListener('change', (e) => {
+          this.audio.setSFXEnabled(e.target.checked);
+          this.saveAudioSettings();
+        });
+      }
+
+      const sliderMusic = document.getElementById('sliderMusicVolume');
+      if (sliderMusic) {
+        sliderMusic.addEventListener('input', (e) => {
+          const val = parseFloat(e.target.value) / 100;
+          this.audio.setMusicVolume(val);
+          const badge = document.getElementById('valMusicVolume');
+          if (badge) badge.textContent = `${e.target.value}%`;
+          this.saveAudioSettings();
+        });
+      }
+
+      const sliderSFX = document.getElementById('sliderSFXVolume');
+      if (sliderSFX) {
+        sliderSFX.addEventListener('input', (e) => {
+          const val = parseFloat(e.target.value) / 100;
+          this.audio.setSFXVolume(val);
+          const badge = document.getElementById('valSFXVolume');
+          if (badge) badge.textContent = `${e.target.value}%`;
+          this.saveAudioSettings();
+        });
+      }
 
       const tabColor = document.getElementById('tabColorMatch');
       const tabRow = document.getElementById('tabRowBuild');
@@ -2784,6 +2908,60 @@
 
     closeAboutModal() {
       const modal = document.getElementById('gameDialogAbout');
+      if (modal) modal.classList.add('hidden');
+
+      if (this.wasPausedByModal) {
+        this.wasPausedByModal = false;
+        if (this.isPlaying && this.isPaused) {
+          this.isPaused = false;
+          this.lastTime = performance.now();
+        }
+      }
+    }
+
+    saveAudioSettings() {
+      const settings = {
+        masterEnabled: this.audio.enabled,
+        musicEnabled: this.audio.musicEnabled,
+        sfxEnabled: this.audio.sfxEnabled,
+        musicVolume: this.audio.musicVolume,
+        sfxVolume: this.audio.sfxVolume
+      };
+      localStorage.setItem('oddballz_hd_audio_settings', JSON.stringify(settings));
+    }
+
+    syncAudioUI() {
+      const toggleMaster = document.getElementById('toggleSoundMaster');
+      const toggleMusic = document.getElementById('toggleMusic');
+      const toggleSFX = document.getElementById('toggleSFX');
+      const sliderMusic = document.getElementById('sliderMusicVolume');
+      const sliderSFX = document.getElementById('sliderSFXVolume');
+      const valMusic = document.getElementById('valMusicVolume');
+      const valSFX = document.getElementById('valSFXVolume');
+
+      if (toggleMaster) toggleMaster.checked = this.audio.enabled;
+      if (toggleMusic) toggleMusic.checked = this.audio.musicEnabled;
+      if (toggleSFX) toggleSFX.checked = this.audio.sfxEnabled;
+
+      if (sliderMusic) sliderMusic.value = Math.round(this.audio.musicVolume * 100);
+      if (sliderSFX) sliderSFX.value = Math.round(this.audio.sfxVolume * 100);
+
+      if (valMusic) valMusic.textContent = `${Math.round(this.audio.musicVolume * 100)}%`;
+      if (valSFX) valSFX.textContent = `${Math.round(this.audio.sfxVolume * 100)}%`;
+    }
+
+    showAudioModal() {
+      if (this.isPlaying && !this.isPaused) {
+        this.wasPausedByModal = true;
+        this.isPaused = true;
+      }
+      this.syncAudioUI();
+      const modal = document.getElementById('gameDialogAudio');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    closeAudioModal() {
+      const modal = document.getElementById('gameDialogAudio');
       if (modal) modal.classList.add('hidden');
 
       if (this.wasPausedByModal) {
