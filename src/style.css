@@ -181,7 +181,7 @@ body, html {
 .stats-panel {
   position: absolute;
   left: 1.2rem;
-  top: 5rem;
+  top: 7rem;
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
@@ -216,7 +216,7 @@ body, html {
 .keybinds-panel {
   position: absolute;
   right: 1.2rem;
-  top: 5rem;
+  top: 7rem;
   padding: 1.2rem;
   display: flex;
   flex-direction: column;

@@ -1964,6 +1964,10 @@
       this.engine = engine;
       const currentKeys = new Set();
       const nextStaticMeshes = new Map();
+      // Guard: a single mesh must never back two grid cells in one pass. This can
+      // happen when a ball drops INTO a cell that another ball is dropping OUT of,
+      // aliasing one sphere across two keys and leaving the other cell blank (gap/hang).
+      const assignedMeshes = new Set();
 
       const droppingPathsMap = engine.droppingPathsMap || new Map();
 
@@ -1984,8 +1988,9 @@
               const pathInfo = droppingPathsMap.get(key);
               const fromKey = pathInfo.sourceKey;
 
-              if (this.staticBallMeshes.has(fromKey)) {
-                mesh = this.staticBallMeshes.get(fromKey);
+              const sourceMesh = this.staticBallMeshes.get(fromKey);
+              if (sourceMesh && !assignedMeshes.has(sourceMesh)) {
+                mesh = sourceMesh;
                 this.staticBallMeshes.delete(fromKey);
                 mesh.material = mat;
               } else {
@@ -2021,6 +2026,7 @@
             }
 
             nextStaticMeshes.set(key, mesh);
+            assignedMeshes.add(mesh);
           }
         }
       }
@@ -2540,7 +2546,7 @@
       if (toggleMaster) {
         toggleMaster.addEventListener('change', (e) => {
           this.audio.setMasterEnabled(e.target.checked);
-          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && !this.isPaused) {
+          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && (!this.isPaused || this.wasPausedByModal)) {
             this.audio.startBGM();
           } else {
             this.audio.stopBGM();
@@ -2553,7 +2559,7 @@
       if (toggleMusic) {
         toggleMusic.addEventListener('change', (e) => {
           this.audio.setMusicEnabled(e.target.checked);
-          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && !this.isPaused) {
+          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && (!this.isPaused || this.wasPausedByModal)) {
             this.audio.startBGM();
           } else {
             this.audio.stopBGM();
