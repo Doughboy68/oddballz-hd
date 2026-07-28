@@ -869,3 +869,85 @@ input:checked + .slider::before {
   text-align: right;
 }
 
+/* ===== Attract / How-To-Play demo overlay ===== */
+.overlay-attract {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none; /* taps fall through; a global listener handles them */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6rem 1rem 8.5rem;
+}
+.overlay-attract.hidden { display: none; }
+
+.attract-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 1.2rem;
+  animation: attractFadeDown 0.5s ease;
+}
+.attract-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--accent-gold, #ffcf4d);
+  background: rgba(255, 207, 77, 0.12);
+  border: 1px solid rgba(255, 207, 77, 0.4);
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+}
+.attract-mode-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #fff 0%, var(--accent-cyan, #00f0ff) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.attract-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+}
+.attract-caption {
+  max-width: 560px;
+  text-align: center;
+  padding: 0.9rem 1.5rem;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.95);
+  transition: opacity 0.25s ease;
+}
+.attract-caption b { color: var(--accent-cyan, #00f0ff); font-weight: 700; }
+.attract-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted, rgba(255, 255, 255, 0.65));
+  animation: attractPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes attractFadeDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes attractPulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+
+/* Keep the demo text clear of the taller mobile header / controls bar */
+@media (max-width: 768px) {
+  .overlay-attract { padding: 9.5rem 0.8rem 11rem; }
+  .attract-mode-title { font-size: 1.15rem; }
+  .attract-caption { font-size: 0.95rem; padding: 0.75rem 1.1rem; }
+}
+
