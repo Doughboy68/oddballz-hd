@@ -6,13 +6,26 @@
 
 (function () {
   // --- 1. HEX MATH ---
-  // Board scale: 1 = the classic 1992 grid, 2 = the experimental dense grid.
-  // Doubling the grid while halving both the hex spacing and the ball radius keeps
-  // the board's world-space extent identical (x +/-8.0, y +/-8.227 either way), so
-  // the camera and the locked mobile scaling maths never see a difference. Set once
-  // at startup by setBoardScale(); changing it reloads the page rather than trying
-  // to remap a live board onto a different grid.
-  let BOARD_SCALE = 1;
+  // Board presets, keyed by the width of the bottom edge in balls. Each entry is
+  // the classic 1992 hexagon's integer parameters scaled up; WORLD_SCALE then
+  // shrinks the hex spacing and the ball radius by the same ratio, so every preset
+  // occupies the same world-space extent (x +/-8.0, y +/-8.23) and the camera and
+  // the locked mobile scaling maths never see a difference.
+  //
+  //   bottom edge = MAX_X - MAX_Y + LOWER      top edge = UPPER - MIN_X
+  //
+  // Set once at startup by setBoardWidth(); changing it reloads the page rather
+  // than trying to remap a live board onto a different grid.
+  const BOARD_PRESETS = {
+    9:  { MIN_X: 4, MAX_X: 20, MAX_Y: 19, SPLIT: 12, UPPER: 10, LOWER: 8 },
+    12: { MIN_X: 5, MAX_X: 26, MAX_Y: 25, SPLIT: 16, UPPER: 13, LOWER: 11 },
+    18: { MIN_X: 8, MAX_X: 40, MAX_Y: 38, SPLIT: 24, UPPER: 20, LOWER: 16 }
+  };
+
+  let BOARD_WIDTH = 9;
+  let BP = BOARD_PRESETS[9];
+  let BOARD_RATIO = 1;      // grid size relative to classic
+  let WORLD_SCALE = 1;      // world size per grid cell, = 1 / BOARD_RATIO
   let BOARD_BOUNDS = { MIN_X: 4, MAX_X: 20, MIN_Y: 0, MAX_Y: 19 };
   let ALLOC_MAX_X = 24;
   let ALLOC_MAX_Y = 23;
@@ -22,22 +35,24 @@
   let HEX_SPACING_X = 1.0;
   let HEX_SPACING_Y = 0.866;
 
-  function setBoardScale(s) {
-    BOARD_SCALE = s;
-    BOARD_BOUNDS = { MIN_X: 4 * s, MAX_X: 20 * s, MIN_Y: 0, MAX_Y: 19 * s };
-    ALLOC_MAX_X = 20 * s + 4;
-    ALLOC_MAX_Y = 19 * s + 4;
-    CENTER_X = 12 * s;
-    CENTER_Y = 9.5 * s;
-    SPHERE_RADIUS = 0.45 / s;
-    HEX_SPACING_X = 1.0 / s;
-    HEX_SPACING_Y = 0.866 / s;
+  function setBoardWidth(w) {
+    BOARD_WIDTH = BOARD_PRESETS[w] ? w : 9;
+    BP = BOARD_PRESETS[BOARD_WIDTH];
+    BOARD_RATIO = (BP.MAX_X - BP.MIN_X) / 16;
+    WORLD_SCALE = 1 / BOARD_RATIO;
+    BOARD_BOUNDS = { MIN_X: BP.MIN_X, MAX_X: BP.MAX_X, MIN_Y: 0, MAX_Y: BP.MAX_Y };
+    ALLOC_MAX_X = BP.MAX_X + 4;
+    ALLOC_MAX_Y = BP.MAX_Y + 4;
+    CENTER_X = (BP.MIN_X + BP.MAX_X) / 2;
+    CENTER_Y = BP.MAX_Y / 2;
+    SPHERE_RADIUS = 0.45 * WORLD_SCALE;
+    HEX_SPACING_X = 1.0 * WORLD_SCALE;
+    HEX_SPACING_Y = 0.866 * WORLD_SCALE;
   }
 
   function isInBoard(x, y) {
-    const s = BOARD_SCALE;
-    if (x < 4 * s || x > 20 * s || y < 0 || y > 19 * s) return false;
-    return (y < 12 * s && x < y + 10 * s) || (y >= 12 * s && x > y - 8 * s);
+    if (x < BP.MIN_X || x > BP.MAX_X || y < 0 || y > BP.MAX_Y) return false;
+    return (y < BP.SPLIT && x < y + BP.UPPER) || (y >= BP.SPLIT && x > y - BP.LOWER);
   }
 
   function gridToWorld(x, y, zOffset = 0) {
@@ -49,16 +64,17 @@
     return { x: worldX, y: worldY, z: worldZ };
   }
 
-  function buildRowTables(s) {
+  function buildRowTables() {
+    const topmostRow = Math.round(4 * BOARD_RATIO);   // spawn rows are excluded
     const midRow = [];
-    for (let y = 19 * s; y >= 4 * s; y--) {
-      for (let x = 4 * s; x <= 20 * s; x++) {
+    for (let y = BP.MAX_Y; y >= topmostRow; y--) {
+      for (let x = BP.MIN_X; x <= BP.MAX_X; x++) {
         if (isInBoard(x, y)) { midRow.push({ x: x, y: y }); break; }
       }
     }
     const bottom = [];
-    for (let x = 4 * s; x <= 20 * s; x++) {
-      if (isInBoard(x, 19 * s)) bottom.push({ x: x, y: 19 * s });
+    for (let x = BP.MIN_X; x <= BP.MAX_X; x++) {
+      if (isInBoard(x, BP.MAX_Y)) bottom.push({ x: x, y: BP.MAX_Y });
     }
     return { midRow: midRow, ltRow: bottom.slice(), rtRow: bottom.slice().reverse() };
   }
@@ -142,7 +158,7 @@
       // midRow is the leftmost cell of each row from the bottom up to y = 4*scale
       // (the spawn rows are deliberately excluded from row clearing), and lt/rtRow
       // are the bottom row scanned in the two directions.
-      const rowTables = buildRowTables(BOARD_SCALE);
+      const rowTables = buildRowTables();
       this.midRow = rowTables.midRow;
       this.rtRow = rowTables.rtRow;
       this.ltRow = rowTables.ltRow;
@@ -190,7 +206,7 @@
       ];
 
       this.startPos = [6, 7, 8, 9].map(x => ({
-        x: x * BOARD_SCALE, y: 3 * BOARD_SCALE
+        x: Math.round(x * BOARD_RATIO), y: Math.round(3 * BOARD_RATIO)
       }));
 
       this.matcher = true;
@@ -1002,8 +1018,8 @@
     }
 
     checkGameOver() {
-      for (let x = 4 * BOARD_SCALE; x <= 12 * BOARD_SCALE; x++) {
-        for (let y = 0; y <= 4 * BOARD_SCALE - 1; y++) {
+      for (let x = Math.round(4 * BOARD_RATIO); x <= Math.round(12 * BOARD_RATIO); x++) {
+        for (let y = 0; y <= Math.round(4 * BOARD_RATIO) - 1; y++) {
           if (this.checkInMap({ x: x, y: y }) && this.ballMap[x][y].bzMap !== 0) {
             this.endGame = true;
             if (this.onPlaySound) this.onPlaySound('gameover');
@@ -1954,7 +1970,7 @@
     }
 
     build3DBoard() {
-      const hexRadius = 0.52 / BOARD_SCALE;
+      const hexRadius = 0.52 * WORLD_SCALE;
       const hexShape = new THREE.Shape();
       for (let i = 0; i < 6; i++) {
         const angle = (i * Math.PI) / 3;
@@ -1965,8 +1981,8 @@
       }
 
       const extrudeSettings = {
-        depth: 0.2 / BOARD_SCALE, bevelEnabled: true, bevelSegments: 2, steps: 1,
-        bevelSize: 0.03 / BOARD_SCALE, bevelThickness: 0.03 / BOARD_SCALE
+        depth: 0.2 * WORLD_SCALE, bevelEnabled: true, bevelSegments: 2, steps: 1,
+        bevelSize: 0.03 * WORLD_SCALE, bevelThickness: 0.03 * WORLD_SCALE
       };
       const hexGeo = new THREE.ExtrudeGeometry(hexShape, extrudeSettings);
       const hexMat = new THREE.MeshStandardMaterial({ color: 0x141829, roughness: 0.6, metalness: 0.4, emissive: 0x070914, emissiveIntensity: 0.5 });
@@ -2886,8 +2902,8 @@
     scheduleAttractIdle() {
       // The attract lessons are built on hardcoded classic-board coordinates
       // (row 11 x5-9, the perpendicular line, the x15-16 gravity gap), so they are
-      // meaningless on the dense grid. Disabled there rather than half-working.
-      if (BOARD_SCALE !== 1) return;
+      // meaningless on a wider grid. Disabled there rather than half-working.
+      if (BOARD_WIDTH !== 9) return;
       if (this.attractIdleTimer) { clearTimeout(this.attractIdleTimer); this.attractIdleTimer = null; }
       this.attractIdleTimer = setTimeout(() => this.enterAttract(), this.ATTRACT_IDLE_MS);
     }
@@ -2898,7 +2914,7 @@
     }
 
     enterAttract() {
-      if (BOARD_SCALE !== 1) return;
+      if (BOARD_WIDTH !== 9) return;
       if (this.attractActive) return;
       if (!this.isOnTitleIdle()) { if (!this.isPlaying) this.scheduleAttractIdle(); return; }
 
@@ -4043,27 +4059,39 @@
     }
   }
 
-  // Experimental dense-playfield toggle. Kept deliberately outside the app class:
-  // the scale has to be fixed before the engine and renderer are constructed, since
-  // both bake the board dimensions in, so flipping it reloads the page instead of
-  // trying to remap a live board onto a different grid.
-  const DENSE_KEY = 'oddballz_hd_dense_playfield';
+  // Board-width selector. Kept deliberately outside the app class: the width has to
+  // be fixed before the engine and renderer are constructed, since both bake the
+  // board dimensions in, so changing it reloads the page instead of trying to remap
+  // a live board onto a different grid.
+  const BOARD_KEY = 'oddballz_hd_board_width';
+  const LEGACY_DENSE_KEY = 'oddballz_hd_dense_playfield';
+  const BOARD_CYCLE = [9, 12, 18];
+  const BOARD_LABELS = { 9: '9 wide (classic)', 12: '12 wide (roomy)', 18: '18 wide (dense)' };
 
-  function densePlayfieldEnabled() {
-    try { return localStorage.getItem(DENSE_KEY) === '1'; } catch (e) { return false; }
+  function storedBoardWidth() {
+    try {
+      const v = localStorage.getItem(BOARD_KEY);
+      if (v && BOARD_PRESETS[v]) return parseInt(v, 10);
+      if (localStorage.getItem(LEGACY_DENSE_KEY) === '1') return 18;  // pre-12 setting
+    } catch (e) {}
+    return 9;
   }
 
   window.addEventListener('DOMContentLoaded', () => {
-    setBoardScale(densePlayfieldEnabled() ? 2 : 1);
+    const width = storedBoardWidth();
+    setBoardWidth(width);
     window.oddApp = new OddballzApp();
 
-    const btnDense = document.getElementById('btnDensePlayfield');
-    if (btnDense) {
-      const on = densePlayfieldEnabled();
-      btnDense.textContent = on ? '⬢ Dense Playfield: On' : '⬢ Dense Playfield: Off';
-      btnDense.classList.toggle('active', on);
-      btnDense.addEventListener('click', () => {
-        try { localStorage.setItem(DENSE_KEY, on ? '0' : '1'); } catch (e) {}
+    const btnBoard = document.getElementById('btnDensePlayfield');
+    if (btnBoard) {
+      btnBoard.textContent = '⬢ Board: ' + BOARD_LABELS[width];
+      btnBoard.classList.toggle('active', width !== 9);
+      btnBoard.addEventListener('click', () => {
+        const next = BOARD_CYCLE[(BOARD_CYCLE.indexOf(width) + 1) % BOARD_CYCLE.length];
+        try {
+          localStorage.setItem(BOARD_KEY, String(next));
+          localStorage.removeItem(LEGACY_DENSE_KEY);
+        } catch (e) {}
         location.reload();
       });
     }
