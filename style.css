@@ -923,8 +923,11 @@ input:checked + .slider::before {
    travel between the action and the text. JS sets left/top each caption. */
 .attract-caption {
   position: absolute;
-  left: 50%;
-  top: 62%;
+  /* Positioned with transform, not left/top: an absolutely positioned box is
+     shrink-to-fit within (container width - left), so using `left` made the
+     text re-wrap as it moved and its width changed under the clamp. */
+  left: 0;
+  top: 0;
   transform: translate(-50%, 0);
   max-width: min(420px, 82vw);
   text-align: center;
@@ -932,7 +935,7 @@ input:checked + .slider::before {
   font-size: 1rem;
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.95);
-  transition: left 0.35s ease, top 0.35s ease;
+  transition: transform 0.35s ease;
 }
 .attract-caption b { color: var(--accent-cyan, #00f0ff); font-weight: 700; }
 .attract-hint {

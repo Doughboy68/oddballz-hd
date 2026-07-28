@@ -2952,12 +2952,36 @@
 
       // Sit below the action, but flip above it if that would run off the pane.
       const below = py + rect.height * 0.11;
-      const top = (below > rect.height * 0.82) ? py - rect.height * 0.17 : below;
-      const clampX = Math.max(rect.width * 0.24, Math.min(rect.width * 0.76, px));
-      const clampY = Math.max(rect.height * 0.14, Math.min(rect.height * 0.84, top));
+      const wantY = (below > rect.height * 0.82) ? py - rect.height * 0.17 : below;
 
-      cap.style.left = Math.round(clampX) + 'px';
-      cap.style.top = Math.round(clampY) + 'px';
+      // Clamp against the caption's MEASURED size, not a percentage of the
+      // pane. `left` is its centre (it is translated -50%), so a percentage
+      // clamp let the box hang off the edge whenever it was wider than the
+      // margin allowed -- which is exactly what happens on a phone.
+      const margin = 10;
+      // While the overlay is hidden the caption has no layout, so its size
+      // reads as 0 and the clamp below would do nothing -- leaving a position
+      // that hangs off the edge once it becomes visible. It gets positioned
+      // again with the next caption, so just skip it here.
+      if (!cap.offsetWidth) return;
+
+      // Clamp in page coordinates against the play area, then convert into the
+      // caption's own offset parent. The parent spans the whole page while the
+      // play area does not, so clamping directly in parent coordinates let the
+      // box slide off the side on a phone and under the controls bar.
+      const halfW = cap.offsetWidth / 2, capH = cap.offsetHeight;
+      const wantAbsX = rect.left + px, wantAbsY = rect.top + wantY;
+
+      const minX = rect.left + halfW + margin, maxX = rect.right - halfW - margin;
+      const absX = (minX > maxX) ? rect.left + rect.width / 2
+                                 : Math.max(minX, Math.min(maxX, wantAbsX));
+      const minY = rect.top + margin, maxY = rect.bottom - capH - margin;
+      const absY = (minY > maxY) ? rect.top + margin
+                                 : Math.max(minY, Math.min(maxY, wantAbsY));
+
+      const parent = cap.offsetParent ? cap.offsetParent.getBoundingClientRect() : rect;
+      cap.style.transform = 'translate(' + Math.round(absX - parent.left) + 'px, ' +
+                            Math.round(absY - parent.top) + 'px) translate(-50%, 0)';
     }
 
     // Burst + remove balls, exactly like a real match clear.
