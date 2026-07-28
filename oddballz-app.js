@@ -3188,14 +3188,14 @@
 
       scene('match5', 'COLOR MATCH', [
         'Line up <b>5+ same-coloured</b> balls in a row.',
-        'Steer and rotate as it falls, and cycle the colours with <b>F</b>.',
+        'Steer, rotate and <b>cycle its colours</b> as it falls.',
         'Watch &mdash; <b>these five</b> are lined up&hellip;',
         'Five in a row &mdash; <b>they burst and clear!</b>'
       ], 6800);
 
       scene('perp3', 'COLOR MATCH', [
         'Now match <b>3+</b> in a <b>perpendicular</b> line.',
-        'Steer and rotate as it falls, and cycle the colours with <b>F</b>.',
+        'Steer, rotate and <b>cycle its colours</b> as it falls.',
         'Watch &mdash; <b>these three</b> line up vertically&hellip;',
         'Three perpendicular &mdash; <b>they burst!</b>'
       ], 6800);
