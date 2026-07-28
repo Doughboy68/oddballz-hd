@@ -2873,15 +2873,19 @@
       // same every run so the demo looks like a real level-1 board.
       this.demoPalette = [1, 2, 3];
       this.demoMatchColor = 1;
-      // NOTE: demoPileSnapshot is deliberately NOT cleared here. The heap is
-      // laid out once and then reused for every scene AND every later run, so
-      // the playfield doesn't quietly change between loops.
+      // A fresh heap for each attract run, the way a page reload gives one.
+      // Within the run it is snapshotted and reused, so the board still never
+      // changes underneath the three lessons -- it just isn't the same board
+      // every single loop.
+      this.demoPileSnapshot = null;
       this.engine.endGame = true;            // suppress the live active-piece render
       this.engine.eraseBallMap();
       this.engine.droppingPathsMap = new Map();
       this.renderer.updateScene(this.engine);
 
       document.getElementById('overlayStart').classList.add('hidden');
+      const cap = document.getElementById('attractCaption');
+      if (cap) cap.style.visibility = 'hidden';   // no placeholder flash
       const ov = document.getElementById('overlayAttract');
       if (ov) ov.classList.remove('hidden');
 
@@ -2918,28 +2922,42 @@
       const t = document.getElementById('attractModeTitle');
       const c = document.getElementById('attractCaption');
       if (t) t.textContent = title;
-      if (c) c.innerHTML = html;
+      if (c) { c.innerHTML = html; c.style.visibility = html ? 'visible' : 'hidden'; }
+      this.positionAttractCaption();
     }
 
-    // Drop balls in that visually fall from above into their target cells.
-    demoDrop(cells, colors) {
-      if (!this.engine.droppingPathsMap) this.engine.droppingPathsMap = new Map();
-      cells.forEach((cell, i) => {
-        this.engine.ballMap[cell.x][cell.y].bzMap = colors[i];
-        const fromY = cell.y - 7;
-        const path = [];
-        for (let yy = fromY; yy <= cell.y; yy++) path.push({ x: cell.x, y: yy });
-        this.engine.droppingPathsMap.set(`${cell.x}_${cell.y}`,
-          { sourceKey: `${cell.x}_${fromY}`, targetKey: `${cell.x}_${cell.y}`, path });
-      });
-      this.renderer.updateScene(this.engine);
-      if (this.audio) this.audio.playSound('drop');
-    }
+    // Park the caption just under whatever the demo is drawing attention to, by
+    // projecting those cells through the camera. Keeps the text and the action
+    // in one glance instead of at opposite ends of the screen.
+    positionAttractCaption() {
+      const cap = document.getElementById('attractCaption');
+      const cells = this.attractFocus;
+      if (!cap || !this.container || !cells || !cells.length) return;
+      const cam = this.renderer && this.renderer.camera;
+      if (!cam) return;
 
-    // Place balls instantly (already resting on the board).
-    demoPlace(cells, colors) {
-      cells.forEach((cell, i) => { this.engine.ballMap[cell.x][cell.y].bzMap = colors[i]; });
-      this.renderer.updateScene(this.engine);
+      const zOff = this.renderer.ballsGroup ? this.renderer.ballsGroup.position.z : 0;
+      let nx = 0, ny = 0;
+      for (const c of cells) {
+        const w = gridToWorld(c.x, c.y, SPHERE_RADIUS);
+        const v = new THREE.Vector3(w.x, w.y, w.z + zOff);
+        v.project(cam);
+        nx += v.x; ny += v.y;
+      }
+      nx /= cells.length; ny /= cells.length;
+
+      const rect = this.container.getBoundingClientRect();
+      const px = (nx * 0.5 + 0.5) * rect.width;
+      const py = (-ny * 0.5 + 0.5) * rect.height;
+
+      // Sit below the action, but flip above it if that would run off the pane.
+      const below = py + rect.height * 0.11;
+      const top = (below > rect.height * 0.82) ? py - rect.height * 0.17 : below;
+      const clampX = Math.max(rect.width * 0.24, Math.min(rect.width * 0.76, px));
+      const clampY = Math.max(rect.height * 0.14, Math.min(rect.height * 0.84, top));
+
+      cap.style.left = Math.round(clampX) + 'px';
+      cap.style.top = Math.round(clampY) + 'px';
     }
 
     // Burst + remove balls, exactly like a real match clear.
@@ -2951,12 +2969,6 @@
         this.engine.ballMap[cell.x][cell.y].bzMap = 0;
       });
       if (this.audio) this.audio.playSound('pop');
-      this.renderer.updateScene(this.engine);
-    }
-
-    demoClearBoard() {
-      this.engine.eraseBallMap();
-      this.engine.droppingPathsMap = new Map();
       this.renderer.updateScene(this.engine);
     }
 
@@ -3027,22 +3039,47 @@
       // neighbour is perfectly legal here (that is how this engine's support
       // rule works) and gives the heap its characteristic look, so those are
       // kept -- only genuinely unsupported balls are corrected further down.
+      // Overall density and the height of each column both vary per run. Without
+      // this the heap kept the same silhouette every time and only its colours
+      // changed, which reads as the same board over and over.
+      // Denser on average than a pure spread: a thin heap has little to drop
+      // into a cleared line, which is what makes chain reactions rare.
+      const density = 0.45 + R() * 0.75;
+      const surface = {};
+      for (let x = 4; x <= 20; x++) surface[x] = 12 + Math.floor(R() * R() * 3);  // 12..14
+
       for (let y = 19; y >= 12; y--) {
         for (let x = 4; x <= 20; x++) {
           if (!e.checkInMap({ x: x, y: y })) continue;
+          if (y < surface[x]) continue;                       // ragged top edge
           const hole = (y >= 16) ? 0.10 : (y >= 14 ? 0.22 : 0.30);
-          if (R() < hole) continue;
+          if (R() < Math.min(0.55, hole * density)) continue;
           add(x, y);
         }
       }
-      // A solid shelf under the demo lane so pieces land on a predictable row.
-      for (let x = 5; x <= 12; x++) add(x, 12);
-      // Walls and floor around a permanent notch at x 15-16, part of the heap
+      // Only the cells that actually carry a landing ball are guaranteed; the
+      // rest of the surface is free to vary from run to run.
+      for (const k of ['6_12', '8_12', '9_12', '11_12', '12_12', '17_12', '18_12']) {
+        add(+k.split('_')[0], +k.split('_')[1]);
+      }
+      // Walls and floor around the permanent notch at x 15-16, part of the heap
       // from the start so the gravity lesson can use it with no board reset.
-      for (let y = 12; y <= 19; y++) { add(14, y); add(17, y); add(18, y); }
+      for (let y = 12; y <= 16; y++) add(14, y);
+      for (let y = 12; y <= 13; y++) { add(17, y); add(18, y); }
       for (let y = 17; y <= 19; y++) { add(15, y); add(16, y); }
-      // Ragged extras, kept clear of both demo lanes.
-      for (let x = 19; x <= 20; x++) if (R() < 0.5) add(x, 11);
+      // Ragged extras on the surface, in the columns no lesson lands in.
+      for (const x of [4, 13, 19, 20]) if (R() < 0.5) add(x, 11);
+
+      // Often stack a little ABOVE the five-in-a-row's row, just left of where
+      // the piece lands. Clearing that row then drops these in, which is what
+      // gives that lesson a chance of a chain reaction -- without them the line
+      // sits on the surface with nothing above it to fall.
+      if (R() < 0.9) {
+        add(5, 11); add(6, 11);                       // the pair holds them up
+        for (const x of [4, 5, 6]) {
+          if (R() < 0.8) { add(x, 10); if (R() < 0.5) add(x, 9); }
+        }
+      }
 
       const notch = new Set();
       for (let y = 12; y <= 16; y++) { notch.add('15_' + y); notch.add('16_' + y); }
@@ -3107,45 +3144,6 @@
       this.renderer.updateScene(e);
     }
 
-    // Make sure nothing around a seeded match ball shares its colour, so only
-    // the intended line matches.
-    demoIsolateColor(cells, color) {
-      const e = this.engine;
-      const AXES = [[1,0],[-1,0],[1,1],[-1,-1],[0,1],[0,-1],
-                    [1,2],[-1,-2],[1,-1],[-1,1],[2,1],[-2,-1]];
-      const keep = new Set(cells.map(c => `${c.x}_${c.y}`));
-      for (const c of cells) {
-        for (const [dx, dy] of AXES) {
-          const nx = c.x + dx, ny = c.y + dy;
-          if (nx < 0 || nx > 24 || ny < 0 || ny > 23) continue;
-          if (keep.has(`${nx}_${ny}`)) continue;
-          if (e.ballMap[nx][ny].bzMap === color) {
-            const pal = this.demoPalette || [1, 2, 3];
-            e.ballMap[nx][ny].bzMap = 0;               // ignore itself when picking
-            let repl = this.demoSafeColor(nx, ny);
-            if (repl === color) {
-              const alt = pal.filter(c => c !== color);
-              repl = alt.length ? alt[Math.floor(Math.random() * alt.length)] : color;
-            }
-            e.ballMap[nx][ny].bzMap = repl;
-          }
-        }
-      }
-    }
-
-    // Clear specific cells without a pop burst (used to reset the demo balls
-    // between scenes while leaving the pile intact).
-    demoRemove(cells) {
-      cells.forEach(c => { this.engine.ballMap[c.x][c.y].bzMap = 0; });
-      this.renderer.updateScene(this.engine);
-    }
-
-    // Recolor cells in place — shows the F-key colour cycling on a live piece.
-    demoRecolor(cells, colors) {
-      cells.forEach((c, i) => { this.engine.ballMap[c.x][c.y].bzMap = colors[i]; });
-      this.renderer.updateScene(this.engine);
-    }
-
     runAttractSequence() {
       this.clearAttractTimers();
       let t = 0;
@@ -3155,39 +3153,35 @@
       };
 
       // All three lessons play back to back, then back to the title screen.
-      // `tail` leaves room for cascading chain matches to play out one by one.
+      // Only the first two captions are on a timer. The last two are fired by
+      // the demo itself when the piece actually lands and when it bursts, so
+      // the text can never race ahead of (or lag behind) what's on screen.
       const scene = (kind, title, caps, tail) => {
-        at(150,  () => { this.setAttractCaption(title, caps[0]); this.startAttractPlay(kind); });
-        at(900,  () => this.setAttractCaption(title, caps[1]));
-        at(800,  () => this.setAttractCaption(title, caps[2]));
-        at(700,  () => this.setAttractCaption(title, caps[3]));
-        at(1700, () => this.setAttractCaption(title, caps[4]));
-        at(1800 + (tail || 0), () => 0);
+        at(60,   () => { this.setAttractCaption(title, caps[0]); this.startAttractPlay(kind, title, caps); });
+        at(1450, () => this.setAttractCaption(title, caps[1]));
+        at(3500 + (tail || 0), () => 0);
       };
 
       scene('match5', 'COLOR MATCH', [
         'Line up <b>5+ same-coloured</b> balls in a row.',
-        'Steer and rotate the piece as it falls&hellip;',
-        'Cycle the colours with <b>F</b> to line them up&hellip;',
-        'Watch &mdash; <b>these five</b> are about to line up&hellip;',
+        'Steer and rotate as it falls, and cycle the colours with <b>F</b>.',
+        'Watch &mdash; <b>these five</b> are lined up&hellip;',
         'Five in a row &mdash; <b>they burst and clear!</b>'
-      ], 3600);
+      ], 6800);
 
       scene('perp3', 'COLOR MATCH', [
         'Now match <b>3+</b> in a <b>perpendicular</b> line.',
-        'Steer and rotate the piece as it falls&hellip;',
-        'Cycle the colours with <b>F</b> to line them up&hellip;',
+        'Steer and rotate as it falls, and cycle the colours with <b>F</b>.',
         'Watch &mdash; <b>these three</b> line up vertically&hellip;',
         'Three perpendicular &mdash; <b>they burst!</b>'
-      ], 3600);
+      ], 6800);
 
       scene('support', 'SUPPORT & GRAVITY', [
         'Balls must be <b>supported</b> from underneath.',
-        'Steer the piece over the edge of the stack&hellip;',
-        'Part of it is hanging over a <b>gap</b>&hellip;',
+        'This piece is heading out over a <b>gap</b> in the stack&hellip;',
         'This ball has <b>nothing beneath it</b>&hellip;',
         '&hellip;so it <b>breaks off and falls!</b>'
-      ]);
+      ], 1800);
 
       at(600, () => this.exitAttract(true));
     }
@@ -3206,12 +3200,9 @@
         // five-in-a-row: the line, then its odd ball
         { cells: [P(5,11), P(6,11), P(7,11), P(8,11), P(9,11)], color: C },
         { cells: [P(10,11)], color: o1 },
-        // perpendicular: the line, then the diamond's other three balls. The
-        // two beside (10,11) are o2 so they don't condemn the previous
-        // lesson's leftover o1 ball sitting there.
+        // perpendicular: only the line. The diamond's other three colours are
+        // chosen at run time to suit the heap, so they need no constraint here.
         { cells: [P(12,13), P(13,15), P(11,11)], color: C },
-        { cells: [P(10,10), P(11,10)], color: o2 },
-        { cells: [P(12,11)], color: o1 },
         // gravity: the bar's four landing cells
         { cells: [P(15,11)], color: o2 },
         { cells: [P(16,11), P(18,11)], color: C },
@@ -3248,15 +3239,25 @@
     // sneaks in later). Solved together, since fixing one can break the other.
     demoResolveBoard(protect, isolations, structural) {
       const e = this.engine;
-      const pal = this.demoPalette || [1, 2, 3];
+      // Try the match colour LAST, so a repaint never turns a heap ball into
+      // the colour the next lesson is about to match -- that reads as a ball
+      // appearing from nowhere right beside the action.
+      const C = this.demoMatchColor;
+      const pal = (this.demoPalette || [1, 2, 3]).slice()
+                    .sort((a, b) => (a === C ? 1 : 0) - (b === C ? 1 : 0));
       const AXES = [[1,0], [-1,0], [1,1], [-1,-1], [0,1], [0,-1],
                     [1,2], [-1,-2], [1,-1], [-1,1], [2,1], [-2,-1]];
 
+      // Only PERPENDICULAR neighbours matter here: those lines match at 3, so a
+      // touching ball of the same colour is a real risk. Parallel lines need 5,
+      // so forbidding the colour there just forced needless repaints of balls
+      // sitting right next to the action.
+      const PERP = [[1,2], [-1,-2], [1,-1], [-1,1], [2,1], [-2,-1]];
       const forbid = new Map();
       for (const iso of isolations || []) {
         const keep = new Set(iso.cells.map(c => c.x + '_' + c.y));
         for (const c of iso.cells) {
-          for (const d of AXES) {
+          for (const d of PERP) {
             const nx = c.x + d[0], ny = c.y + d[1], k = nx + '_' + ny;
             if (nx < 4 || nx > 20 || ny < 0 || ny > 19 || keep.has(k)) continue;
             if (!forbid.has(k)) forbid.set(k, new Set());
@@ -3341,6 +3342,7 @@
       }
       return out;
     }
+
 
     // Definitive guarantee for the gravity lesson: play the whole landing and
     // drop out on a scratch copy of the board, and keep recolouring the heap
@@ -3427,38 +3429,26 @@
 
     // Recolour anything already sitting in a match so that when the demo's own
     // line bursts, no unrelated balls go with it. Protected cells keep theirs.
-    demoSanitizeBoard(protect) {
-      const e = this.engine;
-      const sp = e.onPopBalls, ss = e.onPlaySound;
-      e.onPopBalls = null; e.onPlaySound = null;
-
-      let guard = 0;
-      while (guard++ < 12) {
-        const before = [];
-        for (let x = 4; x <= 20; x++) {
-          for (let y = 0; y <= 19; y++) {
-            const v = e.ballMap[x][y].bzMap;
-            if (v) before.push([x, y, v]);
-          }
-        }
-        if (e.matchColors() === 0) break;
-        for (const cell of before) {
-          const x = cell[0], y = cell[1], v = cell[2];
-          if (e.ballMap[x][y].bzMap) continue;            // survived the pop
-          e.ballMap[x][y].bzMap = protect.has(x + '_' + y) ? v : this.demoSafeColor(x, y);
-        }
-      }
-
-      e.onPopBalls = sp; e.onPlaySound = ss;
-      e.matchesDone = 0; e.matchCount = 0; e.sameBonus = 0;
-    }
-
     // Set up a scripted "the game plays itself" scene: seed the match balls,
     // spawn a specific piece, and queue the steer / rotate / colour-cycle inputs
     // played as it falls. The real engine handles the fall, landing, match
     // detection and pop, so everything shown is authentic gameplay.
-    startAttractPlay(kind) {
+    startAttractPlay(kind, title, caps) {
       const e = this.engine;
+
+      // Never inherit a half-finished lesson. If the previous one was still
+      // staging a chain when its scene ran out, its highlight would stay pinned
+      // to those cells -- and balls falling into them afterwards left a trio
+      // flashing in mismatched colours that wasn't a match at all. Any match it
+      // abandoned is resolved here too, so nothing is left for the next
+      // lesson's resolver to quietly repaint.
+      this.renderer.highlightKeys = new Set();
+      this.renderer.highlightActive = new Set();
+      if (this.attractPlay && this.attractPlay.phase !== 'done') {
+        delete e.checkMatches;
+        e.checkMatches();
+        e.droppingPathsMap = new Map();
+      }
       this.attractPlay = null;
       // Only the first lesson lays out the heap; the others carry straight on
       // from the board the previous one left behind, with no reset.
@@ -3506,6 +3496,7 @@
       // Colour isolations are applied AFTER the board sanitiser, otherwise its
       // refills can quietly reintroduce the very colours we cleared away.
       const postIsolate = [];
+      let perpColors = null;   // the diamond's non-match colours, chosen to fit
 
       if (kind === 'perp3') {
         // Nothing is added to the board here -- the vertical pair at (12,13)
@@ -3520,19 +3511,35 @@
         // Clear the lane the diamond drops into.
         [[10, 10], [11, 10], [11, 11], [12, 11]].forEach(c => { e.ballMap[c[0]][c[1]].bzMap = 0; });
 
-        // The taught line...
+        // Only the taught line is isolated.
         postIsolate.push({ cells: [{ x: 12, y: 13 }, { x: 13, y: 15 }, { x: 11, y: 11 }], color: C });
-        // ...and the diamond's OTHER balls, which land at (10,10) (11,10)
-        // (12,11) and would otherwise be free to complete lines of their own.
-        // Both balls next to (10,11) are o2 on purpose: the previous lesson
-        // leaves its odd ball there in o1, and isolating o1 beside it would
-        // condemn that ball and make it vanish before this piece even drops.
-        postIsolate.push({ cells: [{ x: 10, y: 10 }, { x: 11, y: 10 }], color: o2 });
-        postIsolate.push({ cells: [{ x: 12, y: 11 }], color: o1 });
 
-        // A diamond piece. [o1,C,o2,o2] --F--> [C,o2,o2,o1], putting the
-        // match-coloured image[0] ball on the heap at (11,11) to top the column.
-        setPiece(diamond, [o1, C, o2, o2], 13, 6);
+        // Rather than repaint the heap so the piece fits -- which showed up as a
+        // ball changing colour in the middle of the board just before this
+        // lesson began -- pick the diamond's other three colours to suit the
+        // heap exactly as it already is. Each is tried against the real match
+        // rule at the cell it will land on.
+        const palOrder = pal.filter(c => c !== C).concat([C]);
+        const tentative = [];
+        e.ballMap[11][11].bzMap = C;
+        tentative.push([11, 11]);
+        const chooseFor = (x, y) => {
+          for (const col of palOrder) {
+            e.ballMap[x][y].bzMap = col;
+            if (!this.demoCellInMatch(x, y)) { tentative.push([x, y]); return col; }
+          }
+          e.ballMap[x][y].bzMap = palOrder[0];
+          tentative.push([x, y]);
+          return palOrder[0];
+        };
+        const dA = chooseFor(10, 10);
+        const dB = chooseFor(11, 10);
+        const dC = chooseFor(12, 11);
+        for (const t of tentative) e.ballMap[t[0]][t[1]].bzMap = 0;
+        perpColors = [dA, dB, dC];
+
+        // [dC,C,dA,dB] --F--> [C,dA,dB,dC], landing C at (11,11) to top the column.
+        setPiece(diamond, [dC, C, dA, dB], 13, 6);
         steps.push({ y: 7.0, fn: () => e.transform(e.rotCW) });   // spin the diamond
         steps.push({ y: 8.0, fn: () => e.moveOBall(1) });
         steps.push({ y: 8.9, fn: () => e.moveOBall(1) });         // root 13 -> 11
@@ -3612,6 +3619,13 @@
 
       // Nothing on the board may already be a match, and nothing may be able to
       // form one where the demo's balls land. Seeded match balls keep theirs.
+      // The caption follows the lesson's own cells until something else (a
+      // completed line, a chain) takes over.
+      this.attractFocus = matchCells.map(k => {
+        const p = k.split('_');
+        return { x: +p[0], y: +p[1] };
+      });
+
       // Cells that must stay filled: the landing shelf and the props under the
       // perpendicular pair. They may be repainted, never removed.
       // Deliberately minimal -- just the cells that actually hold up a landing
@@ -3636,11 +3650,19 @@
       if (kind === 'support') {
         this.demoEnsureCleanDrop([[15, 11, o2], [16, 11, C], [17, 11, o1], [18, 11, C]]);
       }
+      // NOTE: the colour lessons deliberately do NOT force "only the taught
+      // line may match". Letting a landing complete a second line is where the
+      // demo's variety comes from -- it is shown afterwards as a chain, so it
+      // stays readable without being suppressed.
 
       this.renderer.updateScene(e);
       this.attractPlay = {
-        kind: kind, steps: steps, landed: false, speed: 2.6, color: C,
-        matchCells: matchCells, phase: 'falling', holdMs: 1500, holdUntil: 0
+        kind: kind, steps: steps, landed: false, color: C,
+        // The diamond spawns a row lower, so it falls slightly slower to reach
+        // the heap at the same moment the other lessons do.
+        speed: (kind === 'perp3') ? 1.67 : 2.0,
+        title: title || 'COLOR MATCH', caps: caps || [],
+        matchCells: matchCells, phase: 'falling', holdMs: 1900, holdUntil: 0
       };
     }
 
@@ -3669,16 +3691,25 @@
           this.renderer.highlightActive = new Set();
           delete e.checkMatches;     // restore the engine's real implementation
 
+          this.setAttractCaption(play.title, play.caps[3] || '');
+
           if (play.kind === 'support') { settle(); finish(); return; }
 
-          // Burst what the piece just made, then let the balls above drop in.
-          e.matchColors();
+          // Burst ONLY the line being taught. Anything else the landing
+          // completed is left on the board deliberately -- the cascade phase
+          // below picks it up and shows it as its own chain, one line at a
+          // time, which is how a second match stays readable.
+          this.demoPop(play.matchCells.map(k => {
+            const p = k.split('_');
+            return { x: +p[0], y: +p[1] };
+          }));
           settle();
           this.renderer.updateScene(e);
           play.phase = 'cascade';
           play.chain = 0;
           play.highlighting = false;
-          play.nextAt = now + 700;
+          // Let the burst caption be read before a chain can replace it.
+          play.nextAt = now + 1600;
         }
         return;
       }
@@ -3696,21 +3727,37 @@
           settle();
           this.renderer.updateScene(e);
           play.highlighting = false;
-          play.nextAt = now + 600;
+          play.nextAt = now + 800;
           return;
         }
 
-        const cells = this.demoFindMatchCells();
+        // Spotlight ONE line at a time. A cascade can complete two lines of
+        // different colours at once, and highlighting them together just looks
+        // like a jumble of mismatched balls flashing.
+        const found = this.demoFindMatchCells();
+        let cells = [];
+        if (found.length) {
+          const byColour = new Map();
+          for (const c of found) {
+            const v = e.ballMap[c.x][c.y].bzMap;
+            if (!byColour.has(v)) byColour.set(v, []);
+            byColour.get(v).push(c);
+          }
+          for (const group of byColour.values()) {
+            if (group.length > cells.length) cells = group;
+          }
+        }
         if (cells.length) {
           if (play.chain < 2) {
             play.chain++;
             play.chainCells = cells;
             play.highlighting = true;
             this.renderer.highlightKeys = new Set(cells.map(c => c.x + '_' + c.y));
-            this.setAttractCaption('COLOR MATCH', play.chain === 1
+            this.attractFocus = cells;
+            this.setAttractCaption(play.title, play.chain === 1
               ? 'The balls above drop in &mdash; and land <b>another match!</b>'
               : '<b>Chain reaction!</b> One drop keeps setting off the next&hellip;');
-            play.nextAt = now + 1400;
+            play.nextAt = now + 1600;
           } else {
             e.checkMatches();          // resolve any remainder, never leave one
             this.renderer.updateScene(e);
@@ -3735,16 +3782,17 @@
         // pulse every ball in the match so the whole line reads before it goes.
         e.endGame = true;            // hide the piece the engine queued up next
         this.renderer.updateScene(e);
-        // Highlight everything that is actually about to burst, not just the
-        // line being taught -- a landing sometimes completes a second line at
-        // the same time, and hiding that is what made balls seem to vanish for
-        // no reason.
-        const about = this.demoFindMatchCells().map(c => c.x + '_' + c.y);
-        this.renderer.highlightKeys = new Set(about.length ? about : play.matchCells);
+        // Spotlight just the line being taught. If the landing happened to
+        // complete another line as well, that one is shown afterwards as a
+        // chain rather than lumped in here -- highlighting both together was
+        // what made a group of mismatched colours appear to flash as one match.
+        this.renderer.highlightKeys = new Set(play.matchCells);
         this.renderer.highlightActive = new Set();
-        if (about.length > play.matchCells.length) {
-          this.setAttractCaption('COLOR MATCH', '<b>Two lines at once!</b> Both are about to go&hellip;');
-        }
+        this.attractFocus = play.matchCells.map(k => {
+          const p = k.split('_');
+          return { x: +p[0], y: +p[1] };
+        });
+        this.setAttractCaption(play.title, play.caps[2] || '');
         play.phase = 'hold';
         play.holdUntil = now + play.holdMs;
       }

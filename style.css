@@ -919,14 +919,20 @@ input:checked + .slider::before {
   gap: 0.85rem;
   width: 100%;
 }
+/* Floats next to whatever the demo is pointing at, so the eye doesn't have to
+   travel between the action and the text. JS sets left/top each caption. */
 .attract-caption {
-  max-width: 560px;
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  transform: translate(-50%, 0);
+  max-width: min(420px, 82vw);
   text-align: center;
-  padding: 0.9rem 1.5rem;
-  font-size: 1.05rem;
-  line-height: 1.45;
+  padding: 0.75rem 1.2rem;
+  font-size: 1rem;
+  line-height: 1.4;
   color: rgba(255, 255, 255, 0.95);
-  transition: opacity 0.25s ease;
+  transition: left 0.35s ease, top 0.35s ease;
 }
 .attract-caption b { color: var(--accent-cyan, #00f0ff); font-weight: 700; }
 .attract-hint {
