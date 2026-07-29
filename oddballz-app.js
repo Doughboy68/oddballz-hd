@@ -22,6 +22,9 @@
     18: { MIN_X: 8, MAX_X: 40, MAX_Y: 38, SPLIT: 24, UPPER: 20, LOWER: 16 }
   };
 
+  // Short names for the presets, used on the high score table.
+  const BOARD_SHORT = { 9: 'Classic', 12: 'Roomy', 18: 'Dense' };
+
   let BOARD_WIDTH = 9;
   let BP = BOARD_PRESETS[9];
   let BOARD_RATIO = 1;      // grid size relative to classic
@@ -100,18 +103,30 @@
   // --- 2. ENGINE LOGIC ---
   class OddUnitEngine {
     constructor() {
+      // lColors is the difficulty knob that matters most: an extra colour compounds
+      // over every ball in a line, so it hurts the 5-in-a-row parallel match far
+      // more than the 3-in-a-row perpendicular one. The original ramp reached the
+      // 6-colour ceiling at level 6 (~60 matches), long before the speed ramp had
+      // gone anywhere, after which colour difficulty never changed again. Each step
+      // now takes 3-4 levels instead of 1-2, so 6 colours arrives at level 12:
+      //
+      //   L1-3 = 3    L4-7 = 4    L8-11 = 5    L12+ = 6
+      //
+      // lShapes is deliberately left on its original schedule. Note lDelay is dead
+      // data -- it is assigned to pauseTime and never read; real fall speed comes
+      // from the baseSpeed line in updateContinuous.
       this.levAttr = [
         { lDelay: 100, lShapes: 2, lColors: 3 },
-        { lDelay: 100, lShapes: 2, lColors: 4 },
+        { lDelay: 100, lShapes: 2, lColors: 3 },
+        { lDelay: 100, lShapes: 3, lColors: 3 },
         { lDelay: 100, lShapes: 3, lColors: 4 },
-        { lDelay: 100, lShapes: 3, lColors: 5 },
-        { lDelay: 100, lShapes: 4, lColors: 5 },
-        { lDelay: 100, lShapes: 4, lColors: 6 },
-        { lDelay: 100, lShapes: 5, lColors: 6 },
-        { lDelay: 100, lShapes: 5, lColors: 6 },
-        { lDelay: 100, lShapes: 6, lColors: 6 },
-        { lDelay: 100, lShapes: 7, lColors: 6 },
-        { lDelay: 100, lShapes: 7, lColors: 6 },
+        { lDelay: 100, lShapes: 4, lColors: 4 },
+        { lDelay: 100, lShapes: 4, lColors: 4 },
+        { lDelay: 100, lShapes: 5, lColors: 4 },
+        { lDelay: 100, lShapes: 5, lColors: 5 },
+        { lDelay: 100, lShapes: 6, lColors: 5 },
+        { lDelay: 100, lShapes: 7, lColors: 5 },
+        { lDelay: 100, lShapes: 7, lColors: 5 },
         { lDelay: 98,  lShapes: 7, lColors: 6 },
         { lDelay: 95,  lShapes: 7, lColors: 6 },
         { lDelay: 93,  lShapes: 7, lColors: 6 },
@@ -153,15 +168,6 @@
         { lDelay: 20,  lShapes: 7, lColors: 6 }
       ];
 
-      // Row-scan tables, derived from the board shape so they hold at any scale.
-      // At scale 1 these reproduce the original hardcoded 1992 tables exactly:
-      // midRow is the leftmost cell of each row from the bottom up to y = 4*scale
-      // (the spawn rows are deliberately excluded from row clearing), and lt/rtRow
-      // are the bottom row scanned in the two directions.
-      const rowTables = buildRowTables();
-      this.midRow = rowTables.midRow;
-      this.rtRow = rowTables.rtRow;
-      this.ltRow = rowTables.ltRow;
 
       this.ballShapes = [
         [{ x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }],
@@ -205,10 +211,6 @@
         [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 2, y: 2 }, { x: 1, y: 2 }, { x: 0, y: 2 }]
       ];
 
-      this.startPos = [6, 7, 8, 9].map(x => ({
-        x: Math.round(x * BOARD_RATIO), y: Math.round(3 * BOARD_RATIO)
-      }));
-
       this.matcher = true;
       this.level = 1;
       this.score = 0;
@@ -238,6 +240,28 @@
 
       this.onPlaySound = null;
       this.onPopBalls = null;
+
+      this.applyBoardGeometry();
+    }
+
+    // Everything that depends on the current board preset, in one re-runnable
+    // place so the attract demo can borrow the classic board and hand the
+    // player's board back afterwards.
+    //
+    // Row-scan tables are derived from the board shape rather than hardcoded. At
+    // width 9 they reproduce the original 1992 tables exactly: midRow is the
+    // leftmost cell of each row from the bottom up to y = 4*ratio (the spawn rows
+    // are deliberately excluded from row clearing), and lt/rtRow are the bottom
+    // row scanned in the two directions.
+    applyBoardGeometry() {
+      const rowTables = buildRowTables();
+      this.midRow = rowTables.midRow;
+      this.rtRow = rowTables.rtRow;
+      this.ltRow = rowTables.ltRow;
+
+      this.startPos = [6, 7, 8, 9].map(x => ({
+        x: Math.round(x * BOARD_RATIO), y: Math.round(3 * BOARD_RATIO)
+      }));
 
       this.initEngine();
     }
@@ -397,7 +421,16 @@
         }
       }
 
-      const baseSpeed = 1.0 + (this.level - 1) * 0.12;
+      // Fall speed in grid ROWS per second, so a taller preset gives more thinking
+      // time per piece (spawn-to-floor is ~16 rows on the 9-wide board but ~32 on
+      // the 18-wide). That is deliberate -- the wider boards are meant to be the
+      // more forgiving ones -- so this is not normalised by board width.
+      //
+      // The slope was 0.12 and uncapped, which reached 6.9x by level 50 and undid
+      // the stretched colour ramp well before then. At 0.08 it tracks the colour
+      // curve, and the ceiling turns the late game into a demanding steady state
+      // rather than a wall. The cap is a feel judgement, not a derived number.
+      const baseSpeed = Math.min(2.6, 1.0 + (this.level - 1) * 0.08);
       const speed = this.isZipping ? 35.0 : baseSpeed;
 
       // Direction 2 = down-left (Y+1), Direction 5 = down-right (X+1, Y+1)
@@ -1969,6 +2002,36 @@
       this.scene.add(this.activePointLight);
     }
 
+    // Tear the board down and rebuild it at the current preset. Deliberately a
+    // total rebuild: stale per-cell meshes keyed "x_y" surviving a board change
+    // are exactly the mesh-reuse fault that produced the old hanging-ball and gap
+    // bugs, so nothing is carried across. The shared geometries and materials are
+    // disposed rather than dropped, since the attract demo swaps boards on every
+    // idle cycle and leaking them would accumulate over a long session.
+    rebuildForBoard() {
+      const emptyGroup = (group) => {
+        while (group.children.length) group.remove(group.children[0]);
+      };
+
+      emptyGroup(this.ballsGroup);
+      emptyGroup(this.activeGroup);
+      emptyGroup(this.ghostGroup);
+      emptyGroup(this.boardGroup);
+      this.staticBallMeshes = new Map();
+      this.activeMeshes = [];        // updateScene rebuilds these on next pass
+      this.lastBallCount = -1;
+
+      if (this.hexGeo) this.hexGeo.dispose();
+      if (this.edgeGeo) this.edgeGeo.dispose();
+      if (this.hexMat) this.hexMat.dispose();
+      if (this.wireMat) this.wireMat.dispose();
+
+      if (this.sphereGeo) this.sphereGeo.dispose();
+      this.sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 32);
+
+      this.build3DBoard();
+    }
+
     build3DBoard() {
       const hexRadius = 0.52 * WORLD_SCALE;
       const hexShape = new THREE.Shape();
@@ -1984,21 +2047,23 @@
         depth: 0.2 * WORLD_SCALE, bevelEnabled: true, bevelSegments: 2, steps: 1,
         bevelSize: 0.03 * WORLD_SCALE, bevelThickness: 0.03 * WORLD_SCALE
       };
-      const hexGeo = new THREE.ExtrudeGeometry(hexShape, extrudeSettings);
-      const hexMat = new THREE.MeshStandardMaterial({ color: 0x141829, roughness: 0.6, metalness: 0.4, emissive: 0x070914, emissiveIntensity: 0.5 });
-      const wireMat = new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.35 });
-      const edgeGeo = new THREE.EdgesGeometry(hexGeo);
+      // Kept on the instance, not local: rebuildForBoard() has to dispose these
+      // when the board preset changes, and they are shared by every cell.
+      this.hexGeo = new THREE.ExtrudeGeometry(hexShape, extrudeSettings);
+      this.hexMat = new THREE.MeshStandardMaterial({ color: 0x141829, roughness: 0.6, metalness: 0.4, emissive: 0x070914, emissiveIntensity: 0.5 });
+      this.wireMat = new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.35 });
+      this.edgeGeo = new THREE.EdgesGeometry(this.hexGeo);
 
       for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
         for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y; y++) {
           if (isInBoard(x, y)) {
             const wPos = gridToWorld(x, y, -0.25);
-            const cellMesh = new THREE.Mesh(hexGeo, hexMat);
+            const cellMesh = new THREE.Mesh(this.hexGeo, this.hexMat);
             cellMesh.position.set(wPos.x, wPos.y, wPos.z);
             cellMesh.receiveShadow = true;
             this.boardGroup.add(cellMesh);
 
-            const wireFrame = new THREE.LineSegments(edgeGeo, wireMat);
+            const wireFrame = new THREE.LineSegments(this.edgeGeo, this.wireMat);
             wireFrame.position.set(wPos.x, wPos.y, wPos.z);
             this.boardGroup.add(wireFrame);
           }
@@ -2593,11 +2658,10 @@
       bindStartBtn('btnRestart');
       document.getElementById('btnPause').addEventListener('click', () => this.togglePause());
       document.getElementById('btnResume').addEventListener('click', () => this.togglePause());
-      document.getElementById('btnPauseEnd').addEventListener('click', () => this.promptEndGame());
-      document.getElementById('btnConfirmEndYes').addEventListener('click', () => this.confirmEndGame());
-      document.getElementById('btnConfirmEndNo').addEventListener('click', () => this.closeEndGameModal());
+      document.getElementById('btnPauseEnd').addEventListener('click', () => this.returnToTitle());
+      document.getElementById('btnGameOverMenu').addEventListener('click', () => this.returnToTitle());
 
-      ['btnHighScores', 'btnGameOverHighScores'].forEach(id => {
+      ['btnHighScores', 'btnGameOverHighScores', 'btnStartHighScores'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.addEventListener('click', () => this.showHighScoresModal());
       });
@@ -2800,6 +2864,9 @@
     startGame() {
       if (this.attractActive) this.exitAttract(false);
       if (this.attractIdleTimer) { clearTimeout(this.attractIdleTimer); this.attractIdleTimer = null; }
+      // Belt and braces: the demo borrows the classic board, so make sure the
+      // player's chosen board is back before a real game starts.
+      this.setLiveBoardWidth(storedBoardWidth());
       this.audio.init();
       this.engine.initGame();
       this.engine.build();
@@ -2832,35 +2899,9 @@
         this.audio.stopBGM();
       } else {
         document.getElementById('overlayPause').classList.add('hidden');
-        document.getElementById('dialogConfirmEnd').classList.add('hidden');
         this.lastTime = performance.now();
         this.audio.startBGM();
       }
-    }
-
-    promptEndGame() {
-      if (!this.isPlaying) return;
-      if (!this.isPaused) {
-        this.wasPausedByModal = true;
-        this.togglePause();
-      }
-      document.getElementById('dialogConfirmEnd').classList.remove('hidden');
-    }
-
-    closeEndGameModal() {
-      document.getElementById('dialogConfirmEnd').classList.add('hidden');
-      if (this.wasPausedByModal) {
-        this.wasPausedByModal = false;
-        if (this.isPlaying && this.isPaused) {
-          this.togglePause();
-        }
-      }
-    }
-
-    confirmEndGame() {
-      this.wasPausedByModal = false;
-      document.getElementById('dialogConfirmEnd').classList.add('hidden');
-      this.returnToTitle();
     }
 
     returnToTitle() {
@@ -2875,7 +2916,6 @@
 
       document.getElementById('overlayPause').classList.add('hidden');
       document.getElementById('overlayGameOver').classList.add('hidden');
-      document.getElementById('dialogConfirmEnd').classList.add('hidden');
       document.getElementById('overlayStart').classList.remove('hidden');
       document.getElementById('btnPause').disabled = true;
 
@@ -2891,7 +2931,7 @@
       const start = document.getElementById('overlayStart');
       if (!start || start.classList.contains('hidden')) return false;
       const blockers = ['gameDialogView', 'gameDialogAbout', 'gameDialogAudio',
-                        'overlayPause', 'overlayGameOver', 'dialogConfirmEnd'];
+                        'overlayPause', 'overlayGameOver'];
       for (const id of blockers) {
         const el = document.getElementById(id);
         if (el && !el.classList.contains('hidden')) return false;
@@ -2900,10 +2940,6 @@
     }
 
     scheduleAttractIdle() {
-      // The attract lessons are built on hardcoded classic-board coordinates
-      // (row 11 x5-9, the perpendicular line, the x15-16 gravity gap), so they are
-      // meaningless on a wider grid. Disabled there rather than half-working.
-      if (BOARD_WIDTH !== 9) return;
       if (this.attractIdleTimer) { clearTimeout(this.attractIdleTimer); this.attractIdleTimer = null; }
       this.attractIdleTimer = setTimeout(() => this.enterAttract(), this.ATTRACT_IDLE_MS);
     }
@@ -2913,14 +2949,31 @@
       this.attractTimers = [];
     }
 
+    // Swap the live board to a different preset. Both the engine and the renderer
+    // bake the board in when they are built, so this is a full rebuild of each --
+    // see ThreeRenderer.rebuildForBoard for why nothing is reused.
+    setLiveBoardWidth(w) {
+      if (BOARD_WIDTH === w) return false;
+      setBoardWidth(w);
+      this.engine.applyBoardGeometry();
+      this.renderer.rebuildForBoard();
+      return true;
+    }
+
     enterAttract() {
-      if (BOARD_WIDTH !== 9) return;
       if (this.attractActive) return;
       if (!this.isOnTitleIdle()) { if (!this.isPlaying) this.scheduleAttractIdle(); return; }
 
       this.attractActive = true;
       this.attractPlay = null;
       this.attractSavedMatcher = this.engine.matcher;   // restore the user's mode on exit
+
+      // The lessons are authored against classic-board coordinates (row 11 x5-9,
+      // the perpendicular line, the x15-16 gravity gap), and the demo only has to
+      // teach the rules -- which are the same at every width. So it always runs on
+      // the 9-wide board and hands the player's board back on the way out.
+      this.attractSavedWidth = BOARD_WIDTH;
+      this.setLiveBoardWidth(9);
 
       // Level 1's actual palette (levAttr[0].lColors = 3, i.e. colours 1-3), the
       // same every run so the demo looks like a real level-1 board.
@@ -2953,6 +3006,8 @@
       this.renderer.highlightKeys = new Set();
       this.renderer.highlightActive = new Set();
       delete this.engine.checkMatches;   // in case we exited mid-demo
+
+      this.setLiveBoardWidth(this.attractSavedWidth || storedBoardWidth());
 
       this.engine.endGame = true;
       if (this.attractSavedMatcher !== undefined) this.engine.matcher = this.attractSavedMatcher;
@@ -3933,7 +3988,8 @@
         score: score,
         level: level,
         skill: skill,
-        mode: this.engine.matcher ? 'Color Match' : 'Row Build'
+        mode: this.engine.matcher ? 'Color Match' : 'Row Build',
+        board: BOARD_SHORT[BOARD_WIDTH]
       });
 
       this.highScores.sort((a, b) => b.score - a.score);
@@ -3951,7 +4007,7 @@
       if (tbody) {
         tbody.innerHTML = '';
         if (this.highScores.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:1rem 0;">No records saved yet!</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:1rem 0;">No records saved yet!</td></tr>';
         } else {
           this.highScores.forEach((hs, idx) => {
             const tr = document.createElement('tr');
@@ -3960,6 +4016,7 @@
               <td style="font-weight:bold; color:var(--accent-gold);">${hs.score}</td>
               <td>Lvl ${hs.level}</td>
               <td style="font-size:0.8rem; color:var(--accent-cyan);">${hs.mode}</td>
+              <td style="font-size:0.8rem; color:var(--text-muted);">${hs.board || '&mdash;'}</td>
             `;
             tbody.appendChild(tr);
           });
@@ -4077,10 +4134,33 @@
     return 9;
   }
 
+  // Publish the real height of the touch controls bar so the attract overlay can
+  // keep its hint clear of it. The bar is content-sized and grows with the iPhone's
+  // bottom safe-area inset, so a hardcoded rem value in the CSS was always going to
+  // be wrong on some device. Guarded on h > 0: reading a hidden element gives zero.
+  function syncControlsHeightVar() {
+    const bar = document.getElementById('bottomControlsBar');
+    if (!bar) return;
+    const h = bar.getBoundingClientRect().height;
+    if (h > 0) document.documentElement.style.setProperty('--controls-h', h + 'px');
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     const width = storedBoardWidth();
     setBoardWidth(width);
     window.oddApp = new OddballzApp();
+
+    syncControlsHeightVar();
+    // Observe the bar itself rather than window resize: on a resize the listener
+    // runs a layout pass before the bar has settled to its final height, so the
+    // value lagged. ResizeObserver fires with the settled box every time.
+    const bar = document.getElementById('bottomControlsBar');
+    if (bar && window.ResizeObserver) {
+      new ResizeObserver(syncControlsHeightVar).observe(bar);
+    } else {
+      window.addEventListener('resize', syncControlsHeightVar);
+      window.addEventListener('orientationchange', () => setTimeout(syncControlsHeightVar, 150));
+    }
 
     const btnBoard = document.getElementById('btnDensePlayfield');
     if (btnBoard) {

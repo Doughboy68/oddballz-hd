@@ -577,6 +577,22 @@ input:checked + .slider::before {
   display: flex;
   gap: 1rem;
   justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Game over leaves the final board readable: a much lighter scrim and no backdrop
+   blur, so the player can study how the pieces finished. The blur mattered more
+   than the opacity here -- at 12px the balls smeared out regardless of alpha. */
+#overlayGameOver {
+  background: rgba(10, 12, 22, 0.35);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+#overlayGameOver .modal-card {
+  background: rgba(12, 15, 26, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 /* High Scores Table */
@@ -879,7 +895,10 @@ input:checked + .slider::before {
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  padding: 6rem 1rem 8.5rem;
+  /* --controls-h is measured from #bottomControlsBar at runtime, so the hint
+     clears the real bar (including the iPhone's bottom safe-area inset) rather
+     than a hardcoded guess at its height. Fallback matches the old value. */
+  padding: 6rem 1rem calc(var(--controls-h, 8.5rem) + 1rem);
 }
 .overlay-attract.hidden { display: none; }
 
@@ -955,7 +974,7 @@ input:checked + .slider::before {
 
 /* Keep the demo text clear of the taller mobile header / controls bar */
 @media (max-width: 768px) {
-  .overlay-attract { padding: 9.5rem 0.8rem 11rem; }
+  .overlay-attract { padding: 9.5rem 0.8rem calc(var(--controls-h, 11rem) + 1.25rem); }
   .attract-mode-title { font-size: 1.15rem; }
   .attract-caption { font-size: 0.95rem; padding: 0.75rem 1.1rem; }
 }
