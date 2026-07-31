@@ -12,14 +12,27 @@
   // occupies the same world-space extent (x +/-8.0, y +/-8.23) and the camera and
   // the locked mobile scaling maths never see a difference.
   //
-  //   bottom edge = MAX_X - MAX_Y + LOWER      top edge = UPPER - MIN_X
+  //   bottom edge B = MAX_X - MAX_Y + LOWER    top edge T = UPPER - MIN_X
+  //   width       W = MAX_X - MIN_X            height   H = MAX_Y
+  //
+  // The parameters are NOT independent. SPLIT is pinned twice over: the upper
+  // region must reach full width exactly on its last row (SPLIT = MAX_X - UPPER + 2)
+  // and the lower region must start narrowing on its first (SPLIT = MIN_X + LOWER).
+  // Both must give the same SPLIT, which reduces to
+  //
+  //   2W = T + B + H - 2
+  //
+  // Miss it and the hexagon grows extra full-width rows -- a straight vertical
+  // section down one side that reads as the board being tilted. Scaling the six
+  // values independently and rounding did exactly that: 12 wide gained one such
+  // row and 18 wide gained two. Check the constraint before editing this table.
   //
   // Set once at startup by setBoardWidth(); changing it reloads the page rather
   // than trying to remap a live board onto a different grid.
   const BOARD_PRESETS = {
     9:  { MIN_X: 4, MAX_X: 20, MAX_Y: 19, SPLIT: 12, UPPER: 10, LOWER: 8 },
-    12: { MIN_X: 5, MAX_X: 26, MAX_Y: 25, SPLIT: 16, UPPER: 13, LOWER: 11 },
-    18: { MIN_X: 8, MAX_X: 40, MAX_Y: 38, SPLIT: 24, UPPER: 20, LOWER: 16 }
+    12: { MIN_X: 5, MAX_X: 27, MAX_Y: 26, SPLIT: 16, UPPER: 13, LOWER: 11 },
+    18: { MIN_X: 8, MAX_X: 42, MAX_Y: 40, SPLIT: 24, UPPER: 20, LOWER: 16 }
   };
 
   // Short names for the presets, used on the high score table.
