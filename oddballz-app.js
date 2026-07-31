@@ -43,6 +43,11 @@
   // view rather than sitting in open space above the board.
   let SPAWN_ROW = 3;
 
+  // Horizontal half-extent the portrait camera keeps in view, as tan(hFov/2).
+  // This is the value the original fov expression produced at an iPhone's aspect
+  // (0.571), kept as the reference so phones render exactly as before.
+  const MOBILE_H_COVERAGE = 0.35652;
+
   let BOARD_WIDTH = 9;
   let BP = BOARD_PRESETS[9];
   let BOARD_RATIO = 1;      // grid size relative to classic
@@ -1951,12 +1956,14 @@
       // drop mean luminance to 26-31%, so the balls go dark. Linear was the only
       // mode that kept both (mean luminance 55% against ACES's 43%).
       this.renderer.toneMapping = THREE.LinearToneMapping;
-      // Exposure drops from 1.1 with the tone mapping change. Linear does not roll
-      // off, so at 1.1 the channels clip at 255 and hues collapse towards the RGB
-      // corners: azure and emerald ended up 20 degrees apart against 63 in source,
-      // which is the pair that was already hard to tell apart. 0.7 keeps 54 degrees
-      // of that separation at 89% mean saturation, against 33% under ACES.
-      this.renderer.toneMappingExposure = 0.7;
+      // Back up to 1.0. This was held at 0.7 because higher exposure collapsed the
+      // hues together -- but that was the CYAN RIM LIGHT squashing them, and the rim
+      // is white now. With the rim fixed, exposure is free again, and raising it
+      // brightens the board and the balls together: the board goes from 27 to 47,
+      // which is the shiny surface the game had under ACES (49), while saturation
+      // stays at 78% instead of ACES's 44%. The ball colours below are dimmed to
+      // absorb the extra exposure without clipping.
+      this.renderer.toneMappingExposure = 1.0;
 
       this.container.appendChild(this.renderer.domElement);
       this.updateCameraFraming();
@@ -1994,17 +2001,23 @@
 
     initMaterials() {
       const colors = [
-        { main: 0x0099ff, roughness: 0.15, metalness: 0.35, emissive: 0x002266 }, // 1: Electric Azure Cyan-Blue
-        // 2: pulled from a pink-leaning crimson towards true red. It used to render
-        // at hue 332 against magenta's 296 -- both read as pink at ball size. Now
-        // hue 345, a ~49 degree gap.
-        { main: 0xf02038, roughness: 0.15, metalness: 0.30, emissive: 0x500808 }, // 2: Neon Ruby Red
-        // 3: darkened. At 0xf055 the green channel pegged at 255 under Linear tone
-        // mapping and the ball read as blown out. Same hue (144), no clipping.
-        { main: 0x00c94a, roughness: 0.18, metalness: 0.25, emissive: 0x004410 }, // 3: Vibrant Emerald Green
-        { main: 0xffc107, roughness: 0.20, metalness: 0.40, emissive: 0x553300 }, // 4: Amber Gold
-        { main: 0xb030ff, roughness: 0.15, metalness: 0.30, emissive: 0x330055 }, // 5: Electric Amethyst Purple
-        { main: 0xff00b7, roughness: 0.15, metalness: 0.30, emissive: 0x550033 }  // 6: Hot Magenta
+        // All six dimmed together, base and emissive, to make room for exposure 1.0.
+        // The exposure is what brightens the board back to its old shiny look; the
+        // balls do not need that extra stop, and taking it would clip them. Dimming
+        // the source instead costs nothing visible: measured, saturation still
+        // averages 78% and every hue lands within a few degrees of where it was.
+        //
+        // Emissives are ~22% of each base. That ratio matters -- hand-picked
+        // brighter emissives put purple at 22% clipped where this puts it at 10%.
+        //
+        // Ruby sits at hue 349 and magenta at 311 so the two do not both read as
+        // pink; purple is the closest neighbour to magenta at 36 degrees.
+        { main: 0x0080d8, roughness: 0.15, metalness: 0.35, emissive: 0x001c2f }, // 1: Electric Azure Cyan-Blue
+        { main: 0xd81c32, roughness: 0.15, metalness: 0.30, emissive: 0x2f060b }, // 2: Neon Ruby Red
+        { main: 0x00a83c, roughness: 0.18, metalness: 0.25, emissive: 0x00250d }, // 3: Vibrant Emerald Green
+        { main: 0xd9a406, roughness: 0.20, metalness: 0.40, emissive: 0x2f2401 }, // 4: Amber Gold
+        { main: 0x8020b8, roughness: 0.15, metalness: 0.30, emissive: 0x1c0728 }, // 5: Electric Amethyst Purple
+        { main: 0xd8009c, roughness: 0.15, metalness: 0.30, emissive: 0x2f0022 }  // 6: Hot Magenta
       ];
 
       const clip = this.topClipPlane ? [this.topClipPlane] : null;
@@ -2034,6 +2047,10 @@
           clippingPlanes: clip,
           clipShadows: true
         });
+
+        // render() breathes the ball colour around this; keep the rest value so the
+        // pulse has something stable to work from.
+        mat.userData.baseColor = mat.color.clone();
 
         this.ballMaterials.push(mat);
         this.ghostMaterials.push(ghostMat);
@@ -2066,15 +2083,22 @@
       rimLight.position.set(-15, 10, 10);
       this.scene.add(rimLight);
 
-      // Cyan glow that rides along with the falling piece. At 3.0 intensity over a
-      // 10 unit range it lit up the whole stack as the piece came down: measured
-      // +55 luminance on the ball directly beneath it, against a base of ~100, and
-      // still +5 on the far side of a board only 16 units wide. ACES used to
-      // compress that; Linear does not. 1.2 over 5 units keeps the glow on the
-      // piece and drops it to nothing within about three cells.
-      this.activePointLight = new THREE.PointLight(0x00f0ff, 1.2, 5);
-      this.activePointLight.position.set(0, 0, 2);
-      this.scene.add(this.activePointLight);
+      // One small light per ball of the falling piece rather than a single one at
+      // its centre. A single light threw one round pool that sat in the middle of
+      // the shape and was always cyan whatever the piece was made of; four take the
+      // outline of the piece and each carries its own ball's colour, so the glow on
+      // the board reads as a reflection of what is actually falling.
+      //
+      // The count is fixed at four and unused ones are dimmed to zero rather than
+      // hidden: changing how many lights are in the scene forces Three.js to
+      // recompile every material.
+      this.activeBallLights = [];
+      for (let i = 0; i < 4; i++) {
+        const L = new THREE.PointLight(0xffffff, 0, 5.0);
+        L.position.set(0, 0, 2);
+        this.scene.add(L);
+        this.activeBallLights.push(L);
+      }
     }
 
     // Tear the board down and rebuild it at the current preset. Deliberately a
@@ -2097,9 +2121,7 @@
       this.lastBallCount = -1;
 
       if (this.hexGeo) this.hexGeo.dispose();
-      if (this.edgeGeo) this.edgeGeo.dispose();
       if (this.hexMat) this.hexMat.dispose();
-      if (this.wireMat) this.wireMat.dispose();
 
       if (this.sphereGeo) this.sphereGeo.dispose();
       this.sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 32);
@@ -2133,9 +2155,28 @@
       // Kept on the instance, not local: rebuildForBoard() has to dispose these
       // when the board preset changes, and they are shared by every cell.
       this.hexGeo = new THREE.ExtrudeGeometry(hexShape, extrudeSettings);
-      this.hexMat = new THREE.MeshStandardMaterial({ color: 0x141829, roughness: 0.6, metalness: 0.4, emissive: 0x070914, emissiveIntensity: 0.5 });
-      this.wireMat = new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.35 });
-      this.edgeGeo = new THREE.EdgesGeometry(this.hexGeo);
+      // The board should read as a bluish metallic surface that catches the light,
+      // not a flat lighter slab with a bright outline. Raising the face colour and
+      // the wireframe did the latter, and made the grid look green-edged.
+      //
+      // So this leans on the material's response to light instead of its own
+      // brightness: lower roughness and higher metalness give sharper specular
+      // highlights, so the surface picks up the rim light and the glow of the
+      // falling piece rather than sitting inert. The base colour is tinted towards
+      // blue so what it does reflect reads cool.
+      //
+      // Material properties only, deliberately. Lighting the board more strongly
+      // would work but cannot be aimed: Three.js r128 applies a light to every
+      // object once the camera can see its layer, so a cyan light for the board
+      // also swings gold about 57 units of green. Tried and measured; the balls
+      // must keep the corrected palette.
+      this.hexMat = new THREE.MeshStandardMaterial({ color: 0x1e2c44, roughness: 0.35, metalness: 0.55, emissive: 0x0a1622, emissiveIntensity: 0.5 });
+      // No wireframe at all. The original board had no per-cell outline -- the cells
+      // read from the dark gaps between the hexes and the bevel catching the light.
+      // The cyan LineSegments that drew one were also the source of the jagged cyan
+      // edges down the side of the board: hairline geometry aliases badly whatever
+      // the renderer's antialiasing does, and the colour made it obvious. Dropping
+      // it halves the board's object count as well.
 
       for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
         for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y; y++) {
@@ -2146,10 +2187,6 @@
             cellMesh.position.set(wPos.x, wPos.y, wPos.z);
             cellMesh.receiveShadow = true;
             this.boardGroup.add(cellMesh);
-
-            const wireFrame = new THREE.LineSegments(this.edgeGeo, this.wireMat);
-            wireFrame.position.set(wPos.x, wPos.y, wPos.z);
-            this.boardGroup.add(wireFrame);
           }
         }
       }
@@ -2292,12 +2329,39 @@
         }
 
         avgX /= 4; avgY /= 4; avgZ /= 4;
-        this.activePointLight.position.set(avgX, avgY, avgZ + 1.5);
+
+        // Each ball lights the board beneath it in its own colour.
+        for (let i = 0; i <= 3; i++) {
+          const L = this.activeBallLights[i];
+          const val = engine.oddballz.image[i];
+          const mesh = this.activeMeshes[i];
+          if (val > 0 && mesh) {
+            // Behind the ball, between it and the board, not in front of it. In
+            // front, the light hits the face the camera sees and the ball flares:
+            // at the same strength that put the piece at 52% clipped against a 16%
+            // baseline, behind it leaves the baseline untouched. It also means the
+            // brightness can go up enough to actually show -- at the 0.55 first
+            // tried, the board moved 3 to 7 units, which is invisible.
+            L.position.set(mesh.position.x, mesh.position.y, mesh.position.z - 0.45);
+            L.color.copy(this.ballMaterials[(val - 1) % this.ballMaterials.length].color);
+            // Base only. render() pulses around this each frame, so setting
+            // intensity directly here would fight it.
+            L.userData.baseIntensity = 4.5;
+          } else {
+            L.userData.baseIntensity = 0;
+            L.intensity = 0;
+          }
+        }
       } else {
         for (let i = 0; i < 4; i++) {
           if (this.activeMeshes[i]) {
             this.activeMeshes[i].visible = false;
             this.activeMeshes[i].initialized = false;
+          }
+          // No piece falling, so nothing should be glowing on the board.
+          if (this.activeBallLights[i]) {
+            this.activeBallLights[i].userData.baseIntensity = 0;
+            this.activeBallLights[i].intensity = 0;
           }
         }
       }
@@ -2487,6 +2551,49 @@
       this.ghostGroup.rotation.y = hoverRoll;
       this.ghostGroup.position.z = hoverZ;
 
+      // Pulse the falling piece's lights so the balls read as energised on the way
+      // down. Each ball is offset in phase so the piece shimmers rather than
+      // throbbing as one block. Driven off the base intensity updateScene stores,
+      // not the live value, which would compound frame on frame.
+      if (this.activeBallLights) {
+        for (let i = 0; i < this.activeBallLights.length; i++) {
+          const L = this.activeBallLights[i];
+          const base = L.userData.baseIntensity || 0;
+          L.intensity = base <= 0 ? 0
+            : base * (1 + 0.3 * Math.sin(this._flightTime * 3.2 + i * 0.7));
+        }
+      }
+
+      // The balls already landed breathe too, so the board is not inert while a
+      // piece falls. Done on the shared material rather than with lights: there can
+      // be up to 936 settled balls and one light each is impossible, whereas six
+      // shared materials cost nothing per ball.
+      //
+      // Scaling the COLOUR, not emissiveIntensity. Emissive turned out to have
+      // almost no leverage -- sweeping it from 0 to 1.6 moved a ball only about 11
+      // luminance, because the balls are dominated by scene lighting rather than
+      // their own glow, and at 0.18 amplitude the swing measured 0.4, i.e. nothing.
+      //
+      // Range 0.90 to 1.02, so it is centred just below the resting colour rather
+      // than above it. The balls already sit near the top of the range at exposure
+      // 1.0 and there is very little headroom above: x1.05 took one ball from 17%
+      // of its pixels blown to 31%. Downward is free -- clipping falls as it dims.
+      // This gives about 8 luminance of swing with clipping staying under 20%.
+      //
+      // Slower than the falling piece (1.6 against 3.2) so that stays the livelier
+      // one, and phase is spread across the six colours so the board shimmers
+      // rather than flashing in unison.
+      if (this.ballMaterials) {
+        for (let i = 0; i < this.ballMaterials.length; i++) {
+          const m = this.ballMaterials[i];
+          const base = m.userData.baseColor;
+          if (base) {
+            const f = 0.96 + 0.06 * Math.sin(this._flightTime * 1.6 + i * 1.05);
+            m.color.setRGB(base.r * f, base.g * f, base.b * f);
+          }
+        }
+      }
+
       // === 3D SPACE FLIGHT MOTION (ALIGNED WITH BOARD PERSPECTIVE TILT) ===
       const isZip = this.engine && this.engine.isZipping;
       const flightSpeedMult = isZip ? 2.5 : 1.0;
@@ -2632,7 +2739,14 @@
 
       if (aspect < 1.0) {
         // iPhone & Android portrait mobile camera framing: Ergonomic scaled view showing full board & all tips
-        this.camera.fov = Math.min(68, 42 / (aspect * 1.15));
+        // Exact form of the expression this replaces, which was:
+        //     this.camera.fov = Math.min(68, 42 / (aspect * 1.15));
+        // That holds horizontal coverage constant only while tan(fov/2) ~= fov/2.
+        // True at phone aspects (0.571, accurate to 0.2%), not at tablet ones
+        // (0.827, 5.9% short), which clipped the board off both edges of an iPad by
+        // 14px and 25px. Anchored on MOBILE_H_COVERAGE so phones are unchanged: at
+        // 0.571 this returns 63.96, the same value the old line gave.
+        this.camera.fov = Math.min(68, 2 * Math.atan(MOBILE_H_COVERAGE / aspect) * 180 / Math.PI);
         const distFactor = (1.0 - aspect);
         this.camera.position.set(0.4, -16.5 - distFactor * 2.0, 18.0 + distFactor * 2.5);
         this.camera.lookAt(0.4, 0.4, 0);

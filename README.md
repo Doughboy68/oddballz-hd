@@ -21,15 +21,30 @@ npm run dev -- --host
 
 ## Controls
 
-- **Move Piece**: <kbd>←</kbd> / <kbd>→</kbd> (or <kbd>A</kbd> / <kbd>D</kbd>)
-- **Rotate Piece**: <kbd>↑</kbd> / <kbd>↓</kbd>
-- **Flip X / Y**: <kbd>X</kbd> / <kbd>Y</kbd>
-- **Cycle Colour Order**: <kbd>F</kbd>
+- **Move Piece**: <kbd>←</kbd> / <kbd>→</kbd> — or <kbd>A</kbd> / <kbd>D</kbd>
+- **Rotate Piece**: <kbd>↑</kbd> / <kbd>↓</kbd> — or <kbd>W</kbd> / <kbd>S</kbd>
+- **Flip X / Y**: <kbd>X</kbd> / <kbd>Y</kbd> — or <kbd>Q</kbd> / <kbd>E</kbd>
+- **Cycle Colour Order**: <kbd>F</kbd> (also <kbd>Insert</kbd>, <kbd>Numpad0</kbd>)
 - **Hard Drop (Zip)**: <kbd>Space</kbd>
-- **Pause**: <kbd>P</kbd>
-- **Start / Restart**: <kbd>Enter</kbd>
+- **Pause**: <kbd>P</kbd> · **Mute**: <kbd>M</kbd> · **Start / Restart**: <kbd>Enter</kbd>
 
-On-screen touch buttons mirror all of the above on mobile.
+The letter keys form a complete left-hand layout — <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd>
+over <kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, with <kbd>F</kbd> one key across and
+<kbd>Space</kbd> under the thumb — so the whole game is playable one-handed.
+
+On-screen touch buttons mirror all of the above, laid out as two rows of four at
+every screen size: move and flip fall under the left thumb, rotate, colour and drop
+under the right.
+
+## Board Size
+
+The title card cycles the playfield between **9 wide (classic)**, **12 wide (roomy)**
+and **18 wide (dense)** — measured along the bottom edge. Wider boards fit
+proportionally smaller balls into the same physical playfield, so there is more room
+to manoeuvre without the board taking more screen. Changing it reloads the game; the
+setting is remembered per device.
+
+The classic 9-wide board is the original 1992 geometry, untouched.
 
 ## Game Modes
 
@@ -44,7 +59,9 @@ On-screen touch buttons mirror all of the above on mobile.
 If the title screen sits idle for ~12 seconds, an arcade-style demo takes over the
 board and teaches the game in three lessons, then returns to the title and loops.
 Any key or tap returns to the title; <kbd>Enter</kbd> starts a game straight from
-the demo.
+the demo. The demo always runs on the classic 9-wide board whatever size is
+selected — the rules it teaches are the same at every width — and hands your board
+back on the way out.
 
 1. **Colour Match** — five in a row
 2. **Colour Match** — three in a perpendicular line
@@ -76,13 +93,19 @@ itself does not depend on them.
 ## Development Notes
 
 - **Bump the cache-bust version when you change `oddballz-app.js` or `style.css`.**
-  `index.html` links them as `?v=1.6.3`; incrementing it is what forces browsers (and
+  `index.html` links them as `?v=N.N.N`; incrementing it is what forces browsers (and
   GitHub Pages) to fetch the new file instead of a cached one. Without it your change
-  may simply not load.
+  may simply not load. Never reuse a number you have already served, either — that
+  fails the same way.
 - The engine logic is a faithful port and is well tested — if balls appear to hang,
   vanish or leave gaps, suspect the renderer's mesh reuse before the engine.
 - The mobile camera scaling and centering maths is deliberately locked; see
   `GEMINI.md`.
+- **`?palette` on the URL** paints every ball colour and all seven piece shapes onto
+  the real board with the floating panels hidden. It is the right way to judge any
+  colour or lighting change, ideally on a phone rather than a desktop pane.
+- Board geometry is a preset table with a constraint between its parameters; see
+  `CLAUDE.md` before editing `BOARD_PRESETS`.
 
 ## Credits
 

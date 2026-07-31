@@ -187,15 +187,31 @@ body, html {
 }
 
 /* Stats Panel */
+/* Both side panels share one width. They float over the playfield, so every pixel
+   is board they cover; and because the board is centred, unequal panels leave
+   unequal gaps -- the guide used to be 52px wider, which left 64px of clearance on
+   the left and 7px on the right and read as lopsided. */
+/* 160 is the narrowest that fits the guide's longest row (Space + Hard Drop needs
+   157 including the key cap); the stats panel has room to spare at that width.
+   The shared height keeps the two cards matching so the layout reads as symmetric:
+   the stats card is naturally 201px and the guide 173px, and min-height rather than
+   height means either can still grow past it instead of clipping. */
+:root {
+  --side-panel-w: 160px;
+  --side-panel-h: 201px;
+}
+
 .stats-panel {
   position: absolute;
   left: 1.2rem;
   top: 7rem;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
-  padding: 1.2rem;
-  min-width: 170px;
+  gap: 0.55rem;
+  padding: 0.8rem 0.9rem;
+  width: var(--side-panel-w);
+  min-height: var(--side-panel-h);
+  justify-content: space-between;
 }
 
 .stat-card {
@@ -205,15 +221,16 @@ body, html {
 }
 
 .stat-label {
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 700;
   color: var(--text-muted);
-  letter-spacing: 1px;
+  letter-spacing: 0.6px;
 }
 
 .stat-value {
-  font-size: 1.6rem;
+  font-size: 1.35rem;
   font-weight: 800;
+  line-height: 1.1;
 }
 
 .text-gold { color: var(--accent-gold); }
@@ -222,16 +239,21 @@ body, html {
 .text-danger { color: var(--accent-pink); }
 
 /* Keybinds Panel */
+/* Same reasoning as the stats panel, and more so: showing both the arrows and the
+   WASD alternates made this the widest thing on screen and it sat over the board's
+   widest band. No min-width, so it shrinks to its content. */
 .keybinds-panel {
   position: absolute;
   right: 1.2rem;
   top: 7rem;
-  padding: 1.2rem;
+  padding: 0.7rem 0.8rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  min-width: 200px;
-  font-size: 0.85rem;
+  gap: 0.4rem;
+  width: var(--side-panel-w);
+  min-height: var(--side-panel-h);
+  justify-content: space-between;
+  font-size: 0.76rem;
 }
 
 .panel-title {
@@ -246,17 +268,18 @@ body, html {
 .key-row {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.28rem;
   color: var(--text-main);
+  white-space: nowrap;
 }
 
 kbd {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 5px;
-  padding: 0.15rem 0.45rem;
+  padding: 0.1rem 0.3rem;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 700;
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
 }
@@ -265,7 +288,7 @@ kbd {
    panel reads as one scheme with a secondary column rather than two lists. */
 .key-alt {
   display: inline-flex;
-  gap: 0.25rem;
+  gap: 0.18rem;
   opacity: 0.5;
 }
 
@@ -613,15 +636,15 @@ input:checked + .slider::before {
    blur, so the player can study how the pieces finished. The blur mattered more
    than the opacity here -- at 12px the balls smeared out regardless of alpha. */
 #overlayGameOver {
-  background: rgba(10, 12, 22, 0.35);
+  background: rgba(10, 12, 22, 0.22);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 #overlayGameOver .modal-card {
-  background: rgba(12, 15, 26, 0.72);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(12, 15, 26, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 /* High Scores Table */
@@ -725,6 +748,9 @@ input:checked + .slider::before {
     left: 0;
     right: 0;
     width: 100%;
+    /* The shared side-panel height is for the floating cards on wider screens.
+       Left applied here it turned this strip into a 201px band over the board. */
+    min-height: 0;
     display: flex;
     flex-direction: row;
     justify-content: space-around;
