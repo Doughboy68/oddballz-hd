@@ -1417,17 +1417,28 @@
 
       switch (type) {
         case 'click': {
+          // Colour cycle. Fires on every F press, often several times per piece, so
+          // it has to sit under the one-off effects rather than on top of them. It
+          // was the only short effect running a raw square wave straight to the
+          // output -- every other one is triangle or sine through a filter -- and a
+          // square's odd harmonics made it cut through far harder than its 0.15
+          // gain suggested. Same pitch sweep and timing, so it still reads as the
+          // same event; just softer harmonics, filtered, and quieter.
           const osc = this.ctx.createOscillator();
+          const filter = this.ctx.createBiquadFilter();
           const gain = this.ctx.createGain();
-          osc.type = 'square';
+          osc.type = 'triangle';
           osc.frequency.setValueAtTime(600, now);
           osc.frequency.exponentialRampToValueAtTime(1200, now + 0.04);
-          gain.gain.setValueAtTime(0.15, now);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
-          osc.connect(gain);
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(2600, now);
+          gain.gain.setValueAtTime(0.08, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+          osc.connect(filter);
+          filter.connect(gain);
           gain.connect(out);
           osc.start(now);
-          osc.stop(now + 0.04);
+          osc.stop(now + 0.05);
           break;
         }
         case 'drop': {
