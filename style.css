@@ -34,7 +34,14 @@ body, html {
   top: 0;
   left: 0;
   width: 100vw;
+  /* 100vh on iOS Safari is the toolbar-HIDDEN height, so a layout sized to it runs
+     taller than what is actually on screen and the controls bar ends up under the
+     browser chrome. dvh tracks the visible area. This used to live in a
+     max-width:600px block, which meant phones were covered and iPads were not --
+     every iPad is 744px wide or more. 100vh stays as the fallback. */
   height: 100vh;
+  height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -58,6 +65,8 @@ body, html {
   flex: 0 0 auto;
   width: 100%;
   padding: 0.5rem 1rem;
+  /* Clears the home indicator on iPad as well as iPhone. */
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
   background: rgba(12, 15, 26, 0.95);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -252,6 +261,14 @@ kbd {
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
 }
 
+/* The left-hand alternatives (QWE / ASD), dimmed beside the primary keys so the
+   panel reads as one scheme with a secondary column rather than two lists. */
+.key-alt {
+  display: inline-flex;
+  gap: 0.25rem;
+  opacity: 0.5;
+}
+
 kbd.key-highlight {
   background: rgba(244, 63, 94, 0.25);
   border-color: var(--accent-pink);
@@ -373,16 +390,25 @@ input:checked + .slider::before {
   max-width: 95vw;
 }
 
+/* Always two rows of four, at every screen size. A wrapping flex row collapsed to
+   a single row of eight as soon as there was space, which broke the thumb layout:
+   with 4x2 the left thumb covers move and flip, the right thumb covers rotate,
+   colour and drop, and that is worth keeping on a tablet where the device is held
+   the same way. Capped so the buttons do not become absurd on a desktop monitor,
+   but wide enough that an iPad still puts them under the thumbs. */
 .touch-cluster {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   justify-content: center;
   gap: 0.35rem;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
   background: var(--panel-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  padding: 0.35rem 0.75rem;
-  border-radius: 12px;
+  padding: 0.35rem;
+  border-radius: 14px;
   border: 1px solid var(--panel-border);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
@@ -391,33 +417,36 @@ input:checked + .slider::before {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #fff;
-  padding: 0.5rem 0.8rem;
-  min-height: 48px;
-  border-radius: 9px;
+  padding: 0.6rem 0.15rem;
+  min-height: 74px;          /* tall enough to hit with a thumb without looking */
+  border-radius: 10px;
   font-family: var(--font-family);
   font-weight: 700;
   font-size: 0.78rem;
   cursor: pointer;
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
+  text-align: center;
   transition: all 0.15s ease;
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .touch-btn .btn-icon {
-  font-size: 1.1rem;
+  font-size: 1.35rem;
   line-height: 1;
 }
 
 .touch-btn .btn-label {
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.02em;
+  line-height: 1.1;
   white-space: nowrap;
 }
 
@@ -645,10 +674,8 @@ input:checked + .slider::before {
 }
 
 @media (max-width: 600px) {
-  #appLayout {
-    height: 100dvh;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
+  /* #appLayout's dvh and safe-area handling moved to the base rule so iPads get it
+     too; duplicating it here would just invite the two copies to drift apart. */
 
   #uiOverlay {
     padding: 0.25rem 0.35rem;
@@ -723,44 +750,12 @@ input:checked + .slider::before {
     font-size: 1.05rem;
   }
 
-  /* Ergonomic 4-Column Vertical Touch Button Grid directly below 3D canvas for mobile play */
+  /* The 4-column thumb grid and its button sizing now live in the base rules so
+     tablets and desktop get the same layout; only the tighter phone gutter is
+     specific to this breakpoint. */
   #bottomControlsBar {
-    padding: 0.35rem 0.4rem;
-    padding-bottom: max(0.4rem, env(safe-area-inset-bottom, 0px));
-    width: 100%;
-  }
-
-  .touch-cluster {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.35rem;
-    width: 100%;
-    padding: 0.35rem;
-    border-radius: 14px;
-  }
-
-  .touch-btn {
-    padding: 0.6rem 0.15rem;
-    min-height: 74px; /* Doubled height for effortless thumb tapping on mobile */
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    text-align: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  }
-
-  .touch-btn .btn-icon {
-    font-size: 1.35rem;
-    line-height: 1;
-  }
-
-  .touch-btn .btn-label {
-    font-size: 0.76rem;
-    font-weight: 800;
-    line-height: 1.1;
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
   }
 
   /* Mobile Modals scaling */

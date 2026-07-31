@@ -1944,8 +1944,19 @@
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.1;
+      // Linear, not ACES. ACES is a film curve that desaturates highlights by
+      // design, and with this scene's hot lighting it was crushing the balls to
+      // near-grey: measured across all six, mean saturation 33% against 99% under
+      // Linear, with green worst at 10%. Reinhard and Cineon restore the colour but
+      // drop mean luminance to 26-31%, so the balls go dark. Linear was the only
+      // mode that kept both (mean luminance 55% against ACES's 43%).
+      this.renderer.toneMapping = THREE.LinearToneMapping;
+      // Exposure drops from 1.1 with the tone mapping change. Linear does not roll
+      // off, so at 1.1 the channels clip at 255 and hues collapse towards the RGB
+      // corners: azure and emerald ended up 20 degrees apart against 63 in source,
+      // which is the pair that was already hard to tell apart. 0.7 keeps 54 degrees
+      // of that separation at 89% mean saturation, against 33% under ACES.
+      this.renderer.toneMappingExposure = 0.7;
 
       this.container.appendChild(this.renderer.domElement);
       this.updateCameraFraming();
@@ -1984,8 +1995,13 @@
     initMaterials() {
       const colors = [
         { main: 0x0099ff, roughness: 0.15, metalness: 0.35, emissive: 0x002266 }, // 1: Electric Azure Cyan-Blue
-        { main: 0xff2a5f, roughness: 0.15, metalness: 0.30, emissive: 0x550011 }, // 2: Neon Ruby Red
-        { main: 0x00f055, roughness: 0.18, metalness: 0.25, emissive: 0x005511 }, // 3: Vibrant Emerald Green
+        // 2: pulled from a pink-leaning crimson towards true red. It used to render
+        // at hue 332 against magenta's 296 -- both read as pink at ball size. Now
+        // hue 345, a ~49 degree gap.
+        { main: 0xf02038, roughness: 0.15, metalness: 0.30, emissive: 0x500808 }, // 2: Neon Ruby Red
+        // 3: darkened. At 0xf055 the green channel pegged at 255 under Linear tone
+        // mapping and the ball read as blown out. Same hue (144), no clipping.
+        { main: 0x00c94a, roughness: 0.18, metalness: 0.25, emissive: 0x004410 }, // 3: Vibrant Emerald Green
         { main: 0xffc107, roughness: 0.20, metalness: 0.40, emissive: 0x553300 }, // 4: Amber Gold
         { main: 0xb030ff, roughness: 0.15, metalness: 0.30, emissive: 0x330055 }, // 5: Electric Amethyst Purple
         { main: 0xff00b7, roughness: 0.15, metalness: 0.30, emissive: 0x550033 }  // 6: Hot Magenta
@@ -2004,12 +2020,17 @@
           clipShadows: true      // otherwise a masked ball still casts a shadow
         });
 
+        // The ghost is a placement hint and should sit behind the real balls. Linear
+        // tone mapping lifted every colour, which made it compete with them. Down a
+        // third rather than halved: measured against bare board it was only 13% of a
+        // solid ball's contrast even at 0.3, and 0.15 risked losing it altogether on
+        // a phone in daylight. 0.2 keeps it legible.
         const ghostMat = new THREE.MeshStandardMaterial({
           color: c.main,
           roughness: 0.5,
           metalness: 0.1,
           transparent: true,
-          opacity: 0.3,
+          opacity: 0.20,
           clippingPlanes: clip,
           clipShadows: true
         });
@@ -2036,11 +2057,22 @@
       dirLight.shadow.camera.bottom = -15;
       this.scene.add(dirLight);
 
-      const rimLight = new THREE.DirectionalLight(0x00f0ff, 1.5);
+      // White, not cyan. A cyan rim tinted every ball about +5 degrees of hue
+      // towards green -- measured on a uniform gold board, 47 becomes 52 -- which is
+      // why gold read as olive: it starts at hue 45, right on the yellow-green
+      // boundary, so it has the least headroom. White holds every ball at 47 with no
+      // variation across the board, and is marginally brighter into the bargain.
+      const rimLight = new THREE.DirectionalLight(0xffffff, 1.5);
       rimLight.position.set(-15, 10, 10);
       this.scene.add(rimLight);
 
-      this.activePointLight = new THREE.PointLight(0x00f0ff, 3.0, 10);
+      // Cyan glow that rides along with the falling piece. At 3.0 intensity over a
+      // 10 unit range it lit up the whole stack as the piece came down: measured
+      // +55 luminance on the ball directly beneath it, against a base of ~100, and
+      // still +5 on the far side of a board only 16 units wide. ACES used to
+      // compress that; Linear does not. 1.2 over 5 units keeps the glow on the
+      // piece and drops it to nothing within about three cells.
+      this.activePointLight = new THREE.PointLight(0x00f0ff, 1.2, 5);
       this.activePointLight.position.set(0, 0, 2);
       this.scene.add(this.activePointLight);
     }
@@ -2714,17 +2746,21 @@
         switch (code) {
           case 'KeyF': case 'Insert': case 'Numpad0':
             this.engine.rotColors(); e.preventDefault(); break;
-          case 'ArrowLeft': case 'KeyD': case 'KeyA':
+          // WASD alongside the arrows. D used to be left and G right, from the
+          // original's D/F/G home-row cluster, which left A and D both moving left.
+          case 'ArrowLeft': case 'KeyA':
             this.engine.moveOBall(1); e.preventDefault(); break;
-          case 'ArrowRight': case 'KeyG':
+          case 'ArrowRight': case 'KeyD':
             this.engine.moveOBall(4); e.preventDefault(); break;
           case 'ArrowUp': case 'KeyW':
             this.engine.transform(this.engine.rotCCW); e.preventDefault(); break;
-          case 'ArrowDown': case 'KeyV': case 'KeyS':
+          case 'ArrowDown': case 'KeyS':
             this.engine.transform(this.engine.rotCW); e.preventDefault(); break;
-          case 'KeyX': case 'Home':
+          // Q/E sit above A/D so the whole game is playable left-handed:
+          // Q W E / A S D for flips, rotation and movement, F for colour, Space to drop.
+          case 'KeyX': case 'Home': case 'KeyQ':
             this.engine.transform(this.engine.flipX); e.preventDefault(); break;
-          case 'KeyY': case 'End':
+          case 'KeyY': case 'End': case 'KeyE':
             this.engine.transform(this.engine.flipY); e.preventDefault(); break;
           case 'Space':
             this.engine.zip(); e.preventDefault(); break;
@@ -4051,6 +4087,56 @@
       requestAnimationFrame((t) => this.gameLoop(t));
     }
 
+    // Palette and shape reference sheet, opened with ?palette on the URL. Paints
+    // every colour and every shape onto the real board so they are judged under the
+    // actual materials, lighting and tone mapping -- a flat swatch page would not
+    // represent what the balls look like in play. Not a game feature; it just
+    // paints the board and stops.
+    showPaletteSheet() {
+      const e = this.engine;
+      e.endGame = true;
+      e.eraseBallMap();
+
+      const free = (x, y) => e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap === 0;
+      const paint = (cells, colour) => cells.forEach(c => { e.ballMap[c.x][c.y].bzMap = colour; });
+
+      // One ball per colour along a single row, as a reference strip. Scan downward
+      // for the first row wide enough to hold all six rather than assuming one --
+      // the hexagon narrows towards the top and the row that fits moves with the
+      // board preset.
+      let strip = [];
+      let stripY = SPAWN_ROW + 1;
+      for (let y = SPAWN_ROW + 1; y <= BOARD_BOUNDS.MAX_Y; y++) {
+        const slots = [];
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X && slots.length < 6; x += 2) {
+          if (free(x, y)) slots.push({ x: x, y: y });
+        }
+        if (slots.length === 6) { strip = slots; stripY = y; break; }
+      }
+      strip.forEach((c, i) => paint([c], i + 1));
+
+      // Then each shape, spaced out, cycling through the colours. Greedy placement
+      // against the live map so nothing overlaps and nothing lands off-board.
+      const anchors = [];
+      for (let y = stripY + 4; y <= BOARD_BOUNDS.MAX_Y; y += 4)
+        for (let x = BOARD_BOUNDS.MIN_X + 2; x <= BOARD_BOUNDS.MAX_X; x += 5)
+          anchors.push({ x: x, y: y });
+
+      let shapesPlaced = 0;
+      e.ballShapes.forEach((offs, i) => {
+        const colour = (i % 6) + 1;
+        for (const a of anchors) {
+          const cells = [{ x: a.x, y: a.y }]
+            .concat(offs.map(o => ({ x: a.x + o.x, y: a.y + o.y })));
+          if (cells.every(c => free(c.x, c.y))) { paint(cells, colour); shapesPlaced++; break; }
+        }
+      });
+
+      e.droppingPathsMap = new Map();
+      this.renderer.updateScene(e);
+      return { colours: strip.length, shapes: shapesPlaced, totalShapes: e.ballShapes.length };
+    }
+
     handleGameOver() {
       this.isPlaying = false;
       this.setModeTabsDisabled(false);
@@ -4241,6 +4327,21 @@
     const width = storedBoardWidth();
     setBoardWidth(width);
     window.oddApp = new OddballzApp();
+
+    if (new URLSearchParams(location.search).has('palette')) {
+      const app = window.oddApp;
+      if (app.attractIdleTimer) { clearTimeout(app.attractIdleTimer); app.attractIdleTimer = null; }
+      app.scheduleAttractIdle = () => {};   // the demo would repaint the board
+      document.getElementById('overlayStart').classList.add('hidden');
+      // Clear the floating panels off the board. Both overlap the playfield -- the
+      // Controls Guide on the right, the stats card on the left -- which gets in the
+      // way of photographing the shapes.
+      ['.keybinds-panel', '.stats-panel'].forEach(sel => {
+        const el = document.querySelector(sel);
+        if (el) el.style.display = 'none';
+      });
+      app.showPaletteSheet();
+    }
 
     syncControlsHeightVar();
     // Observe the bar itself rather than window resize: on a resize the listener
