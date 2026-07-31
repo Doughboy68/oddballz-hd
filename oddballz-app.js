@@ -25,6 +25,11 @@
   // Short names for the presets, used on the high score table.
   const BOARD_SHORT = { 9: 'Classic', 12: 'Roomy', 18: 'Dense' };
 
+  // The row pieces spawn on, and the first row of the visible playfield. Rows above
+  // it are the staging area the original masked off, so a piece slides down into
+  // view rather than sitting in open space above the board.
+  let SPAWN_ROW = 3;
+
   let BOARD_WIDTH = 9;
   let BP = BOARD_PRESETS[9];
   let BOARD_RATIO = 1;      // grid size relative to classic
@@ -48,6 +53,7 @@
     ALLOC_MAX_Y = BP.MAX_Y + 4;
     CENTER_X = (BP.MIN_X + BP.MAX_X) / 2;
     CENTER_Y = BP.MAX_Y / 2;
+    SPAWN_ROW = Math.round(3 * BOARD_RATIO);
     SPHERE_RADIUS = 0.45 * WORLD_SCALE;
     HEX_SPACING_X = 1.0 * WORLD_SCALE;
     HEX_SPACING_Y = 0.866 * WORLD_SCALE;
@@ -260,7 +266,7 @@
       this.ltRow = rowTables.ltRow;
 
       this.startPos = [6, 7, 8, 9].map(x => ({
-        x: Math.round(x * BOARD_RATIO), y: Math.round(3 * BOARD_RATIO)
+        x: Math.round(x * BOARD_RATIO), y: SPAWN_ROW
       }));
 
       this.initEngine();
@@ -1920,9 +1926,16 @@
       this.container.appendChild(this.renderer.domElement);
       this.updateCameraFraming();
 
+      // Masks off the staging rows above the playfield. Material-level clipping
+      // rather than renderer.clippingPlanes: a global plane would also slice the
+      // starfield, planet and moon, which sit above the board in world space.
+      this.renderer.localClippingEnabled = true;
+      this.topClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+
       this.ballMaterials = [];
       this.ghostMaterials = [];
       this.initMaterials();
+      this.updateTopClipPlane();
 
       this.sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 32);
 
@@ -1954,13 +1967,17 @@
         { main: 0xff00b7, roughness: 0.15, metalness: 0.30, emissive: 0x550033 }  // 6: Hot Magenta
       ];
 
+      const clip = this.topClipPlane ? [this.topClipPlane] : null;
+
       colors.forEach(c => {
         const mat = new THREE.MeshStandardMaterial({
           color: c.main,
           roughness: c.roughness,
           metalness: c.metalness,
           emissive: c.emissive,
-          emissiveIntensity: 0.25
+          emissiveIntensity: 0.25,
+          clippingPlanes: clip,
+          clipShadows: true      // otherwise a masked ball still casts a shadow
         });
 
         const ghostMat = new THREE.MeshStandardMaterial({
@@ -1968,7 +1985,9 @@
           roughness: 0.5,
           metalness: 0.1,
           transparent: true,
-          opacity: 0.3
+          opacity: 0.3,
+          clippingPlanes: clip,
+          clipShadows: true
         });
 
         this.ballMaterials.push(mat);
@@ -2029,7 +2048,15 @@
       if (this.sphereGeo) this.sphereGeo.dispose();
       this.sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 32);
 
+      this.updateTopClipPlane();   // SPAWN_ROW and WORLD_SCALE both just changed
       this.build3DBoard();
+    }
+
+    // Top edge of the first visible row, in world space. Everything above it is
+    // the staging area and gets clipped away.
+    updateTopClipPlane() {
+      const hexHalfHeight = 0.52 * WORLD_SCALE * Math.sin(Math.PI / 3);
+      this.topClipPlane.constant = gridToWorld(CENTER_X, SPAWN_ROW).y + hexHalfHeight;
     }
 
     build3DBoard() {
@@ -2056,7 +2083,8 @@
 
       for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
         for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y; y++) {
-          if (isInBoard(x, y)) {
+          // Staging rows above the playfield get no tile -- they are masked.
+          if (isInBoard(x, y) && y >= SPAWN_ROW) {
             const wPos = gridToWorld(x, y, -0.25);
             const cellMesh = new THREE.Mesh(this.hexGeo, this.hexMat);
             cellMesh.position.set(wPos.x, wPos.y, wPos.z);
@@ -2505,6 +2533,41 @@
       this.renderer.render(this.scene, this.camera);
     }
 
+    // Pan offset that leaves equal space above and below the drawn board.
+    //
+    // Solved rather than derived: the view is tilted, so the board's top edge is
+    // further from the camera than its bottom and foreshortens more. Its world
+    // midpoint therefore does not project to the screen midpoint -- aiming at the
+    // midpoint still leaves roughly 2 units too much room at the top. Bisection is
+    // exact and stays right if the board shape changes again.
+    //
+    // The extent comes from the geometry, not from boardGroup, because framing is
+    // set up before the tiles are built. Canvas size does not enter into it: for a
+    // perspective camera aspect scales x only, so vertical balance depends solely
+    // on fov, camera pose and the board's world extent.
+    solveDesktopPan() {
+      const cam = this.camera;
+      const halfH = 0.52 * WORLD_SCALE * Math.sin(Math.PI / 3);
+      const topY = gridToWorld(CENTER_X, SPAWN_ROW).y + halfH;
+      const botY = gridToWorld(CENTER_X, BP.MAX_Y).y - halfH;
+
+      const imbalance = (off) => {
+        cam.position.set(0.4, -17.5 + off, 21.0);
+        cam.lookAt(0.4, 0.8 + off, 0);
+        cam.updateMatrixWorld();
+        const ndcTop = new THREE.Vector3(0.4, topY, 0).project(cam).y;
+        const ndcBot = new THREE.Vector3(0.4, botY, 0).project(cam).y;
+        return (1 - ndcTop) - (1 + ndcBot);   // top margin minus bottom margin
+      };
+
+      let lo = -8, hi = 4;
+      for (let i = 0; i < 30; i++) {
+        const mid = (lo + hi) / 2;
+        if (imbalance(mid) > 0) hi = mid; else lo = mid;
+      }
+      return (lo + hi) / 2;
+    }
+
     updateCameraFraming() {
       const width = this.container.clientWidth || window.innerWidth;
       const height = this.container.clientHeight || window.innerHeight;
@@ -2518,10 +2581,15 @@
         this.camera.position.set(0.4, -16.5 - distFactor * 2.0, 18.0 + distFactor * 2.5);
         this.camera.lookAt(0.4, 0.4, 0);
       } else {
-        // Desktop / landscape view framing
+        // Desktop / landscape view framing. Masking the staging rows made the
+        // drawn board shorter at the top, which left a black band up there. Pan
+        // the camera to recentre it -- position and target move together, so the
+        // viewing angle is unchanged and this is a pure pan, not a tilt.
         this.camera.fov = 45;
-        this.camera.position.set(0.4, -17.5, 21.0);
-        this.camera.lookAt(0.4, 0.8, 0);
+        this.camera.updateProjectionMatrix();
+        const pan = this.solveDesktopPan();
+        this.camera.position.set(0.4, -17.5 + pan, 21.0);
+        this.camera.lookAt(0.4, 0.8 + pan, 0);
       }
 
       this.camera.updateProjectionMatrix();
