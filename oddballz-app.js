@@ -2976,9 +2976,18 @@
         }
       }
 
-      // === 3D SPACE FLIGHT MOTION (ALIGNED WITH BOARD PERSPECTIVE TILT) ===
-      const isZip = this.engine && this.engine.isZipping;
-      const flightSpeedMult = isZip ? 2.5 : 1.0;
+      // === 3D SPACE FLIGHT MOTION ===
+      //
+      // Constant speed. A hard drop used to push the background to 2.5x, which was
+      // barely noticeable while the stars drifted sideways as flat dots. Once they
+      // fly at the viewer it is a different effect entirely, because the streak
+      // length scales with speed as well: 2.5x speed and 2.5x trails together read
+      // as a jump to warp every time a piece is dropped, which pulls the eye off the
+      // board at the exact moment it should be on it.
+      //
+      // The hook is still there if a warp burst is ever wanted deliberately --
+      // engine.isZipping is true for the duration of a zip -- but it belongs to an
+      // effect that has been designed, not to the resting state of the background.
 
       // 1. Cruise: stars fly toward the viewer down the camera's own axis
       if (this.flightStars && this.starPointsMesh && this.starFieldGroup) {
@@ -3001,7 +3010,7 @@
 
         for (let i = 0; i < this.flightStars.length; i++) {
           const s = this.flightStars[i];
-          s.z += s.speed * flightSpeedMult * dt;
+          s.z += s.speed * dt;
 
           if (s.z > -nearLimit) {
             s.z = -STAR_FAR;
@@ -3017,7 +3026,7 @@
           // Streak length in world units. Perspective alone then makes it longer on
           // screen as the star closes, which is the part that reads as speed. Capped
           // against its own distance so a near star cannot smear across the view.
-          let len = s.speed * flightSpeedMult * STAR_TRAIL;
+          let len = s.speed * STAR_TRAIL;
           const maxLen = -s.z * 0.22;
           if (len > maxLen) len = maxLen;
 
@@ -3055,7 +3064,7 @@
         const rockNear = Math.max(STAR_NEAR_MIN, this.boardNearDistance() - STAR_BOARD_MARGIN);
         for (const rock of this.flightAsteroids) {
           const u = rock.userData;
-          rock.position.z += u.speed * flightSpeedMult * dt;
+          rock.position.z += u.speed * dt;
           rock.rotation.x += u.spinX * dt;
           rock.rotation.y += u.spinY * dt;
           rock.rotation.z += u.spinZ * dt;
