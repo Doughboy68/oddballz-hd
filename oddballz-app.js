@@ -76,6 +76,29 @@
   // share their materials, so it could only be as bright as they are.
   const ACTIVE_BALL_DIM = 0.85;
 
+  // Cruise starfield. Coordinates are camera space: x and y across the view, z
+  // negative into the screen, stars travelling toward z = 0.
+  const STAR_COUNT = 3000;
+  const STAR_FAR = 190;          // where stars are born, straight ahead
+  const STAR_SPREAD = 78;        // half-width of the box they are born in
+  const STAR_TRAIL = 0.075;      // seconds of travel drawn as a streak behind each
+  // Stars are recycled before they reach the playfield, never at a fixed distance.
+  // They are additive and the board is opaque, so any star nearer than the board
+  // draws on top of it -- and depth testing cannot help, because in front is in
+  // front. The real limit is computed from the board's bounding sphere each frame,
+  // since the camera pulls back on narrow screens; this is only the floor under it.
+  const STAR_NEAR_MIN = 18;
+  const STAR_BOARD_MARGIN = 2.5;
+
+  // Asteroids cruise on the same axis as the stars, in the same camera space. They
+  // are born further out than the stars because they are solid objects: a rock that
+  // reaches the recycle limit vanishes in open view, so it wants to have drifted off
+  // the side of the screen well before then. That is what the lateral offset at
+  // spawn is for -- perspective sweeps anything off-centre outward as it closes.
+  const ROCK_FAR = 210;
+  const ROCK_SIDE_MIN = 15;      // never spawn dead centre, where the board is
+  const ROCK_SIDE_RANGE = 46;
+
   let BOARD_WIDTH = 9;
   let BP = BOARD_PRESETS[9];
   let BOARD_RATIO = 1;      // grid size relative to classic
@@ -2288,6 +2311,10 @@
         this.glowDecals[i].visible = false;
       }
 
+      // The starfield's recycle limit is derived from this, and a preset change
+      // resizes the board, so the cached sphere has to go with it.
+      this._boardSphere = null;
+
       this.updateTopClipPlane();   // SPAWN_ROW and WORLD_SCALE both just changed
       this.build3DBoard();
     }
@@ -2595,65 +2622,127 @@
       }
     }
 
-    build3DStarfield() {
-      // === 3D SPACE FLIGHT ENVIRONMENT ===
-      this.spaceFlightGroup = new THREE.Group();
-      // Tilt space flight container to match the exact camera & board perspective angle (~40 degrees)
-      this.spaceFlightGroup.rotation.x = -0.70;
+    // A soft round dot. Untextured GL points are drawn as hard-edged squares, and
+    // at the old 0.45 with size attenuation the near ones were large enough to read
+    // as coloured blocks. This is the whole of that fix.
+    makeStarSprite() {
+      const S = 64;
+      const cvs = document.createElement('canvas');
+      cvs.width = S;
+      cvs.height = S;
+      const ctx = cvs.getContext('2d');
+      const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.25, 'rgba(255,255,255,0.85)');
+      g.addColorStop(0.5, 'rgba(255,255,255,0.32)');
+      g.addColorStop(0.75, 'rgba(255,255,255,0.07)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, S, S);
+      return new THREE.CanvasTexture(cvs);
+    }
 
-      // 1. DENSE 3D STARFIELD (3000 Stars streaming parallel to platform plane)
-      const starCount = 3000;
-      const starPositions = new Float32Array(starCount * 3);
-      const starColors = new Float32Array(starCount * 3);
+    // Stars flying toward the viewer from a vanishing point, the view out the
+    // window at cruise. Two things make it read as depth rather than drifting
+    // confetti: the stars travel along the camera's own axis so perspective throws
+    // them outward from the centre of the screen, and each one trails a short
+    // streak whose on-screen length grows as it approaches.
+    //
+    // Deliberately in its own group rather than in spaceFlightGroup. That group is
+    // tilted -0.70 to sit with the board, which is what made the old stars stream
+    // sideways past the playfield instead of coming at you. This group is pinned to
+    // the camera's position and orientation every frame, so star coordinates are
+    // camera space: x and y across the view, z negative into the screen, and motion
+    // is simply z increasing toward 0. That holds at any aspect or fov, so it needs
+    // nothing from the locked mobile camera maths.
+    buildCruiseStarfield() {
+      this.starFieldGroup = new THREE.Group();
+      this.scene.add(this.starFieldGroup);
 
-      this.flightStars = [];
+      // Mostly white, because that is what a starfield looks like. The old palette
+      // weighted cyan, purple, blue, white, gold and rose equally, which is why it
+      // read as confetti; the tints here are faint and rare.
       const palette = [
-        new THREE.Color(0x00f0ff), // Cyan
-        new THREE.Color(0xa855f7), // Purple
-        new THREE.Color(0x3b82f6), // Blue
-        new THREE.Color(0xffffff), // White
-        new THREE.Color(0xfcbd2c), // Gold
-        new THREE.Color(0xf43f5e)  // Rose
+        { c: 0xffffff, w: 62 },
+        { c: 0xd6e6ff, w: 18 },
+        { c: 0xa9c8ff, w: 9 },
+        { c: 0xfff0d4, w: 7 },
+        { c: 0xffd9d9, w: 4 }
       ];
-
-      for (let i = 0; i < starCount; i++) {
-        const x = (Math.random() - 0.5) * 240;
-        const y = (Math.random() - 0.5) * 240;
-        const z = (Math.random() - 0.5) * 140 - 10;
-        const color = palette[Math.floor(Math.random() * palette.length)];
-
-        this.flightStars.push({
-          x, y, z,
-          speed: 15 + Math.random() * 25, // Flight speed parallel to board
-          color
-        });
-
-        starPositions[i * 3]     = x;
-        starPositions[i * 3 + 1] = y;
-        starPositions[i * 3 + 2] = z;
-
-        starColors[i * 3]     = color.r;
-        starColors[i * 3 + 1] = color.g;
-        starColors[i * 3 + 2] = color.b;
+      const bag = [];
+      for (let i = 0; i < palette.length; i++) {
+        for (let k = 0; k < palette[i].w; k++) bag.push(new THREE.Color(palette[i].c));
       }
 
-      const starGeo = new THREE.BufferGeometry();
-      starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-      starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+      this.flightStars = [];
+      const pos = new Float32Array(STAR_COUNT * 3);
+      const col = new Float32Array(STAR_COUNT * 3);
+      const segPos = new Float32Array(STAR_COUNT * 6);
+      const segCol = new Float32Array(STAR_COUNT * 6);
 
-      const starMat = new THREE.PointsMaterial({
-        size: 0.45,
+      for (let i = 0; i < STAR_COUNT; i++) {
+        const base = bag[Math.floor(Math.random() * bag.length)];
+        // Per-star brightness, so the field has faint stars behind bright ones
+        // instead of one flat wall of dots.
+        const mag = 0.35 + Math.random() * 0.65;
+        this.flightStars.push({
+          x: (Math.random() * 2 - 1) * STAR_SPREAD,
+          y: (Math.random() * 2 - 1) * STAR_SPREAD,
+          z: -(STAR_NEAR_MIN + Math.random() * (STAR_FAR - STAR_NEAR_MIN)),
+          speed: 14 + Math.random() * 26,
+          r: base.r * mag, g: base.g * mag, b: base.b * mag
+        });
+      }
+
+      const pointGeo = new THREE.BufferGeometry();
+      pointGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      pointGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      this.starTexture = this.makeStarSprite();
+      this.starPointsMesh = new THREE.Points(pointGeo, new THREE.PointsMaterial({
+        size: 2.6,
+        map: this.starTexture,
+        // Constant screen size, not world size. With attenuation on, a star's dot
+        // balloons as it approaches -- at these distances the nearest would be tens
+        // of pixels across. Depth is carried by the streak instead, which is what
+        // actually reads as speed.
+        sizeAttenuation: false,
         vertexColors: true,
         transparent: true,
-        opacity: 0.9,
         blending: THREE.AdditiveBlending,
         depthWrite: false
-      });
+      }));
+      this.starFieldGroup.add(this.starPointsMesh);
 
-      this.starPointsMesh = new THREE.Points(starGeo, starMat);
-      this.spaceFlightGroup.add(this.starPointsMesh);
+      const segGeo = new THREE.BufferGeometry();
+      segGeo.setAttribute('position', new THREE.BufferAttribute(segPos, 3));
+      segGeo.setAttribute('color', new THREE.BufferAttribute(segCol, 3));
+      // The streak's tail vertex is left black. Under additive blending black adds
+      // nothing, so the trail fades out along its length without needing per-vertex
+      // alpha, which a line material does not support.
+      this.starStreaks = new THREE.LineSegments(segGeo, new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      }));
+      this.starFieldGroup.add(this.starStreaks);
+    }
 
-      // 2. FLOATING ASTEROIDS & SPACE ROCKS (Streaming parallel to board tilt)
+    // Rocks, not crumpled foil.
+    //
+    // The old ones displaced every vertex by its own Math.random(). Polyhedron
+    // geometries in r128 are NOT indexed -- each triangle owns its three corners
+    // outright -- so corners that share a location got different random values and
+    // the surface came apart at every seam. Measured on the old build: 144
+    // triangles, 432 vertices, 432 distinct positions, where a welded dodecahedron
+    // at that detail has about 62. Not one shared corner survived. That is the
+    // crumpled-paper look, and it is torn geometry rather than a shading problem.
+    //
+    // The displacement here is a function of the vertex's DIRECTION from the
+    // centre, so duplicated corners are handed identical input and necessarily
+    // agree. A few low-frequency terms give big coherent lumps rather than
+    // high-frequency noise, which is the difference between a rock and gravel.
+    buildAsteroids() {
       this.flightAsteroids = [];
       const rockMat = new THREE.MeshStandardMaterial({
         color: 0x3a3f58,
@@ -2662,38 +2751,89 @@
         flatShading: true
       });
 
+      const v = new THREE.Vector3();
       for (let i = 0; i < 20; i++) {
         const size = 0.8 + Math.random() * 2.5;
-        const rockGeo = new THREE.DodecahedronGeometry(size, 1);
-        const posAttr = rockGeo.attributes.position;
-        for (let v = 0; v < posAttr.count; v++) {
-          posAttr.setXYZ(
-            v,
-            posAttr.getX(v) * (0.8 + Math.random() * 0.4),
-            posAttr.getY(v) * (0.8 + Math.random() * 0.4),
-            posAttr.getZ(v) * (0.8 + Math.random() * 0.4)
-          );
+        // Detail 1, not 2 or more: a rock wants a few broad faces catching the
+        // light, and subdividing further only makes room for noise to look busy.
+        const geo = new THREE.IcosahedronGeometry(size, 1);
+        const p = geo.attributes.position;
+        const ph = [0, 1, 2, 3].map(() => Math.random() * Math.PI * 2);
+        for (let k = 0; k < p.count; k++) {
+          v.set(p.getX(k), p.getY(k), p.getZ(k));
+          const len = v.length() || 1;
+          const d = v.clone().divideScalar(len);
+          const bump = 1
+            + 0.20 * Math.sin(2.3 * d.x + ph[0])
+            + 0.16 * Math.sin(2.9 * d.y + ph[1])
+            + 0.13 * Math.sin(3.3 * d.z + ph[2])
+            + 0.09 * Math.sin(5.1 * (d.x + d.y + d.z) + ph[3]);
+          p.setXYZ(k, d.x * len * bump, d.y * len * bump, d.z * len * bump);
         }
-        rockGeo.computeVertexNormals();
+        geo.computeVertexNormals();
 
-        const rock = new THREE.Mesh(rockGeo, rockMat);
-        const side = Math.random() < 0.5 ? -1 : 1;
-        rock.position.set(
-          side * (16 + Math.random() * 45),
-          (Math.random() - 0.5) * 120,
-          -40 + Math.random() * 80
+        const rock = new THREE.Mesh(geo, rockMat);
+        // Irregular silhouette from a whole-mesh scale, which cannot tear anything
+        // because it is applied to the object rather than to individual vertices.
+        rock.scale.set(
+          0.78 + Math.random() * 0.44,
+          0.78 + Math.random() * 0.44,
+          0.78 + Math.random() * 0.44
         );
+        rock.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+
+        this.placeRock(rock, -(60 + Math.random() * (ROCK_FAR - 60)));
 
         rock.userData = {
-          speedY: 18 + Math.random() * 28,
+          speed: 10 + Math.random() * 16,
           spinX: (Math.random() - 0.5) * 1.5,
           spinY: (Math.random() - 0.5) * 1.5,
           spinZ: (Math.random() - 0.5) * 1.5
         };
 
-        this.spaceFlightGroup.add(rock);
+        // Into the camera-pinned group with the stars, not spaceFlightGroup. They
+        // have to share the stars' frame to cruise on the same axis; the flight
+        // group is tilted to sit with the board and would send them sideways again.
+        this.starFieldGroup.add(rock);
         this.flightAsteroids.push(rock);
       }
+    }
+
+    // Somewhere off to the side at the given depth, never dead centre. Centre is
+    // where the board is, and a rock that closes on the middle of the screen ends up
+    // vanishing at the recycle limit in full view instead of leaving past the edge.
+    placeRock(rock, z) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const vertical = Math.random() < 0.5 ? -1 : 1;
+      rock.position.set(
+        side * (ROCK_SIDE_MIN + Math.random() * ROCK_SIDE_RANGE),
+        vertical * (ROCK_SIDE_MIN + Math.random() * ROCK_SIDE_RANGE),
+        z
+      );
+    }
+
+    // Distance from the camera to the nearest point of the playfield, via the
+    // board's bounding sphere. Cached against camera position and board preset,
+    // since it only changes when one of those does.
+    boardNearDistance() {
+      if (!this._boardSphere) {
+        const box = new THREE.Box3().setFromObject(this.boardGroup);
+        this._boardSphere = box.getBoundingSphere(new THREE.Sphere());
+      }
+      return Math.max(
+        1,
+        this.camera.position.distanceTo(this._boardSphere.center) - this._boardSphere.radius
+      );
+    }
+
+    build3DStarfield() {
+      // === 3D SPACE FLIGHT ENVIRONMENT ===
+      this.spaceFlightGroup = new THREE.Group();
+      // Tilt space flight container to match the exact camera & board perspective angle (~40 degrees)
+      this.spaceFlightGroup.rotation.x = -0.70;
+
+      this.buildCruiseStarfield();
+      this.buildAsteroids();
 
       // 3. DISTANT BACKGROUND PLANETS (Aligned with space tilt)
       const planetGroup = new THREE.Group();
@@ -2840,41 +2980,87 @@
       const isZip = this.engine && this.engine.isZipping;
       const flightSpeedMult = isZip ? 2.5 : 1.0;
 
-      // 1. Move Stars smoothly parallel to board plane
-      if (this.flightStars && this.starPointsMesh) {
-        const posAttr = this.starPointsMesh.geometry.attributes.position;
-        for (let i = 0; i < this.flightStars.length; i++) {
-          const star = this.flightStars[i];
-          star.y -= star.speed * flightSpeedMult * dt;
+      // 1. Cruise: stars fly toward the viewer down the camera's own axis
+      if (this.flightStars && this.starPointsMesh && this.starFieldGroup) {
+        // Pin the field to the camera so star coordinates ARE camera space. Doing
+        // it here rather than at build time matters: updateCameraFraming moves the
+        // camera on every resize and orientation change.
+        this.starFieldGroup.position.copy(this.camera.position);
+        this.starFieldGroup.quaternion.copy(this.camera.quaternion);
 
-          if (star.y < -120) {
-            star.y = 120;
-            star.x = (Math.random() - 0.5) * 240;
-            star.z = (Math.random() - 0.5) * 140 - 10;
+        // How near a star may come before it is recycled. Anything nearer than the
+        // playfield would draw over it, so this tracks the board rather than being
+        // a fixed number -- the camera sits further back on narrow screens.
+        const nearLimit = Math.max(STAR_NEAR_MIN, this.boardNearDistance() - STAR_BOARD_MARGIN);
+        const span = STAR_FAR - nearLimit;
+
+        const pts = this.starPointsMesh.geometry.attributes.position;
+        const pcol = this.starPointsMesh.geometry.attributes.color;
+        const seg = this.starStreaks.geometry.attributes.position;
+        const scol = this.starStreaks.geometry.attributes.color;
+
+        for (let i = 0; i < this.flightStars.length; i++) {
+          const s = this.flightStars[i];
+          s.z += s.speed * flightSpeedMult * dt;
+
+          if (s.z > -nearLimit) {
+            s.z = -STAR_FAR;
+            s.x = (Math.random() * 2 - 1) * STAR_SPREAD;
+            s.y = (Math.random() * 2 - 1) * STAR_SPREAD;
           }
 
-          posAttr.array[i * 3]     = star.x;
-          posAttr.array[i * 3 + 1] = star.y;
-          posAttr.array[i * 3 + 2] = star.z;
+          // Fade in over the far fifth so stars do not pop into existence at the
+          // back of the field.
+          const depth = (-s.z - nearLimit) / (span || 1);
+          const fade = depth > 0.8 ? Math.max(0, (1 - depth) / 0.2) : 1;
+
+          // Streak length in world units. Perspective alone then makes it longer on
+          // screen as the star closes, which is the part that reads as speed. Capped
+          // against its own distance so a near star cannot smear across the view.
+          let len = s.speed * flightSpeedMult * STAR_TRAIL;
+          const maxLen = -s.z * 0.22;
+          if (len > maxLen) len = maxLen;
+
+          pts.array[i * 3] = s.x;
+          pts.array[i * 3 + 1] = s.y;
+          pts.array[i * 3 + 2] = s.z;
+          pcol.array[i * 3] = s.r * fade;
+          pcol.array[i * 3 + 1] = s.g * fade;
+          pcol.array[i * 3 + 2] = s.b * fade;
+
+          // Head at the star, tail left black so additive blending fades it out.
+          seg.array[i * 6] = s.x;
+          seg.array[i * 6 + 1] = s.y;
+          seg.array[i * 6 + 2] = s.z;
+          seg.array[i * 6 + 3] = s.x;
+          seg.array[i * 6 + 4] = s.y;
+          seg.array[i * 6 + 5] = s.z - len;
+          scol.array[i * 6] = s.r * fade * 0.8;
+          scol.array[i * 6 + 1] = s.g * fade * 0.8;
+          scol.array[i * 6 + 2] = s.b * fade * 0.8;
+          scol.array[i * 6 + 3] = 0;
+          scol.array[i * 6 + 4] = 0;
+          scol.array[i * 6 + 5] = 0;
         }
-        posAttr.needsUpdate = true;
+        pts.needsUpdate = true;
+        pcol.needsUpdate = true;
+        seg.needsUpdate = true;
+        scol.needsUpdate = true;
       }
 
-      // 2. Stream Asteroids parallel to board plane
-      if (this.flightAsteroids) {
+      // 2. Asteroids cruise on the same axis as the stars, in the same camera space
+      if (this.flightAsteroids && this.starFieldGroup) {
+        // The same limit the stars use, so nothing solid crosses the playfield
+        // either. Recomputed rather than cached: the camera moves on resize.
+        const rockNear = Math.max(STAR_NEAR_MIN, this.boardNearDistance() - STAR_BOARD_MARGIN);
         for (const rock of this.flightAsteroids) {
           const u = rock.userData;
-          rock.position.y -= u.speedY * flightSpeedMult * dt;
+          rock.position.z += u.speed * flightSpeedMult * dt;
           rock.rotation.x += u.spinX * dt;
           rock.rotation.y += u.spinY * dt;
           rock.rotation.z += u.spinZ * dt;
 
-          if (rock.position.y < -110) {
-            rock.position.y = 110;
-            const side = Math.random() < 0.5 ? -1 : 1;
-            rock.position.x = side * (16 + Math.random() * 45);
-            rock.position.z = -40 + Math.random() * 80;
-          }
+          if (rock.position.z > -rockNear) this.placeRock(rock, -ROCK_FAR);
         }
       }
 
