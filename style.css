@@ -193,12 +193,21 @@ body, html {
    the left and 7px on the right and read as lopsided. */
 /* 160 is the narrowest that fits the guide's longest row (Space + Hard Drop needs
    157 including the key cap); the stats panel has room to spare at that width.
-   The shared height keeps the two cards matching so the layout reads as symmetric:
-   the stats card is naturally 201px and the guide 173px, and min-height rather than
-   height means either can still grow past it instead of clipping. */
+   The shared height keeps the two cards matching so the layout reads as symmetric,
+   and min-height rather than height means either can still grow past it instead of
+   clipping.
+
+   That last part is also the trap: because it is a MINIMUM, a panel that outgrows
+   it silently stops matching instead of breaking visibly. It was 201px for four
+   stat cards; adding a TIME card took the stats panel to 244px while the guide sat
+   at its floor of 201, and the pair went 43px out of step. 245 now clears the
+   taller of the two, so both settle on exactly that.
+
+   Measure both and update this if a stat card or a control row is ever added --
+   the natural heights are 244px for five stat cards and 173px for the guide. */
 :root {
   --side-panel-w: 160px;
-  --side-panel-h: 201px;
+  --side-panel-h: 245px;
 }
 
 .stats-panel {
