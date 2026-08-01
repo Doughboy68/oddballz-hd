@@ -2,6 +2,70 @@
 
 A running log of notable changes. Newest first.
 
+## Board Glow and the Falling Piece (`v1.3`)
+
+- **The falling piece's lights are gone; the glow is a decal now.** Four coloured
+  point lights under the piece read as a little jetstream beneath each ball rather
+  than a glow, and no placement fixes that. The board's tile faces sit only about
+  0.017 above z = 0, so a light low enough not to flare the piece is nearly edge-on
+  to them and `N·L` collapses with distance. Board gain 3 cells out against the
+  share of the piece's pixels clipped to white — 11–13% is the lights-off floor:
+
+  | light position | board @3u | ball clipped |
+  |---|---|---|
+  | contact point | 4.3 | 18–47% |
+  | ball centre | 12.6 | 20–62% |
+  | +3.0 above, dist 12 | 34.3 | 62–87% |
+
+  Every setting is a tight core or a flare. Opening the distance cutoff from 5 to
+  25 and softening decay does not escape it either. Moving the light to the ball's
+  centre was tried and reverted — it made the plume worse, not better.
+- **A decal has none of those constraints.** A soft radial gradient laid flat on the
+  board under each ball, additively blended in that ball's colour. The falloff is
+  painted into the texture so it cannot form a hot core, the reach is just the
+  quad's size, and because it is geometry rather than a light it cannot touch the
+  balls at all — clipped pixels went back to the lights-off floor, 15.8% against
+  54.5%. It also sidesteps the r128 limitation recorded under `v1.2`, that a light
+  cannot be confined to one object once the camera can see its layer.
+- **Span and opacity are a pair, and only span changes the reach.** Turning opacity
+  down fades the whole pool evenly; it does not pull it in. At opacity 0.5, board
+  gain at 1.5 / 2.2 / 3.0 / 4.0 / 5.2 cells was `48.8 15.5 2.1 0 0` at span 5 —
+  a blob that dies at 3 cells — against `109 74.2 44.1 19.6 4.1` at span 11, which
+  reaches but is far too hot. Shipped at span 10, opacity 0.15.
+- **Anything added near the board must ride the magic-carpet hover.** The decals
+  were left in world space while the board heaves ±0.15 in z, and they sit 0.03
+  above it — so the board swallowed them on every upswing, and the simultaneous
+  tilt swept its edge across as an arc. Over one hover cycle the glow measured
+  `38.4 38.6 38.4 39.0` then `51.7 52.1 54.3 55.5`: off for half of every cycle.
+  It looks exactly like a shadow passing over the glow, and was taken for one.
+- **The ghost piece was erasing the glow, not dimming it.** The ghost is transparent
+  but still writes depth, and it sits at the landing position directly under the
+  falling piece. Drawn after it, the decal was depth-rejected wherever a ghost ball
+  overlapped: the patch read 65.4 both with the decal and without it, against 76.3
+  once the decal draws first. Fixed with `renderOrder` rather than by clearing
+  `depthWrite` on the ghost, whose appearance is already tuned.
+- **The falling piece has its own materials now.** It was drawing the settled balls'
+  materials, so it was necessarily exactly as bright as they are, and nothing in the
+  lighting could separate them — gold measured 127.0 with the per-ball lights at
+  0.8, at 0.4 and switched off entirely. Its own copies at 0.85 on colour and
+  emissive make it 12.6% darker than a settled ball of the same colour.
+- **`Material.clone()` deep-copies `clippingPlanes`.** It does not share the
+  reference, and `initMaterials` runs before `updateTopClipPlane`, so the piece's
+  cloned materials froze the staging mask at the constructor's constant of 0 while
+  everything else tracked the live plane. The falling piece alone was sliced at
+  y = 0 — and it does not present as a clipping bug at all, it just looks *darker*.
+  Reassign the planes by hand after cloning.
+- **Two measurements were confidently wrong before being caught.** `render()` lerps
+  mesh positions, so sampling a fixed disc across two renders catches the ball after
+  it has drifted out of it — re-project after every render. And several early
+  readings came from nine `readPixels` calls after a single render, of which only
+  the first is valid; that produced a 47%-clipped figure that did not exist. Both
+  traps are the ones already written down in `CLAUDE.md`.
+- The per-ball light offset also became `SPHERE_RADIUS` rather than a literal `0.45`.
+  That literal was the 9-wide radius while the radius scales with `WORLD_SCALE`, so
+  on the 18-wide board it had been putting the light at z = -0.238, buried under the
+  tile faces.
+
 ## Colour, Lighting and Animation (`v1.2`)
 
 - **The palette was never the problem.** Balls looked faded, and green and cyan were
@@ -25,10 +89,15 @@ A running log of notable changes. Newest first.
 - **The falling piece is lit per ball, not per piece.** One light at the centre gave a
   single round cyan pool whatever the piece was made of. Four lights, each in its own
   ball's colour, take the shape of the piece and reflect what is actually falling.
+  *Superseded in `v1.3`: these lights are down to 0.8 and the glow itself is a decal
+  on the board. The shape-of-the-piece reasoning still holds, but a light could not
+  spread it.*
 - **Those lights sit *behind* their ball**, between ball and board. In front they lit
   the camera-facing side and the piece flared — 52% of its pixels blown against a 16%
   baseline. Behind, the baseline is untouched, and that headroom is what lets the
   brightness go high enough to see at all.
+  *Superseded in `v1.3`: "behind the ball" is the contact point, which is what made
+  the glow read as a jetstream. See above for why no other position works either.*
 - **Settled balls breathe via material colour, not emissive.** Emissive has almost no
   leverage on balls dominated by scene lighting: sweeping it 0 → 1.6 moved a ball
   about 11 luminance, and the first attempt's swing measured 0.4. The pulse also has

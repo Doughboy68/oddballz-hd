@@ -48,6 +48,34 @@
   // (0.571), kept as the reference so phones render exactly as before.
   const MOBILE_H_COVERAGE = 0.35652;
 
+  // Width of a falling ball's glow decal, in grid cells, and its peak opacity.
+  // In cells rather than world units so the glow covers the same number of hexes
+  // on every board preset instead of shrinking with the balls.
+  //
+  // These two are a pair and should be tuned together: the span sets how far the
+  // glow reaches and the opacity sets how strong it is, so widening the span
+  // without dimming makes the middle hotter as well as the edge wider. Board gain
+  // measured at 1.5 / 2.2 / 3.0 / 4.0 / 5.2 cells out, at opacity 0.5:
+  //
+  //   span  5    48.8   15.5    2.1     0      0     -- dies at 3 cells, a blob
+  //   span  8    83.7   46.5   20.1    3.7     0
+  //   span 11   109     74.2   44.1   19.6    4.1    -- reaches, far too hot
+  //
+  // 10 with 0.15 keeps the reach of the wide setting at under a third of its
+  // strength, which is the soft sheen this is meant to be rather than a pool of
+  // light. Note the render() pulse rewrites material.opacity from GLOW_OPACITY on
+  // every frame, so setting opacity on the material directly does nothing.
+  //
+  // Opacity is the dimmer and span is the reach: turning this down does not pull
+  // the glow in, it just fades the whole pool evenly, which is usually what is
+  // wanted. Reach for GLOW_SPAN_CELLS only when the glow is the wrong size.
+  const GLOW_SPAN_CELLS = 10.0;
+  const GLOW_OPACITY = 0.15;
+
+  // How much darker the falling piece is than the settled balls. The piece used to
+  // share their materials, so it could only be as bright as they are.
+  const ACTIVE_BALL_DIM = 0.85;
+
   let BOARD_WIDTH = 9;
   let BP = BOARD_PRESETS[9];
   let BOARD_RATIO = 1;      // grid size relative to classic
@@ -1992,6 +2020,7 @@
       this.scene.add(this.ghostGroup);
 
       this.initLights();
+      this.initGlowDecals();
       this.build3DBoard();
       this.build3DStarfield();
 
@@ -2055,6 +2084,37 @@
         this.ballMaterials.push(mat);
         this.ghostMaterials.push(ghostMat);
       });
+
+      // The falling piece gets its own copies of the six, dimmed. It shares the
+      // palette but not the brightness.
+      //
+      // Its own materials because there is nothing else left to turn down. The
+      // per-ball lights no longer reach the piece at all -- measured on gold, it
+      // reads 127.0 with them at 0.8, at 0.4 and switched off entirely, and the
+      // same again with the glow decals hidden. The piece was drawing the shared
+      // material, so it was simply as bright as every settled ball and could not
+      // be separated from them without separating the material.
+      //
+      // Colour and emissive both, so the dimming holds under any lighting rather
+      // than only where the scene light dominates.
+      this.activeBallMaterials = this.ballMaterials.map((m) => {
+        const a = m.clone();
+        // Share the live clipping plane. Material.clone() deep-copies
+        // clippingPlanes, so the clone gets a frozen snapshot of the Plane rather
+        // than a reference to it -- and initMaterials runs before
+        // updateTopClipPlane, so that snapshot is the constructor's constant of 0.
+        // The staging mask then sits at y = 0 for the falling piece alone and
+        // slices most of it away. It does not read as a clipping bug either: the
+        // piece simply looks darker, and it measured as a 35% drop in brightness
+        // that no colour change could account for.
+        a.clippingPlanes = m.clippingPlanes;
+        a.color.multiplyScalar(ACTIVE_BALL_DIM);
+        a.emissive.multiplyScalar(ACTIVE_BALL_DIM);
+        // Its own rest value, or the breathe in render() would pull it back to the
+        // settled balls' brightness on the first frame.
+        a.userData = { baseColor: a.color.clone() };
+        return a;
+      });
     }
 
     initLights() {
@@ -2101,6 +2161,98 @@
       }
     }
 
+    // Top face of a board tile. The tiles are placed at z = -0.25 and extruded by
+    // depth + bevelThickness, both of which scale with the preset, so this has to
+    // be computed rather than written down as a number.
+    boardSurfaceZ() {
+      return -0.25 + (0.2 + 0.03) * WORLD_SCALE;
+    }
+
+    glowDecalGeometry() {
+      const span = GLOW_SPAN_CELLS * WORLD_SCALE;
+      return new THREE.PlaneGeometry(span, span);
+    }
+
+    // A soft radial gradient laid flat on the board under each falling ball, in
+    // that ball's colour, additively blended.
+    //
+    // This exists because the per-ball point lights cannot spread. Their pool is
+    // governed by N.L against the board, and the tile faces sit only about 0.017
+    // above z = 0, so a light low enough not to flare the piece is nearly edge-on
+    // to them: measured gain 3 units out was 4.3 with the light at the contact
+    // point and 12.6 at the ball's centre, against 34.3 with it lifted 3 units --
+    // which blew 62-87% of the piece's pixels to white. Opening the distance
+    // cutoff from 5 to 25 and softening decay did not escape it either. A point
+    // light here is a tight core or a flare, never a wide soft pool.
+    //
+    // A decal has no such constraint. The falloff is painted into the texture, so
+    // it cannot form a hot core; the reach is just the quad's size; and because it
+    // is geometry on the board rather than a light it cannot touch the balls at
+    // all. That also sidesteps the r128 limitation already recorded here, that a
+    // light cannot be confined to one object once the camera can see its layer.
+    initGlowDecals() {
+      // Painted once, at a fixed resolution independent of the board preset. The
+      // stops are deliberately shallow and wide rather than a tight bright centre:
+      // a plain linear ramp puts most of its energy in the middle and reads as the
+      // same blob the lights gave. Alpha is well under 1 even at the centre, since
+      // additive blending on top of the lit board is what makes it visible.
+      const SIZE = 128;
+      const cvs = document.createElement('canvas');
+      cvs.width = SIZE;
+      cvs.height = SIZE;
+      const ctx = cvs.getContext('2d');
+      const g = ctx.createRadialGradient(SIZE / 2, SIZE / 2, 0, SIZE / 2, SIZE / 2, SIZE / 2);
+      const stops = [[0, 0.85], [0.18, 0.55], [0.36, 0.30], [0.55, 0.14], [0.75, 0.045], [1, 0]];
+      for (let i = 0; i < stops.length; i++) {
+        g.addColorStop(stops[i][0], `rgba(255,255,255,${stops[i][1]})`);
+      }
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, SIZE, SIZE);
+
+      this.glowTexture = new THREE.CanvasTexture(cvs);
+      this.glowGeo = this.glowDecalGeometry();
+      this.glowGroup = new THREE.Group();
+      this.scene.add(this.glowGroup);
+
+      // Clipped like the balls, or the glow would light up the masked staging
+      // rows above the playfield where there are no tiles to catch it.
+      const clip = this.topClipPlane ? [this.topClipPlane] : null;
+
+      this.glowDecals = [];
+      for (let i = 0; i < 4; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+          map: this.glowTexture,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          // Additive and unlit, so it must not occlude anything: the balls and the
+          // ghost draw over it normally, but it must not write depth itself or the
+          // four decals would cut holes in each other where they overlap.
+          depthWrite: false,
+          opacity: GLOW_OPACITY,
+          clippingPlanes: clip
+        });
+        const mesh = new THREE.Mesh(this.glowGeo, mat);
+        // Before the other transparent objects, not after. The ghost piece is
+        // transparent but still writes depth, and it sits at the landing position
+        // directly under the falling piece -- exactly where the glow is. Drawn
+        // after it, the decal is depth-rejected wherever a ghost ball overlaps and
+        // the glow is erased, not dimmed: measured over one ghost ball, the patch
+        // read 65.4 both with the decal and without it, against 76.3 once the
+        // decal draws first. That is what looked like something blocking the glow.
+        //
+        // Fixed here rather than by clearing depthWrite on the ghost, which would
+        // work too but changes an appearance that is already tuned. Drawing first
+        // also means the ghost now blends over the glow instead of cutting it out,
+        // which is what a see-through ball in front of a glow should do. Opaque
+        // balls are unaffected: they render in the opaque pass before any of this,
+        // so they still occlude the decal correctly.
+        mesh.renderOrder = -1;
+        mesh.visible = false;
+        this.glowGroup.add(mesh);
+        this.glowDecals.push(mesh);
+      }
+    }
+
     // Tear the board down and rebuild it at the current preset. Deliberately a
     // total rebuild: stale per-cell meshes keyed "x_y" surviving a board change
     // are exactly the mesh-reuse fault that produced the old hanging-ball and gap
@@ -2125,6 +2277,16 @@
 
       if (this.sphereGeo) this.sphereGeo.dispose();
       this.sphereGeo = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 32);
+
+      // The decals are sized in cells, so a preset change resizes them. The four
+      // meshes are kept and re-pointed at the new geometry; the texture is scale
+      // independent and does not need rebuilding.
+      if (this.glowGeo) this.glowGeo.dispose();
+      this.glowGeo = this.glowDecalGeometry();
+      for (let i = 0; i < this.glowDecals.length; i++) {
+        this.glowDecals[i].geometry = this.glowGeo;
+        this.glowDecals[i].visible = false;
+      }
 
       this.updateTopClipPlane();   // SPAWN_ROW and WORLD_SCALE both just changed
       this.build3DBoard();
@@ -2277,7 +2439,7 @@
       if (!this.activeMeshes || this.activeMeshes.length === 0) {
         this.activeMeshes = [];
         for (let i = 0; i < 4; i++) {
-          const mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+          const mesh = new THREE.Mesh(this.sphereGeo, this.activeBallMaterials[0]);
           mesh.castShadow = true;
           mesh.targetPos = new THREE.Vector3();
           mesh.initialized = false;
@@ -2308,7 +2470,7 @@
           if (val > 0) {
             mesh.visible = true;
             const colorIdx = (val - 1) % this.ballMaterials.length;
-            mesh.material = this.ballMaterials[colorIdx];
+            mesh.material = this.activeBallMaterials[colorIdx];
 
             const relX = engine.activeRel ? engine.activeRel[i].x : engine.oddballz.rel[i].x;
             const relY = engine.activeRel ? engine.activeRel[i].y : engine.oddballz.rel[i].y;
@@ -2336,20 +2498,66 @@
           const val = engine.oddballz.image[i];
           const mesh = this.activeMeshes[i];
           if (val > 0 && mesh) {
-            // Behind the ball, between it and the board, not in front of it. In
-            // front, the light hits the face the camera sees and the ball flares:
-            // at the same strength that put the piece at 52% clipped against a 16%
-            // baseline, behind it leaves the baseline untouched. It also means the
-            // brightness can go up enough to actually show -- at the 0.55 first
-            // tried, the board moved 3 to 7 units, which is invisible.
-            L.position.set(mesh.position.x, mesh.position.y, mesh.position.z - 0.45);
+            // Behind the ball, at the point where it touches the board. A ball
+            // rests on the surface, so one radius back from its centre is exactly
+            // the contact point. In front of the ball instead, the light hits the
+            // face the camera sees and the piece flares.
+            //
+            // SPHERE_RADIUS, not a literal 0.45. The literal was the 9-wide radius
+            // and the radius scales with WORLD_SCALE, so on 18-wide it left the
+            // light at z = -0.238, buried under the tile faces, lighting nothing.
+            //
+            // This position confines the glow to a small core under each ball,
+            // which reads as a little jetstream. That is not fixable by moving the
+            // light, and it was tried. The board's tile faces sit about 0.017 above
+            // z = 0, so a light near that plane is edge-on to them and N.L collapses
+            // with distance; lifting the light restores N.L but puts it between the
+            // ball and the camera, which flares the piece. Measured board gain at
+            // 3 units with the lights-off floor subtracted, against the share of
+            // ball pixels clipped to white (11-13% is the lights-off floor):
+            //
+            //                        board @3u    ball clipped
+            //   here (contact pt)          4.3       18-47%
+            //   ball centre               12.6       20-62%
+            //   +3.0 above, dist 12       34.3       62-87%
+            //   +4.0 above, dist 12       29.8       58-69%
+            //
+            // Opening the distance cutoff from 5 to 25 and softening decay does not
+            // escape it either: the pool barely widens and the balls keep blowing
+            // out. A point light on the ball can be a tight core or a flare, not a
+            // wide soft pool. Spreading the glow properly needs a flat additive
+            // decal on the board rather than a light.
+            L.position.set(mesh.position.x, mesh.position.y, mesh.position.z - SPHERE_RADIUS);
             L.color.copy(this.ballMaterials[(val - 1) % this.ballMaterials.length].color);
             // Base only. render() pulses around this each frame, so setting
             // intensity directly here would fight it.
-            L.userData.baseIntensity = 4.5;
+            //
+            // 0.8, down from 4.5. The glow decals carry the effect now, so this is
+            // only here for the genuine shading a real light gives the settled
+            // balls the piece passes -- something a decal on the board cannot do.
+            // Set it to 0 to drop the lights entirely; nothing else depends on it.
+            L.userData.baseIntensity = 0.8;
           } else {
             L.userData.baseIntensity = 0;
             L.intensity = 0;
+          }
+        }
+
+        // Glow decals follow the same four balls, flat on the board surface.
+        const glowZ = this.boardSurfaceZ() + 0.03;
+        for (let i = 0; i <= 3; i++) {
+          const decal = this.glowDecals[i];
+          const val = engine.oddballz.image[i];
+          const mesh = this.activeMeshes[i];
+          if (val > 0 && mesh && mesh.visible) {
+            // x and y from the ball, z pinned to the board. Deliberately not the
+            // ball's z: the decal is a mark on the surface, so it must not rise
+            // and fall with the piece's hover.
+            decal.position.set(mesh.position.x, mesh.position.y, glowZ);
+            decal.material.color.copy(this.ballMaterials[(val - 1) % this.ballMaterials.length].color);
+            decal.visible = true;
+          } else {
+            decal.visible = false;
           }
         }
       } else {
@@ -2363,6 +2571,7 @@
             this.activeBallLights[i].userData.baseIntensity = 0;
             this.activeBallLights[i].intensity = 0;
           }
+          if (this.glowDecals && this.glowDecals[i]) this.glowDecals[i].visible = false;
         }
       }
 
@@ -2551,6 +2760,18 @@
       this.ghostGroup.rotation.y = hoverRoll;
       this.ghostGroup.position.z = hoverZ;
 
+      // The glow decals bob with everything else, and must. They lie 0.03 above the
+      // board surface while hoverZ swings +/-0.15, so a group left in world space
+      // gets overrun by the board on every upswing: the glow vanishes completely,
+      // and because the board is tilting at the same time the edge of the board
+      // sweeps across it as an arc, one way and then the other, once per cycle.
+      // It reads exactly like a shadow passing over the glow and was mistaken for
+      // one. The decal positions are taken from activeMeshes, which are local to
+      // activeGroup, so this has to be the same transform for them to line up.
+      this.glowGroup.rotation.x = hoverPitch;
+      this.glowGroup.rotation.y = hoverRoll;
+      this.glowGroup.position.z = hoverZ;
+
       // Pulse the falling piece's lights so the balls read as energised on the way
       // down. Each ball is offset in phase so the piece shimmers rather than
       // throbbing as one block. Driven off the base intensity updateScene stores,
@@ -2561,6 +2782,19 @@
           const base = L.userData.baseIntensity || 0;
           L.intensity = base <= 0 ? 0
             : base * (1 + 0.3 * Math.sin(this._flightTime * 3.2 + i * 0.7));
+        }
+      }
+
+      // The decals breathe on the same phase as the light they replaced, so the
+      // two read as one effect rather than beating against each other. Shallower
+      // than the lights' 0.3: the decal is the visible part now, and at 0.3 the
+      // pulse became the thing you watch instead of the piece.
+      if (this.glowDecals) {
+        for (let i = 0; i < this.glowDecals.length; i++) {
+          const decal = this.glowDecals[i];
+          if (!decal.visible) continue;
+          decal.material.opacity = GLOW_OPACITY *
+            (1 + 0.16 * Math.sin(this._flightTime * 3.2 + i * 0.7));
         }
       }
 
@@ -2583,10 +2817,18 @@
       // Slower than the falling piece (1.6 against 3.2) so that stays the livelier
       // one, and phase is spread across the six colours so the board shimmers
       // rather than flashing in unison.
-      if (this.ballMaterials) {
-        for (let i = 0; i < this.ballMaterials.length; i++) {
-          const m = this.ballMaterials[i];
-          const base = m.userData.baseColor;
+      // Both sets, on the same phase. The falling piece has its own dimmed copies
+      // of these materials, and they need breathing too or the piece would sit
+      // inert against a board that is moving. Each drives off its own baseColor,
+      // so the piece keeps its dimming instead of being pulled up to the settled
+      // brightness.
+      const breatheSets = [this.ballMaterials, this.activeBallMaterials];
+      for (let s = 0; s < breatheSets.length; s++) {
+        const set = breatheSets[s];
+        if (!set) continue;
+        for (let i = 0; i < set.length; i++) {
+          const m = set[i];
+          const base = m.userData && m.userData.baseColor;
           if (base) {
             const f = 0.96 + 0.06 * Math.sin(this._flightTime * 1.6 + i * 1.05);
             m.color.setRGB(base.r * f, base.g * f, base.b * f);
