@@ -8,10 +8,22 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Oddballz HD - Hex Puzzle Game Engine</title>
+
+  <!-- Home screen icon. Without an apple-touch-icon, Safari's Add to Home Screen
+       falls back to a screenshot or the first letter of the title, which is why it
+       showed a bare "O". iOS wants a 180x180 PNG and ignores SVG here; it applies
+       its own rounded mask, so the artwork is drawn full-bleed and opaque.
+       The label under the icon comes from apple-mobile-web-app-title, or the
+       <title> is used and truncated to something like "Oddballz HD - Hex...". -->
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Oddballz HD">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+  <meta name="theme-color" content="#0a1024">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=1.52.0">
+  <link rel="stylesheet" href="./style.css?v=1.53.0">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -313,6 +325,6 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=1.52.0"></script>
+  <script src="./oddballz-app.js?v=1.53.0"></script>
 </body>
 </html>
