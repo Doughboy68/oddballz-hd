@@ -2,6 +2,102 @@
 
 A running log of notable changes. Newest first.
 
+## Scoring, Timer and High Scores (`v1.4`)
+
+- **The score was exponential in the number of lines cleared at once.** `checkAdvance`
+  runs once per landing, *after* the cascade loop, so its count is every line the
+  landing eventually cleared including chain reactions — and `2^n` on that is
+  savage. A nine-line cascade paid 512 against 144 for an entire careful game of
+  single clears, so one lucky landing was worth two to three games and the score
+  stopped reflecting how well the game was played. Now `n(n+1)`: measured across
+  whole simulated games, a run containing one nine-line cascade scored 4.09× a
+  steady run and now scores 1.45×. Nine lines at once still pays 90 against 18 for
+  those same nine cleared singly, so clustering is a multiple rather than an order
+  of magnitude.
+- **Line *length* is a separate axis, and it barely registered.** The bonus was
+  `len-3` for parallel and `len-2` for perpendicular — one point per extra ball, so
+  a nine-long line scored 8 against 4 for the minimum five. It now uses the same
+  `n(n+1)` shape on length above each line's **own** minimum, giving 4 / 8 / 14 /
+  22 / 32 for lengths five through nine. Above its own minimum because parallel
+  lines need five and perpendicular only three; raw length would have made
+  perpendiculars strictly better for the same effort. Anchored so a minimum-length
+  line is unchanged, which leaves the baseline economy where it was.
+- **Big clears used to cost you levels.** The level-up set `matchesDone` to zero,
+  discarding everything above the threshold, and was a single `if` rather than a
+  loop, so one landing could only ever gain one level. Arriving with 48 lines
+  advanced one level and threw away 36 — the same 36 lines reached level 4 cleared
+  singly and only level 2 in one lump. A big cascade paid in score and quietly
+  billed you in progression. It now subtracts the threshold and loops.
+- **High scores are per mode *and* per board, six categories.** A single global top
+  ten meant one category evicted every other: all ten saved entries were Color
+  Match / Classic, and a Row Build score could not survive unless it beat scores set
+  under different rules on a different board. They are not comparable anyway — the
+  modes score different things, and the new length bonus pays more on the wider
+  boards where long lines are easier. The panel opens on the mode and board being
+  played rather than wherever you last browsed.
+- **Ten rows needed the modal constrained.** At 375×667 the Close button landed at
+  y=680, off the bottom of the screen, and the card clipped its own overflow so
+  there was no way to scroll to it. The card is capped to the viewport with only the
+  table scrolling. Two details that matter: `dvh` with a `vh` fallback, because on
+  iOS Safari `vh` is the toolbar-*hidden* height — the same trap already documented
+  for `#appLayout` — and `min-height: 0` on the scroll container, without which a
+  flex item will not shrink below its content and the overflow goes straight back
+  onto the card.
+- **A live game timer**, also recorded with each high score. It accumulates inside
+  the existing `isPlaying && !isPaused` branch, so pause, the modals and focus loss
+  are excluded by construction rather than by separate bookkeeping. Stored as
+  seconds so the display format can change without rewriting saved data; entries
+  predating it show a dash rather than a fabricated `0:00`.
+- **Its stat card then broke the side panels.** `--side-panel-h` is a *minimum*, so
+  the stats panel grew to 244px while the guide sat at its floor of 201 and the two
+  went 43px out of step — silently, rather than by clipping. That is the cost of
+  `min-height` over `height`, and it will happen again the next time a card is added.
+- **The level-up sound was an alarm.** A square wave sweeping 300 → 1400 Hz at 0.2
+  gain with no attack: odd harmonics only, the shape of a siren rather than a
+  fanfare, snapping on at full volume and ending where the ear is most sensitive.
+  Now a short major arpeggio on triangles behind a 2.6 kHz lowpass, 12ms fade-in,
+  peak gain 0.09.
+
+## The Space Background (`v1.4`)
+
+- **The stars were squares because the points material had no texture.** Untextured
+  GL points are drawn as hard-edged quads; it was never a resolution problem. They
+  now carry a soft round sprite. Size attenuation is off as well, since it sets the
+  dot's size in *world* units and an approaching star balloons to tens of pixels.
+- **They did not move like a starfield either.** They translated sideways because
+  they sat inside `spaceFlightGroup`, which is tilted −0.70 to sit with the board —
+  so the tilt that makes the flight scene agree with the playfield was exactly what
+  stopped the stars coming at you. The field is now its own group, pinned to the
+  camera's position and orientation every frame, so star coordinates *are* camera
+  space and motion is simply z travelling toward zero. Perspective throws them
+  outward from the centre on its own, at any aspect or fov, so it takes nothing from
+  the locked mobile camera maths.
+- **The palette was the rest of it.** Cyan, purple, blue, white, gold and rose at
+  equal weight is confetti, not stars. Now 62% white and 18% blue-white with the
+  tints faint and rare, plus per-star brightness variation.
+- **The asteroids looked like crumpled paper because they were torn apart.** Every
+  vertex was displaced by its own `Math.random()`, and polyhedron geometries in r128
+  are **not indexed** — each triangle owns its three corners outright — so corners
+  sharing a location were pulled different ways and the surface came apart at every
+  seam. The old build measured 144 triangles, 432 vertices, **432 distinct
+  positions**, where a welded dodecahedron at that detail has about 62. Not one
+  shared corner survived. The displacement is now a function of the vertex's
+  *direction* from the centre, so duplicated corners get identical input and cannot
+  disagree; the rebuilt rocks measure 42 distinct positions out of 240, exactly a
+  welded icosahedron.
+- **Nothing may pass in front of the playfield.** Stars and rocks are drawn after the
+  opaque board, and depth testing cannot help with something genuinely nearer — in
+  front is in front. Both are recycled against the board's bounding sphere, computed
+  each frame because the camera pulls back on narrow screens. Verified with the
+  field running: closest star 22.42 and closest rock 60.96 against a board distance
+  of 17.53.
+- **A hard drop used to push the background to 2.5×.** Barely noticeable while the
+  stars drifted sideways as flat dots, but the streak length scales with speed too,
+  so once they fly at the viewer it gave 2.5× velocity and 2.5× trails at once and
+  read as a jump to warp — every drop, at the moment the eye should be on the board.
+  Removed; `engine.isZipping` is still there if a warp burst is ever wanted as a
+  designed effect with its own ramp.
+
 ## Board Glow and the Falling Piece (`v1.3`)
 
 - **The falling piece's lights are gone; the glow is a decal now.** Four coloured

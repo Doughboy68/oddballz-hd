@@ -657,6 +657,77 @@ input:checked + .slider::before {
 }
 
 /* High Scores Table */
+/* Category tabs above the high score table: one row for mode, one for board.
+   They wrap rather than scroll, so a narrow phone gets two lines instead of
+   content disappearing off the edge. */
+.hiscore-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.hiscore-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-family: var(--font-family);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.hiscore-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.hiscore-tab.active {
+  background: rgba(34, 211, 238, 0.16);
+  border-color: rgba(34, 211, 238, 0.5);
+  color: var(--accent-cyan);
+}
+
+/* The count carries the information, so it stays legible on an inactive tab
+   rather than fading out with the label. */
+.hiscore-tab-count {
+  font-size: 0.68rem;
+  opacity: 0.75;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* The high score card is the one modal whose content grows without bound -- ten
+   rows now, where five used to fit comfortably. Cap it to the viewport and let
+   ONLY the table scroll, so the tabs and the Close button stay put.
+
+   Without this the card simply grew: at 375x667 with ten rows the Close button
+   landed at y=680, off the bottom of the screen, and the card clipped its own
+   overflow so there was no way to scroll to it. dvh rather than vh because on iOS
+   Safari vh is the toolbar-HIDDEN height, which is the same trap already
+   documented for #appLayout; the vh line is the fallback for anything older. */
+#gameDialogView .modal-card {
+  max-height: calc(100vh - 1.5rem);
+  max-height: calc(100dvh - 1.5rem);
+  gap: 0.9rem;
+}
+
+.hiscores-scroll {
+  flex: 1 1 auto;
+  /* A flex item will not shrink below its content without this, which would put
+     the overflow back on the card and undo the whole thing. */
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .hiscores-table {
   width: 100%;
   border-collapse: collapse;

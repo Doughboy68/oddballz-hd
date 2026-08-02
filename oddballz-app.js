@@ -38,6 +38,21 @@
   // Short names for the presets, used on the high score table.
   const BOARD_SHORT = { 9: 'Classic', 12: 'Roomy', 18: 'Dense' };
 
+  // High scores are kept per mode AND per board, six categories in all. Neither
+  // axis is comparable with the other: the two modes score different things, and a
+  // wider board makes long lines easier, which the length bonus pays for. One
+  // combined table meant the easiest category quietly evicted every other.
+  const HISCORE_MODES = ['Color Match', 'Row Build'];
+  const HISCORE_BOARDS = ['Classic', 'Roomy', 'Dense'];
+  // Rows shown, and rows kept. Splitting into six categories is what made room for
+  // the full ten: each list is now a tenth of what one combined table held, so the
+  // height that used to show every score across every mode now shows one category
+  // in full. Keeping the same number as is shown means nothing is retained
+  // invisibly -- drop SHOWN below KEPT again if the panel ever needs to be shorter.
+  const HISCORE_SHOWN = 10;
+  const HISCORE_KEPT = 10;
+  const hiscoreKey = (mode, board) => `${mode || 'Color Match'}|${board || 'Classic'}`;
+
   // The row pieces spawn on, and the first row of the visible playfield. Rows above
   // it are the staging area the original masked off, so a piece slides down into
   // view rather than sitting in open space above the board.
@@ -98,6 +113,23 @@
   const ROCK_FAR = 210;
   const ROCK_SIDE_MIN = 15;      // never spawn dead centre, where the board is
   const ROCK_SIDE_RANGE = 46;
+
+  // What one line is worth for its LENGTH, given how many balls it runs beyond the
+  // shortest legal line of its kind. Separate from how many lines a landing cleared
+  // at once, which checkAdvance scores; a player can do well at either.
+  //
+  // Same n(n+1) shape as the simultaneity curve, so the two dimensions of skill
+  // read the same way. It used to be len-3 for parallel and len-2 for perpendicular
+  // -- one extra point per extra ball, so a nine long line scored 8 against 4 for
+  // the minimum five, and length barely registered next to the base.
+  //
+  // Anchored so a minimum-length line is unchanged: a five-long parallel scored 2
+  // before and scores 2 now. Only lines that beat the minimum move, which is the
+  // point, and it means the baseline economy of the game does not shift.
+  function lineLengthBonus(excess) {
+    const n = excess + 1;
+    return n * (n + 1);
+  }
 
   // Seconds as m:ss, growing to h:mm:ss only once it needs to, so the stats strip
   // does not reserve width for an hour that most games never reach.
@@ -981,7 +1013,7 @@
                 const len = rowLength(startPts, dir, saveColor);
                 if (len >= 5) {
                   add2List(startPts, dir, saveColor);
-                  this.sameBonus += len - 3;
+                  this.sameBonus += lineLengthBonus(len - 5);
                 }
               }
             });
@@ -994,7 +1026,7 @@
                 const len = rowLength(startPts, dir, saveColor);
                 if (len >= 3) {
                   add2List(startPts, dir, saveColor);
-                  this.sameBonus += len - 2;
+                  this.sameBonus += lineLengthBonus(len - 3);
                 }
               }
             });
@@ -4800,8 +4832,22 @@
         board: BOARD_SHORT[BOARD_WIDTH]
       });
 
+      // Trimmed per mode+board, never globally. A single top-ten list meant one
+      // category evicted every other: ten Color Match / Classic games had pushed out
+      // everything else outright, so a Row Build score could not survive unless it
+      // beat scores set under different rules on a different board. They are not
+      // comparable anyway -- the modes score different things, and longer lines are
+      // easier to build on the wider boards.
+      //
+      // HISCORE_KEPT per category. Sorted globally first, then counted per key, so
+      // each category keeps its own best regardless of how the others scored.
       this.highScores.sort((a, b) => b.score - a.score);
-      this.highScores = this.highScores.slice(0, 10);
+      const kept = {};
+      this.highScores = this.highScores.filter((hs) => {
+        const key = hiscoreKey(hs.mode, hs.board);
+        kept[key] = (kept[key] || 0) + 1;
+        return kept[key] <= HISCORE_KEPT;
+      });
       localStorage.setItem('oddballz_hd_hiscores', JSON.stringify(this.highScores));
     }
 
@@ -4811,28 +4857,72 @@
         this.isPaused = true;
       }
 
-      const tbody = document.getElementById('recordsTableBody');
-      if (tbody) {
-        tbody.innerHTML = '';
-        if (this.highScores.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:1rem 0;">No records saved yet!</td></tr>';
-        } else {
-          this.highScores.forEach((hs, idx) => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-              <td style="font-weight:bold; color:var(--text-muted);">#${idx + 1}</td>
-              <td style="font-weight:bold; color:var(--accent-gold);">${hs.score}</td>
-              <td>Lvl ${hs.level}</td>
-              <td style="font-size:0.8rem; color:var(--text-muted);">${typeof hs.time === 'number' ? formatPlayTime(hs.time) : '&mdash;'}</td>
-              <td style="font-size:0.8rem; color:var(--accent-cyan);">${hs.mode}</td>
-              <td style="font-size:0.8rem; color:var(--text-muted);">${hs.board || '&mdash;'}</td>
-            `;
-            tbody.appendChild(tr);
-          });
-        }
-      }
+      // Always open on the mode and board currently being played, rather than
+      // remembering wherever the player last browsed to. The list they want is
+      // almost always the one they are competing with right now; the tabs are for
+      // going and looking elsewhere, not for deciding where to land.
+      this.hiscoreView = {
+        mode: this.engine.matcher ? 'Color Match' : 'Row Build',
+        board: BOARD_SHORT[BOARD_WIDTH]
+      };
+
+      this.renderHighScores();
       const modal = document.getElementById('gameDialogView');
       if (modal) modal.classList.remove('hidden');
+    }
+
+    renderHighScores() {
+      const view = this.hiscoreView;
+
+      const buildTabs = (elId, values, current, countFor, onPick) => {
+        const host = document.getElementById(elId);
+        if (!host) return;
+        host.innerHTML = '';
+        values.forEach((v) => {
+          const btn = document.createElement('button');
+          btn.className = 'hiscore-tab' + (v === current ? ' active' : '');
+          // The count is what the tab is for: it shows where there is history to
+          // beat without making the player open every category to find out. It
+          // counts the category that tab would actually land on -- holding the
+          // other axis fixed -- not every entry sharing that one label.
+          const n = countFor(v);
+          btn.innerHTML = `${v}<span class="hiscore-tab-count">${n}</span>`;
+          btn.addEventListener('click', () => { onPick(v); this.renderHighScores(); });
+          host.appendChild(btn);
+        });
+      };
+
+      const tally = (mode, board) => this.highScores.filter(
+        h => h.mode === mode && (h.board || 'Classic') === board
+      ).length;
+
+      buildTabs('hiscoreModeTabs', HISCORE_MODES, view.mode,
+        (v) => tally(v, view.board), (v) => { view.mode = v; });
+      buildTabs('hiscoreBoardTabs', HISCORE_BOARDS, view.board,
+        (v) => tally(view.mode, v), (v) => { view.board = v; });
+
+      const tbody = document.getElementById('recordsTableBody');
+      if (!tbody) return;
+      const rows = this.highScores
+        .filter(hs => hs.mode === view.mode && (hs.board || 'Classic') === view.board)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, HISCORE_SHOWN);
+
+      tbody.innerHTML = '';
+      if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:1rem 0;">No records yet for ${view.mode} on ${view.board}</td></tr>`;
+        return;
+      }
+      rows.forEach((hs, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-weight:bold; color:var(--text-muted);">#${idx + 1}</td>
+          <td style="font-weight:bold; color:var(--accent-gold);">${hs.score}</td>
+          <td>Lvl ${hs.level}</td>
+          <td style="font-size:0.8rem; color:var(--text-muted);">${typeof hs.time === 'number' ? formatPlayTime(hs.time) : '&mdash;'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
     }
 
     closeHighScoresModal() {
