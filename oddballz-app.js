@@ -51,6 +51,52 @@
   // invisibly -- drop SHOWN below KEPT again if the panel ever needs to be shorter.
   const HISCORE_SHOWN = 10;
   const HISCORE_KEPT = 10;
+
+  // Pacing after a piece lands. Both are purely presentational: the engine has
+  // already resolved the whole landing -- matches, gravity, cascades -- by the time
+  // either is used, so these only govern how long the player is given to watch it.
+  //
+  // Balls knocked loose fall along a visual path at BALL_DROP_SPEED world units a
+  // second. It was 35, the same figure the engine uses for a hard drop, which meant
+  // a ball breaking off crossed the board in about two frames and the gravity rule
+  // was invisible -- the board simply looked different afterwards.
+  const BALL_DROP_SPEED = 13.0;
+  // Then a beat with the board clear, before the next piece slides in.
+  const PIECE_SPAWN_DELAY_MS = 400;
+  // The piece is NOT teleported into place: pieces are built at SPAWN_ROW, which
+  // straddles the crop line -- world y 5.63 against a clip constant of 6.08 -- so a
+  // shape simply appearing there is partly on the board already, with only its top
+  // ball masked. That is the "appears part way onto the playfield" glitch, and it
+  // is inherent to the spawn row.
+  //
+  // Rather than move the spawn row, which is engine data and feeds the game-over
+  // test, the piece keeps its real grid position and is given a temporary visual
+  // offset that starts above the crop line and runs down to zero. The staging mask
+  // does the rest, so it emerges from the black as if it had been up there all
+  // along. Purely presentational -- the engine is held throughout and the offset is
+  // gone before it resumes.
+  //
+  // The offset runs off at the piece's OWN fall speed, not over a fixed duration.
+  // A timed slide has to ease, and an ease-out starts fast: the piece was most of
+  // the way in before the eye caught it, which still read as appearing on the top
+  // row. Descending at exactly the rate it will keep descending afterwards means
+  // there is no change of speed to notice at the moment the engine takes over --
+  // it simply looks like a piece falling from above the crop, which is what it is.
+  // Consequently the entry is slow at level 1 and quickens with the fall speed,
+  // which is the same thing happening to the rest of the game.
+  const PIECE_SLIDE_SPEED_MULT = 1.0;
+
+  // Resting opacity of the landing ghost. A third rather than halved: measured
+  // against bare board it was only 13% of a solid ball's contrast even at 0.3, and
+  // 0.15 risked losing it altogether on a phone in daylight.
+  //
+  // Named because the spawn slide scales it. The ghost is drawn from the moment the
+  // piece starts coming in, which is deliberate -- it previews the shape and the
+  // landing spot before the piece itself clears the crop, and that is genuinely
+  // useful. Appearing at full strength on a board that is otherwise still, though,
+  // reads as a pop. It fades up as the piece descends instead, so the two arrive
+  // together.
+  const GHOST_OPACITY = 0.20;
   const hiscoreKey = (mode, board) => `${mode || 'Color Match'}|${board || 'Classic'}`;
 
   // The row pieces spawn on, and the first row of the visible playfield. Rows above
@@ -525,8 +571,16 @@
       this.ballCount++;
     }
 
-    updateContinuous(dt) {
-      if (this.endGame || !this.oddballz || !this.activeFloatPos) return false;
+    // Steering and rotation smoothing, with no vertical progress. Split out of
+    // updateContinuous so the spawn slide can run it on its own: moveOBall,
+    // transform and rotColors write to targetFloatX and targetRel, and it is this
+    // that eases the drawn piece toward them. Without it a piece moved while it is
+    // still coming in registers the input and then sits there, which looks broken.
+    //
+    // updateContinuous calls this rather than duplicating it, so there is one
+    // implementation of the easing and the two paths cannot drift apart.
+    updateSteering(dt) {
+      if (this.endGame || !this.oddballz || !this.activeFloatPos) return;
 
       const steerLerpSpeed = Math.min(1.0, dt * 18.0);
       this.activeFloatPos.x += (this.targetFloatX - this.activeFloatPos.x) * steerLerpSpeed;
@@ -538,6 +592,12 @@
           this.activeRel[i].y += (this.targetRel[i].y - this.activeRel[i].y) * rotLerpSpeed;
         }
       }
+    }
+
+    updateContinuous(dt) {
+      if (this.endGame || !this.oddballz || !this.activeFloatPos) return false;
+
+      this.updateSteering(dt);
 
       // Fall speed in grid ROWS per second, so a taller preset gives more thinking
       // time per piece (spawn-to-floor is ~16 rows on the 9-wide board but ~32 on
@@ -1896,30 +1956,11 @@
       ];
     }
 
-    spawnPopExplosion(worldPos, colorIndex = 1, count = 35) {
-      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
-      const geometry = new THREE.BufferGeometry();
-      const positions = new Float32Array(count * 3);
-      const velocities = [];
-
-      for (let i = 0; i < count; i++) {
-        positions[i * 3] = worldPos.x;
-        positions[i * 3 + 1] = worldPos.y;
-        positions[i * 3 + 2] = worldPos.z + (Math.random() - 0.5) * 0.2;
-
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.random() * Math.PI;
-        const speed = 2.5 + Math.random() * 4.0;
-
-        velocities.push(
-          speed * Math.sin(phi) * Math.cos(theta),
-          speed * Math.sin(phi) * Math.sin(theta),
-          speed * Math.cos(phi) + 1.5
-        );
-      }
-
-      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
+    // One sprite shared by every burst. It used to be built per call, and
+    // material.dispose() does not free material.map, so each popped ball leaked a
+    // 64x64 texture -- ten in a single cascade. Nothing about it varies per ball.
+    popSprite() {
+      if (this._popSprite) return this._popSprite;
       const canvas = document.createElement('canvas');
       canvas.width = 64; canvas.height = 64;
       const ctx = canvas.getContext('2d');
@@ -1929,21 +1970,56 @@
       grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 64, 64);
+      this._popSprite = new THREE.CanvasTexture(canvas);
+      return this._popSprite;
+    }
 
-      const texture = new THREE.CanvasTexture(canvas);
+    // A shell of particles thrown outward from a point, shared by both halves of
+    // the burst below.
+    spawnShell(worldPos, color, opts) {
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(opts.count * 3);
+      const velocities = [];
+      for (let i = 0; i < opts.count; i++) {
+        positions[i * 3] = worldPos.x;
+        positions[i * 3 + 1] = worldPos.y;
+        positions[i * 3 + 2] = worldPos.z + (Math.random() - 0.5) * 0.2;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const speed = opts.speed + Math.random() * opts.spread;
+        velocities.push(
+          speed * Math.sin(phi) * Math.cos(theta),
+          speed * Math.sin(phi) * Math.sin(theta),
+          speed * Math.cos(phi) + 1.5
+        );
+      }
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       const material = new THREE.PointsMaterial({
         color: color,
-        size: 0.35,
-        map: texture,
+        size: opts.size,
+        map: this.popSprite(),
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false
       });
+      const cloud = new THREE.Points(geometry, material);
+      this.scene.add(cloud);
+      this.particles.push({ mesh: cloud, velocities, life: 1.0, decay: opts.decay });
+    }
 
-      const pointCloud = new THREE.Points(geometry, material);
-      this.scene.add(pointCloud);
-
-      this.particles.push({ mesh: pointCloud, velocities, life: 1.0, decay: 1.4 });
+    // Two shells, not one. A single coloured puff was easy to miss in a cascade,
+    // and simply adding particles to it just made a denser puff. What reads as an
+    // explosion is the contrast: a white core that flares and is gone inside a
+    // fifth of a second, then the ball's own colour thrown wider and lingering
+    // long enough to see where it went.
+    spawnPopExplosion(worldPos, colorIndex = 1) {
+      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+      // Core flash: few, large, fast, white.
+      this.spawnShell(worldPos, new THREE.Color(0xffffff),
+        { count: 14, size: 0.85, speed: 1.4, spread: 2.6, decay: 5.2 });
+      // Body: the ball's colour, thrown further and given time to be seen.
+      this.spawnShell(worldPos, color,
+        { count: 46, size: 0.55, speed: 2.8, spread: 5.4, decay: 1.05 });
     }
 
     spawnTrailParticle(worldPos, colorIndex = 1) {
@@ -2182,17 +2258,16 @@
           clipShadows: true      // otherwise a masked ball still casts a shadow
         });
 
-        // The ghost is a placement hint and should sit behind the real balls. Linear
-        // tone mapping lifted every colour, which made it compete with them. Down a
-        // third rather than halved: measured against bare board it was only 13% of a
-        // solid ball's contrast even at 0.3, and 0.15 risked losing it altogether on
-        // a phone in daylight. 0.2 keeps it legible.
+        // The ghost is a placement hint and should sit behind the real balls; linear
+        // tone mapping lifted every colour, which made it compete with them. The
+        // level and the reasoning behind it are on GHOST_OPACITY, which the spawn
+        // slide also scales -- kept in one place so the two cannot drift.
         const ghostMat = new THREE.MeshStandardMaterial({
           color: c.main,
           roughness: 0.5,
           metalness: 0.1,
           transparent: true,
-          opacity: 0.20,
+          opacity: GHOST_OPACITY,
           clippingPlanes: clip,
           clipShadows: true
         });
@@ -2909,6 +2984,107 @@
       );
     }
 
+    // Take the next piece off screen for the length of the spawn hold.
+    //
+    // It cannot be left to the staging mask: pieces are built at SPAWN_ROW, which
+    // is world y 5.63 against a clip line at 6.08, so all but the topmost ball is
+    // already in view the instant it is built. Holding the engine alone therefore
+    // showed the piece arriving and then sitting motionless, which is worse than no
+    // delay -- it looks like a stall rather than a beat.
+    //
+    // Called after updateScene, which sets visibility from the engine every frame
+    // and would otherwise put it straight back.
+    hideActivePiece() {
+      for (const mesh of this.activeMeshes) if (mesh) mesh.visible = false;
+      this.ghostGroup.visible = false;
+      if (this.glowDecals) for (const d of this.glowDecals) d.visible = false;
+      // The lights too, and this is the part that is easy to miss: they are
+      // separate scene objects, so hiding the meshes does nothing to them.
+      // updateScene sets their base intensity from the engine's image, not from
+      // whether the ball is drawn, so through the whole pause four coloured lights
+      // went on burning at the new piece's spawn position -- a patch of colour on
+      // the top rows with no ball above it. Worse, the slide then ramped them up
+      // from zero, so they cut out just before the piece appeared: a flash that
+      // vanished right when you were expecting something to arrive. It showed up
+      // for longer whenever loose balls were still falling, because that extends
+      // the pause.
+      this.activeFade = 0;
+    }
+
+    showActivePiece() {
+      this.ghostGroup.visible = true;
+      this.activeGroup.position.set(0, 0, this.activeGroup.position.z);
+      this.setGhostFade(1);
+      this.activeFade = 1;
+    }
+
+    // Scale the ghost's opacity. The materials are shared across every ghost ball,
+    // so one pass here covers the whole preview however many balls it has.
+    setGhostFade(f) {
+      const k = Math.max(0, Math.min(1, f));
+      for (const mat of this.ghostMaterials) mat.opacity = GHOST_OPACITY * k;
+    }
+
+    // How far the piece has to be lifted for every one of its balls to clear the
+    // staging mask. Measured from the meshes rather than assumed, because the seven
+    // shapes have different vertical extents -- one that reaches a row higher needs
+    // less lift than a flat one, and a fixed number would either leave a shape
+    // showing or throw it further up than necessary.
+    activeSlideDistance(engine) {
+      let minY = Infinity;
+      for (let i = 0; i < this.activeMeshes.length; i++) {
+        const mesh = this.activeMeshes[i];
+        // Deliberately not gated on mesh.visible: this is measured while the piece
+        // is still hidden for the pause, so visibility says nothing about whether
+        // the ball is part of the shape. The engine's image does.
+        if (mesh && engine.oddballz && engine.oddballz.image[i] > 0) {
+          minY = Math.min(minY, mesh.position.y);
+        }
+      }
+      if (!isFinite(minY)) return 0;
+      // Plus a ball's width, so it starts clear of the line rather than touching it.
+      return Math.max(0, this.topClipPlane.constant - minY) + SPHERE_RADIUS * 2;
+    }
+
+    // Slide the piece down into view, backwards along the path it will actually
+    // fall. The offset goes on the group, not the meshes, so their grid positions
+    // stay exactly what updateScene set: nothing here can desync the visual from
+    // the board.
+    //
+    // Not straight up. The hex grid slants by half a cell per row, so a piece
+    // descending one row also travels sideways -- left for direction 2, right for
+    // direction 5. Lifting it on the y axis alone made it enter vertically and then
+    // kink onto the diagonal at the moment the engine took over, which is the one
+    // frame where a discontinuity is most obvious.
+    //
+    // The per-row step is measured from gridToWorld rather than written down as
+    // 0.5, so it follows the board preset's scaling for free.
+    setActiveSlide(liftY, isDownRight) {
+      const from = gridToWorld(10, 10, 0);
+      const to = gridToWorld(isDownRight ? 11 : 10, 11, 0);
+      const dxPerRow = to.x - from.x;
+      const dyPerRow = to.y - from.y;           // negative: rows descend
+      const rows = dyPerRow !== 0 ? liftY / -dyPerRow : 0;
+
+      this.activeGroup.position.x = -dxPerRow * rows;
+      this.activeGroup.position.y = liftY;
+
+      for (const mesh of this.activeMeshes) if (mesh) mesh.visible = true;
+      // Ghost and glow stay on the board at the real landing spot -- they are where
+      // the piece is going, not where it currently is, so they must not slide.
+      this.ghostGroup.visible = true;
+    }
+
+    // True while any knocked-loose ball is still travelling its path. The engine
+    // settled them the instant the piece landed; this is the animation catching up,
+    // and the spawn delay waits on it so the next piece does not arrive mid-fall.
+    hasDroppingBalls() {
+      for (const mesh of this.staticBallMeshes.values()) {
+        if (mesh.isPathDropping) return true;
+      }
+      return false;
+    }
+
     // Distance from the camera to the nearest point of the playfield, via the
     // board's bounding sphere. Cached against camera position and board preset,
     // since it only changes when one of those does.
@@ -3013,12 +3189,19 @@
       // down. Each ball is offset in phase so the piece shimmers rather than
       // throbbing as one block. Driven off the base intensity updateScene stores,
       // not the live value, which would compound frame on frame.
+      // Everything the piece emits is scaled by how far it has entered. Applied
+      // here rather than at the source because updateScene rewrites the light's
+      // base intensity and the decal's visibility from the engine every frame, so
+      // anything set outside the pulse is overwritten before it is drawn -- the
+      // same ordering that made the piece itself reappear mid-hold.
+      const emit = this.activeFade === undefined ? 1 : this.activeFade;
+
       if (this.activeBallLights) {
         for (let i = 0; i < this.activeBallLights.length; i++) {
           const L = this.activeBallLights[i];
           const base = L.userData.baseIntensity || 0;
           L.intensity = base <= 0 ? 0
-            : base * (1 + 0.3 * Math.sin(this._flightTime * 3.2 + i * 0.7));
+            : base * emit * (1 + 0.3 * Math.sin(this._flightTime * 3.2 + i * 0.7));
         }
       }
 
@@ -3030,7 +3213,7 @@
         for (let i = 0; i < this.glowDecals.length; i++) {
           const decal = this.glowDecals[i];
           if (!decal.visible) continue;
-          decal.material.opacity = GLOW_OPACITY *
+          decal.material.opacity = GLOW_OPACITY * emit *
             (1 + 0.16 * Math.sin(this._flightTime * 3.2 + i * 0.7));
         }
       }
@@ -3187,7 +3370,7 @@
         mesh.scale.set(s, s, s);
 
         if (mesh.isPathDropping && mesh.worldPath && mesh.worldPath.length > 1) {
-          const zipSpeed = 35.0; // Fast zip drop speed along visual hex path
+          const zipSpeed = BALL_DROP_SPEED;
           const targetWaypoint = mesh.worldPath[mesh.pathIndex];
           if (targetWaypoint) {
             const dist = mesh.position.distanceTo(targetWaypoint);
@@ -3653,6 +3836,19 @@
       this.moveTime = 0;
       this.accumulatedTime = 0;
       this.playTime = 0;
+      // The first piece of a game gets the same entry as every other one. It used
+      // to be cleared outright here, so it simply appeared on the board while every
+      // subsequent piece slid in -- the one piece that arrives on an empty board,
+      // where it is most obvious.
+      //
+      // Starting in the pause rather than the slide is also what makes it possible:
+      // the lift is measured from the piece's meshes, and updateScene has not run
+      // for this piece yet, so their positions are still the previous game's. The
+      // pause gives it the frame it needs.
+      this.slideOffset = 0;
+      this.slideStart = 0;
+      this.renderer.showActivePiece();
+      this.spawnHoldUntil = performance.now() + PIECE_SPAWN_DELAY_MS;
       this.lastTime = performance.now();
 
       this.setModeTabsDisabled(true);
@@ -4720,15 +4916,105 @@
         // a backgrounded tab returns one enormous frame.
         this.playTime += Math.min(dt, 0.25);
 
-        const stamped = this.engine.updateContinuous(dt);
+        // Hold the engine briefly after a landing so the aftermath is watchable:
+        // until the loose balls have finished falling, and for a fixed beat on top
+        // of that, whichever is longer.
+        //
+        // Only the engine is held. render() keeps running, which is what animates
+        // the falling balls and the burst we are waiting for.
+        // Two phases. First the board is left clear with the piece off screen,
+        // which is the pause; then the piece descends out of the crop under its own
+        // fall speed. Loose balls extend the pause only, so once the piece is on its
+        // way in it never hesitates.
+        const pausing = this.spawnHoldUntil !== undefined &&
+          (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls());
+
+        if (!pausing && this.spawnHoldUntil !== undefined) {
+          // Pause over: measure the lift and start the descent. Measured now rather
+          // than at the landing, because updateScene has since put the new piece's
+          // meshes at their real positions.
+          this.spawnHoldUntil = undefined;
+          this.slideOffset = this.renderer.activeSlideDistance(this.engine);
+          this.slideStart = this.slideOffset;   // kept, to drive the ghost fade
+        }
+
+        if (this.slideOffset > 0) {
+          // A hard drop cuts the entry short rather than queueing behind it. The
+          // piece is already legally on the board, so waiting out the slide before
+          // the zip would just feel like the button was ignored.
+          if (this.engine.isZipping) {
+            this.slideOffset = 0;
+            this.renderer.showActivePiece();
+          } else {
+            // The piece stays steerable on the way in -- moved, rotated, flipped
+            // and recoloured -- which is what the staging rows were for. Only its
+            // descent is held; everything the player can do to it still runs.
+            this.engine.updateSteering(dt);
+
+            // The engine's own fall rate, in world units per second, so the piece
+            // crosses the crop line at exactly the speed it will continue at.
+            const rowsPerSec = Math.min(2.6, 1.0 + (this.engine.level - 1) * 0.08);
+            this.slideOffset -= rowsPerSec * HEX_SPACING_Y * PIECE_SLIDE_SPEED_MULT * Math.min(dt, 0.05);
+            if (this.slideOffset <= 0) {
+              this.slideOffset = 0;
+              this.renderer.showActivePiece();
+            }
+          }
+        }
+
+        const holding = pausing || this.slideOffset > 0;
+
+        let stamped = false;
+        if (!holding) {
+          stamped = this.engine.updateContinuous(dt);
+          if (stamped) {
+            this.spawnHoldUntil = currentTime + PIECE_SPAWN_DELAY_MS;
+            this.slideOffset = 0;
+          }
+        }
+
         if (stamped && this.engine.endGame) {
           this.handleGameOver();
         }
 
         this.renderer.updateScene(this.engine);
+
+        // After updateScene, not before. It sets mesh visibility from the engine on
+        // every call, so hiding the piece earlier in the frame is simply undone --
+        // which is exactly what happened first time: the ghost stayed hidden,
+        // because that is a group flag updateScene does not touch, while the four
+        // balls came straight back and the piece sat on screen for the whole hold.
+        //
+        // `stamped` as well as `holding`, or the piece flashes for one frame. On
+        // the landing frame `holding` was computed before the stamp and is still
+        // false, but by this point the engine has already built the next piece and
+        // updateScene has drawn it. One frame at 16ms, and easier to close than to
+        // argue about.
+        if (stamped || pausing) {
+          this.renderer.hideActivePiece();
+        } else if (this.slideOffset > 0) {
+          this.renderer.setActiveSlide(this.slideOffset, this.engine.direction === 5);
+          // Ghost fades up over the descent, reaching full strength as the piece
+          // arrives. Squared, so it starts almost imperceptibly and firms up late:
+          // linear made it clearly visible while the board was still empty, which
+          // is the pop it is meant to avoid.
+          const p = this.slideStart > 0 ? 1 - this.slideOffset / this.slideStart : 1;
+          this.renderer.setGhostFade(p * p);
+
+          // The piece's own light and its glow pool ramp with it. They were coming
+          // up at full strength the instant the descent began, which lit the board
+          // before there was anything visible to be casting it. Cubed rather than
+          // squared: the light is the brightest thing on an otherwise dark board at
+          // that moment, so it needs to stay out of the way for longer than the
+          // ghost does.
+          this.renderer.activeFade = p * p * p;
+        }
+
         this.updateUI();
 
-        if (this.engine.oddballz && Math.random() < 0.3) {
+        // No trail while the piece is hidden, or particles stream from a shape that
+        // is not there.
+        if (!holding && this.engine.oddballz && Math.random() < 0.3) {
           const rootFloatX = this.engine.activeFloatPos ? this.engine.activeFloatPos.x : this.engine.oddballz.map[0].x;
           const rootFloatY = this.engine.activeFloatPos ? this.engine.activeFloatPos.y : this.engine.oddballz.map[0].y;
           const wPos = gridToWorld(rootFloatX, rootFloatY, SPHERE_RADIUS);
