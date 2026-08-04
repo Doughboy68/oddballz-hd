@@ -7,7 +7,7 @@
 (function () {
   // --- 1. HEX MATH ---
   // Board presets, keyed by the width of the bottom edge in balls. Each entry is
-  // the classic 1992 hexagon's integer parameters scaled up; WORLD_SCALE then
+  // the classic 1994 hexagon's integer parameters scaled up; WORLD_SCALE then
   // shrinks the hex spacing and the ball radius by the same ratio, so every preset
   // occupies the same world-space extent (x +/-8.0, y +/-8.23) and the camera and
   // the locked mobile scaling maths never see a difference.
@@ -97,6 +97,11 @@
   // reads as a pop. It fades up as the piece descends instead, so the two arrive
   // together.
   const GHOST_OPACITY = 0.20;
+
+  // How long the End Game button stays armed after the first press. Long enough to
+  // read the changed label and press again deliberately, short enough that it never
+  // outlives the moment: come back to a pause screen left open and it is safe again.
+  const END_ARM_MS = 4000;
   const hiscoreKey = (mode, board) => `${mode || 'Color Match'}|${board || 'Classic'}`;
 
   // The row pieces spawn on, and the first row of the visible playfield. Rows above
@@ -413,7 +418,7 @@
     // player's board back afterwards.
     //
     // Row-scan tables are derived from the board shape rather than hardcoded. At
-    // width 9 they reproduce the original 1992 tables exactly: midRow is the
+    // width 9 they reproduce the original 1994 tables exactly: midRow is the
     // leftmost cell of each row from the bottom up to y = 4*ratio (the spawn rows
     // are deliberately excluded from row clearing), and lt/rtRow are the bottom
     // row scanned in the two directions.
@@ -3566,10 +3571,53 @@
           e.preventDefault(); return;
         }
 
+        // Escape backs out of whatever is in front of you, and nothing more.
+        // Deliberately never destructive: it does not end a game. Ending is the one
+        // action here you cannot undo, and Escape is the key people press blind.
+        //
+        // Listed rather than written out as a chain of else-ifs, because the first
+        // version of this handled two of the three modals and quietly ignored Audio
+        // Settings. A list is checked against the markup in one glance; a chain is
+        // not. Any modal added later belongs here, and its close button gets the
+        // matching Esc chip.
+        if (code === 'Escape' || key === 'Escape') {
+          // An armed End Game button is the innermost thing on screen, so Escape
+          // disarms it before it considers closing a modal or resuming.
+          if (this.endArmed) { this.disarmEndGame(); e.preventDefault(); return; }
+
+          const dismissable = [
+            ['gameDialogView', () => this.closeHighScoresModal()],
+            ['gameDialogAbout', () => this.closeAboutModal()],
+            ['gameDialogAudio', () => this.closeAudioModal()]
+          ];
+          let closed = false;
+          for (const [id, close] of dismissable) {
+            const el = document.getElementById(id);
+            if (el && !el.classList.contains('hidden')) { close(); closed = true; break; }
+          }
+          if (!closed && this.isPlaying) this.togglePause();   // pause, or resume
+          e.preventDefault(); return;
+        }
+
         if (!this.isPlaying) return;
 
         if (code === 'KeyP' || key === 'p' || key === 'P') {
           this.togglePause(); e.preventDefault(); return;
+        }
+
+        // E ends the game, but only from the pause screen. It is safe to reuse the
+        // flip-Y key because the gameplay switch below is gated on !isPaused, so the
+        // two meanings can never both be live. Worth knowing that they are one
+        // keypress apart though: E flips while playing and ends the run once paused,
+        // and nothing asks for confirmation -- same as the button, which has always
+        // ended immediately on a single click.
+        if (this.isPaused && (code === 'KeyE' || key === 'e' || key === 'E')) {
+          // Ignore auto-repeat. Holding E down delivers a stream of keydowns, which
+          // would arm and confirm within a few milliseconds and end the game from a
+          // single held key -- exactly the accident the two-press guard exists to
+          // prevent, arriving through the guard itself.
+          if (!e.repeat) this.armEndGame();
+          e.preventDefault(); return;
         }
 
         if (this.isPaused) return;
@@ -3617,7 +3665,7 @@
       bindStartBtn('btnRestart');
       document.getElementById('btnPause').addEventListener('click', () => this.togglePause());
       document.getElementById('btnResume').addEventListener('click', () => this.togglePause());
-      document.getElementById('btnPauseEnd').addEventListener('click', () => this.returnToTitle());
+      document.getElementById('btnPauseEnd').addEventListener('click', () => this.armEndGame());
       document.getElementById('btnGameOverMenu').addEventListener('click', () => this.returnToTitle());
 
       ['btnHighScores', 'btnGameOverHighScores', 'btnStartHighScores'].forEach(id => {
@@ -3640,8 +3688,14 @@
         if (btn) btn.addEventListener('click', () => this.closeAboutModal());
       });
 
-      const btnAudio = document.getElementById('btnAudioSettings');
-      if (btnAudio) btnAudio.addEventListener('click', () => this.showAudioModal());
+      // Both entry points: the in-game header and the title screen. Audio was
+      // reachable only from the header, which is hidden behind starting a game --
+      // so the one moment you would most want to turn the music down, before
+      // playing, was the one moment you could not.
+      ['btnAudioSettings', 'btnStartAudio'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.showAudioModal());
+      });
 
       ['btnCloseAudio', 'btnAudioClose'].forEach(id => {
         const btn = document.getElementById(id);
@@ -3865,6 +3919,9 @@
 
     togglePause() {
       if (!this.isPlaying) return;
+      // Leaving the pause screen at all cancels a half-pressed End Game, so it can
+      // never still be armed when the player next opens it.
+      this.disarmEndGame();
       this.isPaused = !this.isPaused;
 
       if (this.isPaused) {
@@ -3878,6 +3935,7 @@
     }
 
     returnToTitle() {
+      this.disarmEndGame();
       this.isPlaying = false;
       this.isPaused = false;
       this.wasPausedByModal = false;
@@ -5231,6 +5289,44 @@
       }
       const modal = document.getElementById('gameDialogAbout');
       if (modal) modal.classList.remove('hidden');
+    }
+
+    // Ending a game is the only irreversible action here, and both routes to it --
+    // the pause screen's button and the E key -- fired on a single press. E is the
+    // sharper edge: it is the flip-Y key during play, so the same finger that flips
+    // a piece ends the run the moment the game is paused.
+    //
+    // Two presses of the same control rather than a confirmation dialog. A dialog
+    // was built first and thrown away: it was safe but put a second screen in front
+    // of a pause screen, and the only way to make it quick again was to bind a key
+    // to the destructive half, which is what the guard existed to prevent. Arming
+    // the button in place keeps the pause screen one level deep, keeps E working at
+    // its old speed by pressing it twice, and needs no new key.
+    //
+    // It disarms on Escape, on resuming, and on a timer, so an armed button never
+    // outlives the moment the player was looking at it.
+    armEndGame() {
+      if (this.endArmed) { this.disarmEndGame(); this.returnToTitle(); return; }
+      this.endArmed = true;
+      const btn = document.getElementById('btnPauseEnd');
+      if (btn) {
+        btn.classList.add('is-armed');
+        btn.innerHTML = '⏹ PRESS AGAIN <kbd class="key-hint">E</kbd>';
+      }
+      clearTimeout(this.endArmTimer);
+      this.endArmTimer = setTimeout(() => this.disarmEndGame(), END_ARM_MS);
+    }
+
+    disarmEndGame() {
+      clearTimeout(this.endArmTimer);
+      this.endArmTimer = null;
+      if (!this.endArmed) return;
+      this.endArmed = false;
+      const btn = document.getElementById('btnPauseEnd');
+      if (btn) {
+        btn.classList.remove('is-armed');
+        btn.innerHTML = '⏹ END GAME <kbd class="key-hint">E</kbd>';
+      }
     }
 
     closeAboutModal() {

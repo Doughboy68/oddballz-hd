@@ -23,7 +23,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=1.65.0">
+  <link rel="stylesheet" href="./style.css?v=1.79.0">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -44,7 +44,7 @@
         <button id="btnTouchRotCW" class="touch-btn"><span class="btn-icon">↻</span><span class="btn-label">Rot CW</span></button>
         <button id="btnTouchFlip" class="touch-btn"><span class="btn-icon">⇄</span><span class="btn-label">Flip X</span></button>
         <button id="btnTouchFlipY" class="touch-btn"><span class="btn-icon">⇅</span><span class="btn-label">Flip Y</span></button>
-        <button id="btnTouchF" class="touch-btn btn-f"><span class="btn-icon">🎨</span><span class="btn-label">Color (F)</span></button>
+        <button id="btnTouchF" class="touch-btn btn-f"><span class="btn-icon">🎨</span><span class="btn-label">Color</span></button>
         <button id="btnTouchSpace" class="touch-btn btn-zip"><span class="btn-icon">⚡</span><span class="btn-label">HARD DROP</span></button>
       </div>
     </footer>
@@ -71,7 +71,7 @@
       <!-- Quick Action Toggles & Audio Options -->
       <div class="header-actions">
         <button id="btnAudioSettings" class="btn btn-secondary btn-sm" title="Audio Settings & Volume">🔊 Audio Options</button>
-        <button id="btnPause" class="btn btn-secondary btn-sm" disabled>Pause (P)</button>
+        <button id="btnPause" class="btn btn-secondary btn-sm" disabled>Pause <kbd class="key-hint">P</kbd></button>
         <button id="btnHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
         <button id="btnAbout" class="btn btn-secondary btn-sm">ℹ️ About & Credits</button>
       </div>
@@ -116,7 +116,7 @@
       <div class="modal-card glass-card text-center">
         <h2 class="modal-title">ODDBALLZ <span class="badge-hd">HD</span></h2>
         <p class="modal-desc">
-          Experience the classic 1992 hex game engine transformed with real-time 3D sphere physics, metallic shaders, dynamic particle explosions, and Web Audio synthesis!
+          Experience the classic 1994 hex game engine transformed with real-time 3D sphere physics, metallic shaders, dynamic particle explosions, and Web Audio synthesis!
         </p>
 
         <div class="mode-summary">
@@ -145,16 +145,23 @@
 
         <div style="display:flex; flex-direction:column; align-items:center; gap:0.5rem; margin-top:0.5rem;">
           <button id="btnOverlayStart" class="btn btn-primary btn-lg glow-btn">
-            🚀 START NEW GAME (Enter)
+            🚀 START NEW GAME <kbd class="key-hint">Enter</kbd>
           </button>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
             <button id="btnStartHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
+            <button id="btnStartAudio" class="btn btn-secondary btn-sm">🔊 Audio Options</button>
             <button id="btnStartCredits" class="btn btn-secondary btn-sm" style="opacity: 0.9;">
               ℹ️ About &amp; Game Credits
             </button>
           </div>
-          <p class="credits-tagline" style="font-size: 0.8rem; opacity: 0.75; margin-top: 0.25rem; color: var(--text-muted);">
-            Inspired by <span style="white-space: nowrap;">Fred Kohler</span>'s early 1990s design &amp; <span style="white-space: nowrap;">Brian Semotiuk</span>'s 1992 Windows port.
+          <!-- text-align is set here, not left to the card's `text-center` class:
+               that class is used on five modal cards but is not defined anywhere in
+               style.css, so it centres nothing. The flex parent shrink-wraps this
+               paragraph to its longest line, which left the shorter first line
+               hanging off to the left once the tagline broke over two lines. -->
+          <p class="credits-tagline" style="font-size: 0.8rem; opacity: 0.75; margin-top: 0.25rem; color: var(--text-muted); text-align: center;">
+            Gameplay &amp; engine by <span style="white-space: nowrap;">Fred Kohler</span><br>
+            Windows conversion by <span style="white-space: nowrap;">Brian Semotiuk</span>, 1992&ndash;1994.
           </p>
         </div>
       </div>
@@ -168,7 +175,7 @@
       </div>
       <div class="attract-caption glass-card" id="attractCaption">Watch how it works&hellip;</div>
       <div class="attract-footer">
-        <div class="attract-hint">Press <kbd>Enter</kbd> or tap to play</div>
+        <div class="attract-hint"><span class="kbd-only">Press <kbd>Enter</kbd> or </span>tap to play</div>
       </div>
     </div>
 
@@ -176,13 +183,14 @@
     <div id="overlayPause" class="overlay-modal flex-center hidden">
       <div class="modal-card glass-card text-center">
         <h2 class="modal-title">GAME PAUSED</h2>
-        <p class="modal-desc">Press <kbd>P</kbd> or click below to resume your game.</p>
+        <p class="modal-desc">Your game is paused.</p>
         <div class="modal-buttons">
-          <button id="btnResume" class="btn btn-primary btn-lg">▶ RESUME (P)</button>
-          <button id="btnPauseEnd" class="btn btn-secondary btn-lg">⏹ END GAME</button>
+          <button id="btnResume" class="btn btn-primary btn-lg">▶ RESUME <kbd class="key-hint">P</kbd></button>
+          <button id="btnPauseEnd" class="btn btn-secondary btn-lg">⏹ END GAME <kbd class="key-hint">E</kbd></button>
         </div>
       </div>
     </div>
+
 
     <!-- Game Over Overlay Modal -->
     <div id="overlayGameOver" class="overlay-modal flex-center hidden">
@@ -194,7 +202,7 @@
           <span id="finalScore" class="final-score-val">0</span>
         </div>
         <div class="modal-buttons">
-          <button id="btnRestart" class="btn btn-primary btn-lg glow-btn">PLAY AGAIN (Enter)</button>
+          <button id="btnRestart" class="btn btn-primary btn-lg glow-btn">PLAY AGAIN <kbd class="key-hint">Enter</kbd></button>
           <button id="btnGameOverMenu" class="btn btn-secondary btn-lg">🏠 Title Screen</button>
           <button id="btnGameOverHighScores" class="btn btn-secondary btn-lg">🏆 High Scores</button>
         </div>
@@ -227,7 +235,7 @@
             </tbody>
           </table>
         </div>
-        <button id="btnRecordsClose" class="btn btn-secondary btn-lg" style="margin-top:1rem; align-self:center;">Close</button>
+        <button id="btnRecordsClose" class="btn btn-secondary btn-lg" style="margin-top:1rem; align-self:center;">Close <kbd class="key-hint">Esc</kbd></button>
       </div>
     </div>
 
@@ -241,17 +249,17 @@
         
         <div class="about-content" style="text-align: left; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.92rem; line-height: 1.5; color: rgba(255, 255, 255, 0.9);">
           <p>
-            <strong>Oddballz HD</strong> is inspired by a game designed by <strong style="white-space: nowrap;">Fred Kohler</strong> in the early 1990s and based off the Windows 1992 port by <strong style="white-space: nowrap;">Brian Semotiuk</strong>.
+            The gameplay and the original Borland Pascal engine are <strong style="white-space: nowrap;">Fred Kohler</strong>'s. <strong style="white-space: nowrap;">Brian Semotiuk</strong> converted the game to Windows, adapting the code where the port required it, working on it from around 1992&ndash;93 and finalising the build in 1994. It was never fully finished and was never released. <strong>Oddballz HD</strong> ports that engine to JavaScript, with the aim of finally finishing what was started over thirty years ago.
           </p>
           <p>
-            It uses the exact same algorithms and preserves authentic hexagonal strategy gameplay, enhanced with real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, and Web Audio synthesis.
+            The matching, support and gravity rules are the original's, untouched. Around them: selectable board sizes, a game timer, high scores kept separately per mode and board, reworked levelling and scoring, and a number of long-standing bugs fixed. The presentation is rebuilt throughout &mdash; real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, Web Audio synthesis, smooth continuous motion in place of the original's step-by-step movement, and pieces that flip in place rather than pivoting end over end about a single ball.
           </p>
           <div style="background: rgba(255, 255, 255, 0.05); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.85rem; text-align: center; color: var(--accent-gold); font-weight: 600;">
             Code and graphics/design copyright &copy; <span style="white-space: nowrap;">Brian Semotiuk</span> and <span style="white-space: nowrap;">Fred Kohler</span>.
           </div>
         </div>
 
-        <button id="btnAboutClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Close</button>
+        <button id="btnAboutClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Close <kbd class="key-hint">Esc</kbd></button>
       </div>
     </div>
 
@@ -320,11 +328,11 @@
 
         </div>
 
-        <button id="btnAudioClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Done</button>
+        <button id="btnAudioClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Done <kbd class="key-hint">Esc</kbd></button>
       </div>
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=1.65.0"></script>
+  <script src="./oddballz-app.js?v=1.79.0"></script>
 </body>
 </html>

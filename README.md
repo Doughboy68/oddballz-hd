@@ -1,10 +1,15 @@
 # Oddballz HD - Hex Puzzle Game Engine
 
-A full 3D WebGL remake of the classic 1992 Oddballz hex puzzle game: the original
+A full 3D WebGL remake of the classic 1994 Oddballz hex puzzle game: the original
 Borland Pascal engine faithfully ported to JavaScript, wrapped in Three.js sphere
 rendering, metallic PBR materials, particle explosions and Web Audio sound.
 
-Inspired by Fred Kohler's early 1990s design and Brian Semotiuk's 1992 Windows port.
+The gameplay and the original Borland Pascal engine are Fred Kohler's. Brian
+Semotiuk converted the game to Windows, adapting the code where the port required
+it, working on it from around 1992–93 and finalising the build in 1994. That
+version was never fully finished and was never released. Oddballz HD ports the
+engine to JavaScript, with the aim of finally finishing what was started over
+thirty years ago.
 
 ## Quick Start
 
@@ -44,7 +49,7 @@ proportionally smaller balls into the same physical playfield, so there is more 
 to manoeuvre without the board taking more screen. Changing it reloads the game; the
 setting is remembered per device.
 
-The classic 9-wide board is the original 1992 geometry, untouched.
+The classic 9-wide board is the original 1994 geometry, untouched.
 
 ## Game Modes
 
@@ -108,5 +113,8 @@ itself does not depend on them.
   `CLAUDE.md` before editing `BOARD_PRESETS`.
 
 ## Credits
+
+Gameplay design and original Borland Pascal engine by Fred Kohler. Windows
+conversion by Brian Semotiuk, 1992–1994.
 
 Code and graphics/design copyright © Brian Semotiuk and Fred Kohler.
