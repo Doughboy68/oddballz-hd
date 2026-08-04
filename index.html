@@ -20,10 +20,19 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
   <meta name="theme-color" content="#0a1024">
 
+  <!-- Android's Add to Home Screen. Chrome takes the icon and the name from the
+       manifest, not from apple-touch-icon, so without this it falls back to a
+       screenshot of the page and the <title> -- the same failure iOS had, by a
+       different route. Paths are relative so it also works from a project
+       subdirectory on GitHub Pages rather than only at a domain root.
+       iOS reads this too since 16.4, and display:standalone matches the fullscreen
+       launch iPhones already give a home-screen shortcut. -->
+  <link rel="manifest" href="./manifest.json">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=1.79.0">
+  <link rel="stylesheet" href="./style.css?v=1.83.0">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -71,7 +80,7 @@
       <!-- Quick Action Toggles & Audio Options -->
       <div class="header-actions">
         <button id="btnAudioSettings" class="btn btn-secondary btn-sm" title="Audio Settings & Volume">🔊 Audio Options</button>
-        <button id="btnPause" class="btn btn-secondary btn-sm" disabled>Pause <kbd class="key-hint">P</kbd></button>
+        <button id="btnPause" class="btn btn-secondary btn-sm" disabled>⏸️ Pause <kbd class="key-hint">P</kbd></button>
         <button id="btnHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
         <button id="btnAbout" class="btn btn-secondary btn-sm">ℹ️ About & Credits</button>
       </div>
@@ -333,6 +342,25 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=1.79.0"></script>
+  <script src="./oddballz-app.js?v=1.83.0"></script>
+
+  <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
+       yet. A service worker is a caching layer between the deployed files and what
+       the device actually runs, and while the game is still changing daily that
+       layer costs more than it earns: every "did that change not take?" gains a
+       third possible answer alongside the browser cache and a forgotten ?v= bump,
+       and on a home-screen app there is no address bar to reload from. Turn it on
+       when the phone is for playing rather than testing, by restoring:
+
+         if ('serviceWorker' in navigator) {
+           window.addEventListener('load', function () {
+             navigator.serviceWorker.register('./sw.js').catch(function () {});
+           });
+         }
+
+       Note that enabling it on a device that has already run it before is not the
+       same as enabling it fresh: an old worker can still be installed. sw.js drops
+       any cache whose name does not match its SW_VERSION on activate, so bumping
+       that constant alongside the ?v= is what clears the previous copy. -->
 </body>
 </html>

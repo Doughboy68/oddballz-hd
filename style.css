@@ -182,7 +182,15 @@ body, html {
 
 .header-actions {
   display: flex;
-  align-items: center;
+  /* stretch, not center. The labels wrap as the header tightens -- "About &
+     Credits" over three lines, "Audio Options" over two -- which is what gives
+     these buttons their chunky look and is wanted. Centring left each button at
+     its own content height, so they came out at 63px, 79px, and Pause at 30px
+     because "Pause" is short enough never to wrap. Pause read as small and out of
+     place; it was in fact the only one at its natural size.
+     Stretching sizes them all to the tallest, so the short label is padded up to
+     match rather than the long ones being squashed down. */
+  align-items: stretch;
   gap: 1rem;
 }
 
