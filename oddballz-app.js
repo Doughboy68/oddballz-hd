@@ -256,11 +256,11 @@
     { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula',
       glow: { threshold: 0.28, strength: 0.35 } },                // its stars and ringed planet
     { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber',
-      glow: { threshold: 0.42, strength: 0.55 } },                // the conduits
+      glow: { threshold: 0.42, strength: 0.42 } },                // the conduits
     { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace',
       glow: { threshold: 0.28, strength: 0.9, radial: true } },   // the streaks, pulsed outward
     { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership',
-      glow: { threshold: 0.42, strength: 0.55 } },                // the lattice
+      glow: { threshold: 0.42, strength: 0.4 } },                 // the lattice
     { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel',
       glow: { threshold: 0.42, strength: 0.5 } },                 // the panel stripes and markers
     { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar',
@@ -6012,7 +6012,7 @@ registerProcessor('odd-sid', OddSid);
       const key = portrait ? i + 'p' : String(i);
       this.backdropKey = key;
       const have = this.backdropTextures[key];
-      if (have) { this.scene.background = have; this.setGlow(have.userData.glow, have.userData.glowCfg); this.fitBackdrop(); return; }
+      if (have) { this.scene.background = have; this.applyGlow(have); this.fitBackdrop(); return; }
       this.setGlow(null);
       if (have === null) return;          // still loading
       this.backdropTextures[key] = null;
@@ -6027,11 +6027,13 @@ registerProcessor('odd-sid', OddSid);
         ctx.fillRect(0, 0, cvs.width, cvs.height);
         const tex = new THREE.CanvasTexture(cvs);
         const gc = BACKDROPS[i].glow;
-        tex.userData = { aspect: cvs.width / cvs.height, glow: gc ? this.glowMask(img, gc.threshold) : null, glowCfg: gc };
+        // The glow layer is built from the image when the picture is shown, not
+        // kept: at full resolution each is ~11 MB of video memory (applyGlow).
+        tex.userData = { aspect: cvs.width / cvs.height, glowSrc: gc ? img : null, glowCfg: gc };
         this.backdropTextures[key] = tex;
         // Only if it is still the one wanted: a quick step past it while it loaded
         // must not snap back to it.
-        if (this.backdropKey === key) { this.scene.background = tex; this.setGlow(tex.userData.glow, tex.userData.glowCfg); this.fitBackdrop(); }
+        if (this.backdropKey === key) { this.scene.background = tex; this.applyGlow(tex); this.fitBackdrop(); }
       };
       img.onerror = () => {
         delete this.backdropTextures[key];
@@ -6073,48 +6075,70 @@ registerProcessor('odd-sid', OddSid);
     }
 
     // The glow layer: the picture's bright parts, found by brightness and kept in
-    // their own colours, at half resolution -- it is lit light, not detail, and
-    // the shader softens it anyway. Measured from the undimmed image, against the
-    // picture's own threshold (BACKDROPS glow).
+    // their own colours, measured from the undimmed image against the picture's
+    // own threshold (BACKDROPS glow).
     //
-    // Each half-resolution pixel takes the BRIGHTEST of the four it covers, not
-    // their average. Scaling down averages, which halves a line one pixel wide,
-    // so stretches of it fell under the threshold and got no glow: glowing dashes
-    // with dull gaps, which is how Hyperspace's thin streaks looked. Measured, the
-    // averaged mask dropped 42% of Hyperspace's line pixels (Mothership 14%,
-    // Cyber 5%); the brightest-of-four drops none by construction.
+    // At the picture's full resolution, smoothed (mipmaps) like the picture under
+    // it. It was half resolution, which looked right on a 1024-wide screen and
+    // broke on bigger ones: a phone shows the middle third of a picture, so the
+    // half-size layer was stretched over 3x, and a thin diagonal line -- pixels
+    // that touch only at their corners -- stretched like that turns into a
+    // string of beads. Hyperspace's streaks are exactly such lines, and they
+    // read as broken. At full size the glow is never stretched more than the
+    // picture itself, which is how the lines were drawn to be seen.
     glowMask(img, threshold) {
-      const FW = img.naturalWidth, FH = img.naturalHeight;
-      const W = Math.floor(FW / 2), H = Math.floor(FH / 2);
-      const src = document.createElement('canvas');
-      src.width = FW; src.height = FH;
-      const sctx = src.getContext('2d');
-      sctx.drawImage(img, 0, 0);
-      const f = sctx.getImageData(0, 0, FW, FH).data;
+      const W = img.naturalWidth, H = img.naturalHeight;
       const cvs = document.createElement('canvas');
       cvs.width = W; cvs.height = H;
       const ctx = cvs.getContext('2d');
-      const im = ctx.createImageData(W, H), d = im.data;
+      ctx.drawImage(img, 0, 0);
+      const im = ctx.getImageData(0, 0, W, H), d = im.data;
+      // Whether a pixel belongs is decided by the brightest pixel around it (its
+      // 3x3 neighbourhood), and what it carries is its own colour. Judged on its
+      // own, a thin anti-aliased line failed in a pattern: the pixels the line
+      // runs through the middle of passed and the ones it only clips did not,
+      // so the glow was a dotted copy of a continuous line. Judged by the
+      // neighbourhood, every pixel of the line goes in at its own brightness and
+      // the glow is the line as drawn.
+      const L = new Float32Array(W * H);
+      for (let i = 0, j = 0; j < L.length; i += 4, j++) {
+        L[j] = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+      }
+      const R = new Float32Array(W * H);              // max across, then down
+      for (let y = 0; y < H; y++) {
+        const r0 = y * W;
+        for (let x = 0; x < W; x++) {
+          let m = L[r0 + x];
+          if (x > 0 && L[r0 + x - 1] > m) m = L[r0 + x - 1];
+          if (x < W - 1 && L[r0 + x + 1] > m) m = L[r0 + x + 1];
+          R[r0 + x] = m;
+        }
+      }
       const lo = threshold, span = 1 - lo;
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
-          let best = 0, bl = -1;
-          for (let k = 0; k < 4; k++) {
-            const o = ((2 * y + (k >> 1)) * FW + 2 * x + (k & 1)) * 4;
-            const l = 0.2126 * f[o] + 0.7152 * f[o + 1] + 0.0722 * f[o + 2];
-            if (l > bl) { bl = l; best = o; }
-          }
-          const l = bl / 255;
-          const kk = l <= lo ? 0 : Math.min(1, (l - lo) / span);
-          const o = (y * W + x) * 4;
-          d[o] = f[best] * kk; d[o + 1] = f[best + 1] * kk; d[o + 2] = f[best + 2] * kk; d[o + 3] = 255;
+          const j = y * W + x;
+          let m = R[j];
+          if (y > 0 && R[j - W] > m) m = R[j - W];
+          if (y < H - 1 && R[j + W] > m) m = R[j + W];
+          const k = m <= lo ? 0 : Math.min(1, (m - lo) / span);
+          const i = j * 4;
+          d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; d[i + 3] = 255;
         }
       }
       ctx.putImageData(im, 0, 0);
-      const tex = new THREE.CanvasTexture(cvs);
-      tex.minFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
-      return tex;
+      return new THREE.CanvasTexture(cvs);    // mipmapped, as the picture is
+    }
+
+    // The glow for a background texture: built for it now, and the last one's
+    // freed, so only the picture on screen holds a layer.
+    applyGlow(tex) {
+      const cfg = tex.userData.glowCfg;
+      if (!cfg || !tex.userData.glowSrc) { this.setGlow(null); return; }
+      if (this.glowFor === tex && this.bgGlow && this.bgGlow.visible) return;
+      const mask = this.glowMask(tex.userData.glowSrc, cfg.threshold);
+      this.setGlow(mask, cfg);
+      this.glowFor = tex;
     }
 
     // Show a glow layer over the background, or none. One full-screen quad, made
@@ -6127,9 +6151,17 @@ registerProcessor('odd-sid', OddSid);
     //   sweep    a soft band of light crosses the picture on a diagonal every
     //            7 s, lighting each line as it passes -- current along a conduit
     //   halo     a few taps around each point, so the light spills off the line
-    //   twinkle  small points flicker on their own phases
+    //   twinkle  lone points -- stars, markers -- flicker on their own phases;
+    //            lines do not, or they break into dashes
     setGlow(mask, cfg) {
-      if (!mask) { if (this.bgGlow) this.bgGlow.visible = false; return; }
+      // The layer being replaced is freed: they are built per showing.
+      const old = this.bgGlow && this.bgGlow.material.uniforms.tGlow.value;
+      if (old && old !== mask) old.dispose();
+      if (!mask) {
+        if (this.bgGlow) { this.bgGlow.visible = false; this.bgGlow.material.uniforms.tGlow.value = null; }
+        this.glowFor = null;
+        return;
+      }
       if (!this.bgGlow) {
         const mat = new THREE.ShaderMaterial({
           uniforms: {
@@ -6158,7 +6190,7 @@ registerProcessor('odd-sid', OddSid);
               vec3 halo = vec3(0.0);
               for (int k = 0; k < 8; k++) {
                 float a = float(k) * 0.785398;
-                halo += texture2D(tGlow, uv + vec2(cos(a), sin(a)) * uTexel * 4.0).rgb;
+                halo += texture2D(tGlow, uv + vec2(cos(a), sin(a)) * uTexel * 8.0).rgb;
               }
               halo *= 0.125;
               float breathe = 0.5 + 0.5 * sin(uTime * 1.2566);
@@ -6169,7 +6201,15 @@ registerProcessor('odd-sid', OddSid);
               float band = exp(-pow((x - pos) / 0.07, 2.0));
               float n = fract(sin(dot(floor(uv * vec2(320.0, 180.0)), vec2(12.9898, 78.233))) * 43758.5453);
               float tw = 0.5 + 0.5 * sin(uTime * (1.5 + 3.0 * n) + n * 6.2832);
-              vec3 c = core * (0.35 + 0.35 * breathe + 1.1 * band + 0.25 * tw)
+              // Twinkle only what stands alone -- stars, markers -- never a line.
+              // The twinkle is set per small square of the picture, so along a
+              // line neighbouring squares flicker out of step and the line reads
+              // as dashes (Hyperspace's streaks did). The halo ring says which is
+              // which: around a lone point it finds nothing, around a line it
+              // catches the line itself, two of its eight taps at the least.
+              float cl = dot(core, vec3(0.333)), hl = dot(halo, vec3(0.333));
+              float alone = clamp(1.0 - 4.0 * hl / max(cl, 0.001), 0.0, 1.0);
+              vec3 c = core * (0.35 + 0.35 * breathe + 1.1 * band + 0.25 * tw * alone)
                      + halo * (0.45 * breathe + 1.4 * band);
               gl_FragColor = vec4(c * uStrength, 1.0);
             }`,
