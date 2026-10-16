@@ -63,6 +63,16 @@
   const BALL_DROP_SPEED = 13.0;
   // Then a beat with the board clear, before the next piece slides in.
   const PIECE_SPAWN_DELAY_MS = 400;
+  // A landing's resolve, played out: after a pass that takes balls off, at least
+  // this long before the next -- long enough to see the pop before the next line
+  // goes -- and never less than CHAIN_SETTLE_MS after the balls it knocked loose
+  // come to rest, so each fall is seen to land before what it set up goes off.
+  const CHAIN_STEP_MS = 520;
+  const CHAIN_SETTLE_MS = 180;
+  // The row sweep's run along the bottom row, popping each ball as it passes.
+  const SWEEP_MS = 950;
+  // How long the demo holds its Special Balls page.
+  const SPECIALS_PAGE_MS = 9000;
   // The piece is NOT teleported into place: pieces are built at SPAWN_ROW, which
   // straddles the crop line -- world y 5.63 against a clip constant of 6.08 -- so a
   // shape simply appearing there is partly on the board already, with only its top
@@ -567,6 +577,7 @@
       this.lines = 0;
       // The piece after this one, dealt ahead so NEXT can show it.
       this.nextDeal = null;
+      this.resolving = false;     // a landing being played out pass by pass
       this.levCol = 0;
       this.shapes = 2;
       this.colors = 3;
@@ -651,6 +662,7 @@
       this.lines = 0;
       // The piece after this one, dealt ahead so NEXT can show it.
       this.nextDeal = null;
+      this.resolving = false;     // a landing being played out pass by pass
       this.matchCount = 0;
       this.sameBonus = 0;
       this.endGame = false;
@@ -999,18 +1011,22 @@
         this.stamp();
         if (this.onPlaySound) this.onPlaySound('drop');
 
-        if (this.matcher) {
-          this.checkMatches();
-        }
-
-        this.checkAdvance();
-
-        if (this.checkGameOver()) {
+        // Resolve the landing, in both modes: the loop clears rows in Row Build
+        // (checkRows) as it matches colours in Colour Match. This used to run in
+        // Colour Match only, so in Row Build a full row never cleared and a bomb
+        // never went off.
+        //
+        // In a real game the app plays the resolve out pass by pass, so a chain
+        // can be watched: it steps resolveStep() and calls finishLanding() when
+        // the board is still. Everywhere else -- the demo, the tests -- it all
+        // happens here at once, exactly as before.
+        if (this.stagedResolve) {
+          this.beginResolve();
+          this.resolving = true;
           return true;
-        } else {
-          this.build();
         }
-        return true;
+        this.checkMatches();
+        return this.finishLanding();
       }
 
       // No collision — advance smoothly. Falling is also what clears the lock
@@ -1633,36 +1649,55 @@
       return !noRows;
     }
 
+    // The resolve loop, all at once: every pass until the board is still.
     checkMatches() {
-      let index = 0;
-      let hasClearedRows = false;
-      let noneDropped = false;
-      let blasted = 0;
-      // A chain, as the C64 build counts it: in Colour Match, each pass of a
-      // landing that clears something, from the second on -- balls that fell
-      // into a new match. Reported for the overlay only; nothing is scored for it.
-      let chain = 0;
+      this.beginResolve();
+      while (this.resolveStep()) { /* each pass is the whole of the work */ }
+    }
 
-      do {
-        // Blasts come first and, when one happens, instead of matching: the board
-        // a bomb leaves is not the board the match walk was about to look at, and
-        // running both in one pass would score lines that the blast had already
-        // taken apart. The pass after it matches as usual.
-        blasted = this.bombBlast();
-        if (blasted > 0) {
-          index = 0;
-          hasClearedRows = false;
-        } else if (this.matcher) {
-          index = this.matchColors();
-        } else {
-          hasClearedRows = this.checkRows();
-        }
-        if (this.matcher && (blasted > 0 || index > 0)) {
-          chain++;
-          if (chain >= 2 && this.onChain) this.onChain(chain);
-        }
-        noneDropped = this.checkGaps();
-      } while (index > 0 || hasClearedRows || blasted > 0 || !noneDropped);
+    // The resolve loop a pass at a time, for the app to play out over time.
+    // checkMatches is these two and nothing else, so the stepped and the
+    // all-at-once resolve cannot differ.
+    beginResolve() {
+      // chain: as the C64 build counts it, in Colour Match, each pass of a
+      // landing that clears something, from the second on -- balls that fell
+      // into a new match. Reported for the overlay only; nothing is scored.
+      this.rs = { chain: 0, cleared: false };
+    }
+
+    // One pass. Returns true while another is needed; rs.cleared says whether
+    // this one took any balls off.
+    resolveStep() {
+      const r = this.rs;
+      let index = 0, hasClearedRows = false;
+      // Blasts come first and, when one happens, instead of matching: the board a
+      // bomb leaves is not the board the match walk was about to look at, and
+      // running both in one pass would score lines that the blast had already
+      // taken apart. The pass after it matches as usual.
+      const blasted = this.bombBlast();
+      if (blasted > 0) {
+        // nothing more this pass
+      } else if (this.matcher) {
+        index = this.matchColors();
+      } else {
+        hasClearedRows = this.checkRows();
+      }
+      r.cleared = blasted > 0 || index > 0 || hasClearedRows;
+      if (this.matcher && (blasted > 0 || index > 0)) {
+        r.chain++;
+        if (r.chain >= 2 && this.onChain) this.onChain(r.chain);
+      }
+      const noneDropped = this.checkGaps();
+      return index > 0 || hasClearedRows || blasted > 0 || !noneDropped;
+    }
+
+    // What follows a landing once its resolve is done: score and level, then
+    // game over or the next piece -- the order the landing always ran them in.
+    finishLanding() {
+      this.resolving = false;
+      this.checkAdvance();
+      if (!this.checkGameOver()) this.build();
+      return true;
     }
 
     checkAdvance() {
@@ -3935,51 +3970,99 @@ registerProcessor('odd-sid', OddSid);
         case 'boom': {
           // A special ball going off. param is the engine's boomKind: 2 a bomb,
           // 1 a sweep with no bomb in the same pass.
-          //
-          // The bomb is the C64 build's boom -- noise falling from 3000 Hz over
-          // about 0.45s -- with a sub-bass drop under it, which the SID could not
-          // spare a voice for. The sweep is a rush rather than a bang: the noise
-          // rises through a narrow band, the way something passing reads.
-          const dur = param === 1 ? 0.42 : 0.55;
-          const len = Math.floor(this.ctx.sampleRate * dur);
-          const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-          const data = buf.getChannelData(0);
-          for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-          const noise = this.ctx.createBufferSource();
-          noise.buffer = buf;
-          const filter = this.ctx.createBiquadFilter();
-          const gain = this.ctx.createGain();
+          const ctx = this.ctx, sr = ctx.sampleRate;
+          const noiseBuf = (secs, brown) => {
+            const n = Math.floor(sr * secs);
+            const b = ctx.createBuffer(1, n, sr);
+            const d = b.getChannelData(0);
+            let last = 0;
+            for (let i = 0; i < n; i++) {
+              const w = Math.random() * 2 - 1;
+              // Brown noise -- white integrated -- for the rumble: its energy is
+              // all at the bottom, which is what reads as weight.
+              if (brown) { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } else d[i] = w;
+            }
+            return b;
+          };
+
           if (param === 1) {
+            // The sweep: a rush rather than a bang, the noise rising through a
+            // narrow band the way something passing reads. As long as the comet's
+            // run along the row (SWEEP_MS), so the two arrive together.
+            const dur = SWEEP_MS / 1000;
+            const noise = ctx.createBufferSource();
+            noise.buffer = noiseBuf(dur, false);
+            const filter = ctx.createBiquadFilter();
+            const gain = ctx.createGain();
             filter.type = 'bandpass';
             filter.Q.value = 4;
-            filter.frequency.setValueAtTime(500, now);
-            filter.frequency.exponentialRampToValueAtTime(4200, now + dur);
+            filter.frequency.setValueAtTime(400, now);
+            filter.frequency.exponentialRampToValueAtTime(3600, now + dur);
             gain.gain.setValueAtTime(0.001, now);
             // 0.6: at 0.22 it measured RMS 0.008 against a pop's 0.045, and was
             // lost under the bottom row's own pops.
             gain.gain.linearRampToValueAtTime(0.6, now + dur * 0.6);
             gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-          } else {
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(3000, now);
-            filter.frequency.exponentialRampToValueAtTime(120, now + dur);
-            gain.gain.setValueAtTime(0.001, now);
-            gain.gain.linearRampToValueAtTime(0.30, now + 0.008);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-
-            const sub = this.ctx.createOscillator();
-            const subGain = this.ctx.createGain();
-            sub.type = 'sine';
-            sub.frequency.setValueAtTime(110, now);
-            sub.frequency.exponentialRampToValueAtTime(32, now + 0.4);
-            subGain.gain.setValueAtTime(0.001, now);
-            subGain.gain.linearRampToValueAtTime(0.28, now + 0.01);
-            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-            sub.connect(subGain); subGain.connect(out);
-            sub.start(now); sub.stop(now + 0.45);
+            noise.connect(filter); filter.connect(gain); gain.connect(out);
+            noise.start(now); noise.stop(now + dur);
+            break;
           }
-          noise.connect(filter); filter.connect(gain); gain.connect(out);
-          noise.start(now); noise.stop(now + dur);
+
+          // The bomb. The first version was the C64 build's boom -- noise falling
+          // from 3000 Hz over half a second -- and read as a firecracker: short,
+          // and bright where an explosion is low. Now four layers, longer and
+          // deeper: a brief crack for the moment of ignition, a blast body that
+          // falls from 1.6 kHz to 60 Hz through a little distortion, a sub-bass
+          // thump under it, and a brown-noise rumble left rolling for nearly two
+          // seconds.
+          const crack = ctx.createBufferSource();
+          crack.buffer = noiseBuf(0.06, false);
+          const crackF = ctx.createBiquadFilter();
+          crackF.type = 'lowpass'; crackF.frequency.value = 2400;
+          const crackG = ctx.createGain();
+          crackG.gain.setValueAtTime(0.35, now);
+          crackG.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+          crack.connect(crackF); crackF.connect(crackG); crackG.connect(out);
+          crack.start(now); crack.stop(now + 0.06);
+
+          const bodyDur = 1.3;
+          const body = ctx.createBufferSource();
+          body.buffer = noiseBuf(bodyDur, false);
+          const bodyF = ctx.createBiquadFilter();
+          bodyF.type = 'lowpass'; bodyF.Q.value = 0.8;
+          bodyF.frequency.setValueAtTime(1600, now);
+          bodyF.frequency.exponentialRampToValueAtTime(60, now + bodyDur);
+          const drive = ctx.createWaveShaper();
+          drive.curve = this.distortionCurve;
+          const bodyG = ctx.createGain();
+          bodyG.gain.setValueAtTime(0.001, now);
+          bodyG.gain.linearRampToValueAtTime(0.42, now + 0.012);
+          bodyG.gain.exponentialRampToValueAtTime(0.001, now + bodyDur);
+          body.connect(bodyF); bodyF.connect(drive); drive.connect(bodyG); bodyG.connect(out);
+          body.start(now); body.stop(now + bodyDur);
+
+          const sub = ctx.createOscillator();
+          const subG = ctx.createGain();
+          sub.type = 'sine';
+          sub.frequency.setValueAtTime(75, now);
+          sub.frequency.exponentialRampToValueAtTime(26, now + 0.9);
+          subG.gain.setValueAtTime(0.001, now);
+          subG.gain.linearRampToValueAtTime(0.55, now + 0.015);
+          subG.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+          sub.connect(subG); subG.connect(out);
+          sub.start(now); sub.stop(now + 1.0);
+
+          const tailDur = 1.8;
+          const tail = ctx.createBufferSource();
+          tail.buffer = noiseBuf(tailDur, true);
+          const tailF = ctx.createBiquadFilter();
+          tailF.type = 'lowpass'; tailF.frequency.value = 220;
+          const tailG = ctx.createGain();
+          tailG.gain.setValueAtTime(0.001, now);
+          tailG.gain.linearRampToValueAtTime(0.5, now + 0.08);
+          tailG.gain.exponentialRampToValueAtTime(0.001, now + tailDur);
+          tail.connect(tailF); tailF.connect(tailG); tailG.connect(out);
+          tail.start(now); tail.stop(now + tailDur);
           break;
         }
         case 'thud': {
@@ -5984,6 +6067,8 @@ registerProcessor('odd-sid', OddSid);
 
       this.initHooks();
       this.initUpdateCheck();
+      const bgBtn = document.getElementById('btnBgCycle');
+      if (bgBtn) bgBtn.addEventListener('click', (ev) => { ev.preventDefault(); bgBtn.blur(); this.nextBackground(); });
       this.initEventListeners();
       this.initTouchControls();
       this.updateUI();
@@ -6105,7 +6190,15 @@ registerProcessor('odd-sid', OddSid);
         // picture that has none -- a new level is the beat instead.
         if (type === 'levelup' && this.backdropAll && !this.audio.songAudible()) this.stepTheme();
         if (type === 'levelup' && this.isPlaying) this.showBanner('bannerLevel', 'LEVEL ' + this.engine.level);
-        if (type === 'boom' && this.sweepArmed) this.drawSweep(this.lastPops || []);
+        // A sweep runSweep has already shown and sounded: not again. A bomb in
+        // the same pass makes it boomKind 2, which still sounds.
+        const swept = !!this.sweepPrePopped;
+        if (type === 'boom' && this.sweepArmed && !swept) this.drawSweep(this.lastPops || []);
+        if (type === 'boom' && swept && this.engine.boomKind === 1) {
+          this.sweepArmed = this.engine.rcFire === 1;
+          this.lastPops = null;
+          return;
+        }
         this.sweepArmed = this.engine.rcFire === 1;
         if (this.sweepArmed) {
           const c = (this.lastPops || []).find(m => isCharged(m.color));
@@ -6125,6 +6218,7 @@ registerProcessor('odd-sid', OddSid);
       this.engine.onPopBalls = (matchList) => {
         this.lastPops = matchList;
         for (const m of matchList) {
+          if (this.sweepPrePopped && this.sweepPrePopped.has(m.x + '_' + m.y)) continue;
           const wPos = gridToWorld(m.x, m.y, SPHERE_RADIUS);
           this.particles.spawnPopExplosion(wPos, m.color || 1);
         }
@@ -6137,6 +6231,81 @@ registerProcessor('odd-sid', OddSid);
       const b = storedBackdrop();
       this.backdropAll = (b === BACKDROP_ALL);
       this.renderer.setBackdrop(this.backdropAll ? 0 : b);
+    }
+
+    // One pass of a landing's resolve, when the last has finished: its fallen
+    // balls at rest and, after a pass that popped some, CHAIN_STEP_MS gone by.
+    // When the board is still, the landing finishes -- score, level, the next
+    // piece -- and the usual spawn hold begins.
+    stepResolve(now) {
+      const e = this.engine;
+      if (this.sweepAnim) return;                    // the sweep is crossing the row
+      if (this.renderer.hasDroppingBalls()) {
+        this.resolveNextAt = Math.max(this.resolveNextAt || 0, now + CHAIN_SETTLE_MS);
+        return;
+      }
+      if (now < (this.resolveNextAt || 0)) return;
+      // A sweep armed by the last pass: run it along the row first, and take the
+      // pass when it reaches the far end.
+      if (e.rcFire && !this.sweepDone) { this.runSweep(); return; }
+      const more = e.resolveStep();
+      this.sweepDone = false;
+      this.sweepPrePopped = null;
+      this.resolveNextAt = now + (e.rs.cleared ? CHAIN_STEP_MS : 0);
+      if (!more) {
+        e.finishLanding();
+        this.spawnHoldUntil = now + PIECE_SPAWN_DELAY_MS;
+        if (e.endGame) this.handleGameOver();
+      }
+    }
+
+    // The row sweep, played before its pass: a comet runs the bottom row from
+    // the end nearer the charged ball that set it off, and each ball pops as it
+    // passes, so the sweep reads as something crossing the row rather than the
+    // row simply going. The pass itself follows at the far end; the balls the
+    // comet has already popped are hidden until then and are not popped twice.
+    runSweep() {
+      const e = this.engine, y = BOARD_BOUNDS.MAX_Y;
+      const xs = [];
+      for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+        if (e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap > 0) xs.push(x);
+      }
+      this.sweepDone = true;
+      if (!xs.length) return;                        // an empty row: just the pass
+      const lo = xs[0], hi = xs[xs.length - 1];
+      const src = this.sweepFrom;
+      const fromLeft = !src || (src.x - lo) <= (hi - src.x);
+      const a = gridToWorld(fromLeft ? lo : hi, y, SPHERE_RADIUS);
+      const b = gridToWorld(fromLeft ? hi : lo, y, SPHERE_RADIUS);
+      this.particles.spawnSweep(a, b, this.particles.colourFor(src ? src.color : 1), SWEEP_MS / 1000);
+      this.audio.playSound('boom', 1);
+      this.sweepPrePopped = new Set();
+      this.sweepAnim = true;
+      const span = Math.max(1, hi - lo);
+      for (const x of xs) {
+        const k = (fromLeft ? x - lo : hi - x) / span;
+        setTimeout(() => {
+          const key = x + '_' + y;
+          const mesh = this.renderer.staticBallMeshes.get(key);
+          if (mesh) mesh.visible = false;
+          this.particles.spawnPopExplosion(gridToWorld(x, y, SPHERE_RADIUS), e.ballMap[x][y].bzMap || 1);
+          if (this.sweepPrePopped) this.sweepPrePopped.add(key);
+        }, k * SWEEP_MS * 0.9);
+      }
+      setTimeout(() => { this.sweepAnim = false; }, SWEEP_MS + 60);
+    }
+
+    // B, and the background button on the board for anyone without a keyboard:
+    // the next background and its song. In a game the one it lands on is then
+    // held, as the C64 build's B does; on the title it is the Background button.
+    nextBackground() {
+      if (!this.isPlaying) {
+        const btn = document.getElementById('btnBackdrop');
+        if (btn) btn.click();
+      } else if (!this.isPaused) {
+        this.backdropAll = false;
+        this.stepTheme();
+      }
     }
 
     // The next picture and its song, from the top.
@@ -6225,13 +6394,7 @@ registerProcessor('odd-sid', OddSid);
         // on is then held, as the C64 build's B does; on the title it is the
         // Background button.
         if (code === 'KeyB' || key === 'b' || key === 'B') {
-          if (!this.isPlaying) {
-            const btn = document.getElementById('btnBackdrop');
-            if (btn) btn.click();
-          } else if (!this.isPaused) {
-            this.backdropAll = false;
-            this.stepTheme();
-          }
+          this.nextBackground();
           e.preventDefault(); return;
         }
 
@@ -6514,6 +6677,8 @@ registerProcessor('odd-sid', OddSid);
 
     startGame() {
       if (this.updateOffer) document.getElementById('updateBar').classList.add('hidden');
+      // The on-board background button is for games only (style.css, .in-game).
+      document.body.classList.add('in-game');
       if (this.attractActive) this.exitAttract(false);
       if (this.attractIdleTimer) { clearTimeout(this.attractIdleTimer); this.attractIdleTimer = null; }
       // Belt and braces: the demo borrows the classic board, so make sure the
@@ -6522,6 +6687,9 @@ registerProcessor('odd-sid', OddSid);
       // Read here rather than held on the app: the title screen can change it
       // between games without anything having to push the new value anywhere.
       this.engine.difficulty = storedDifficulty();
+      this.engine.stagedResolve = true;
+      this.resolveNextAt = 0;
+      this.sweepAnim = false;
       this.applyBackdropChoice();
       this.audio.init();
       this.audio.setSong(BACKDROPS[this.renderer.backdropIndex].song, true);
@@ -6581,6 +6749,7 @@ registerProcessor('odd-sid', OddSid);
 
     returnToTitle() {
       setTimeout(() => this.showUpdateBar(), 0);
+      document.body.classList.remove('in-game');
       this.disarmEndGame();
       this.isPlaying = false;
       this.isPaused = false;
@@ -6644,6 +6813,9 @@ registerProcessor('odd-sid', OddSid);
 
       this.attractActive = true;
       this.attractPlay = null;
+      // The demo resolves its own landings, all at once.
+      this.engine.stagedResolve = false;
+      this.engine.resolving = false;
       this.attractSavedMatcher = this.engine.matcher;   // restore the user's mode on exit
 
       // The lessons are authored against classic-board coordinates (row 11 x5-9,
@@ -6680,6 +6852,7 @@ registerProcessor('odd-sid', OddSid);
       if (!this.attractActive) return;
       this.attractActive = false;
       this.clearAttractTimers();
+      this.showSpecialsPage(false);
       this.attractPlay = null;
       this.renderer.highlightKeys = new Set();
       this.renderer.highlightActive = new Set();
@@ -6993,7 +7166,10 @@ registerProcessor('odd-sid', OddSid);
         '&hellip;so it <b>breaks off and falls!</b>'
       ], 1800);
 
-      at(600, () => this.exitAttract(true));
+      // Then the special balls, the way the C64 build's demo shows them.
+      at(600, () => this.showSpecialsPage(true));
+      at(SPECIALS_PAGE_MS, () => this.showSpecialsPage(false));
+      at(300, () => this.exitAttract(true));
     }
 
     // Every colour constraint all three lessons will need, so the heap can be
@@ -7631,8 +7807,11 @@ registerProcessor('odd-sid', OddSid);
         // which is the pause; then the piece descends out of the crop under its own
         // fall speed. Loose balls extend the pause only, so once the piece is on its
         // way in it never hesitates.
-        const pausing = this.spawnHoldUntil !== undefined &&
-          (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls());
+        // A landing being played out pass by pass holds everything, like the
+        // hold after it.
+        if (this.engine.resolving) this.stepResolve(currentTime);
+        const pausing = this.engine.resolving || (this.spawnHoldUntil !== undefined &&
+          (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls()));
 
         if (!pausing && this.spawnHoldUntil !== undefined) {
           // Pause over: measure the lift and start the descent. Measured now rather
@@ -7676,8 +7855,14 @@ registerProcessor('odd-sid', OddSid);
         if (!holding) {
           stamped = this.engine.updateContinuous(dt);
           if (stamped) {
-            this.spawnHoldUntil = currentTime + PIECE_SPAWN_DELAY_MS;
             this.slideOffset = 0;
+            if (this.engine.resolving) {
+              // The first pass at once, as the landing always did; the rest wait.
+              this.resolveNextAt = currentTime;
+              this.stepResolve(currentTime);
+            } else {
+              this.spawnHoldUntil = currentTime + PIECE_SPAWN_DELAY_MS;
+            }
           }
         }
 
@@ -7795,6 +7980,7 @@ registerProcessor('odd-sid', OddSid);
       document.getElementById('finalScore').textContent = this.engine.score;
       document.getElementById('overlayGameOver').classList.remove('hidden');
       this.showUpdateBar();
+      document.body.classList.remove('in-game');
       document.getElementById('btnPause').disabled = true;
     }
 
@@ -7821,10 +8007,19 @@ registerProcessor('odd-sid', OddSid);
       const cv = document.getElementById('nextCanvas');
       if (!cv) return;
       const cells = (this.isPlaying && !this.engine.endGame) ? this.engine.nextPreview() : null;
+      // Which way it will fall: direction 5 runs down and to the right, 2 down
+      // and to the left. The C64 build's NEXT shows it as an arrow too.
+      const deal = this.engine.nextDeal;
+      const dir = cells && deal ? (deal.direction === 5 ? '↘' : '↙') : '';
       const w = cv.clientWidth, h = cv.clientHeight;
-      const key = (cells ? JSON.stringify(cells) : '-') + '@' + w + 'x' + h;
+      const key = (cells ? JSON.stringify(cells) : '-') + dir + '@' + w + 'x' + h;
       if (key === this._nextKey) return;
       this._nextKey = key;
+      const dirEl = document.getElementById('nextDir');
+      if (dirEl) {
+        dirEl.textContent = dir;
+        dirEl.title = dir === '↘' ? 'Falls down and to the right' : dir ? 'Falls down and to the left' : '';
+      }
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       cv.width = Math.max(1, Math.round(w * dpr));
       cv.height = Math.max(1, Math.round(h * dpr));
@@ -7854,36 +8049,88 @@ registerProcessor('odd-sid', OddSid);
         const id = p.x.toFixed(2) + ',' + p.y.toFixed(2);
         if (seen.has(id)) continue;
         seen.add(id);
-        const x = cx + p.x * k, y = cy + p.y * k, v = p.v;
-        ctx.save();
-        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
-        if (v === JOKER) {
-          // every colour at once: six wedges of the palette
-          for (let i = 0; i < 6; i++) {
-            ctx.beginPath(); ctx.moveTo(x, y);
-            ctx.arc(x, y, r, i * Math.PI / 3, (i + 1) * Math.PI / 3);
-            ctx.fillStyle = css(mats[i].userData.baseColor); ctx.fill();
-          }
-        } else {
-          ctx.fillStyle = css(mats[ballSlot(v)].userData.baseColor || mats[ballSlot(v)].color);
-          ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
-        }
-        if (isCharged(v)) { ctx.fillStyle = '#08080c'; ctx.fillRect(x - r, y - r * 0.16, 2 * r, r * 0.32); }
-        // the light: a soft highlight up and to the left, shade below
-        const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.05);
-        g.addColorStop(0, 'rgba(255,255,255,0.55)');
-        g.addColorStop(0.35, 'rgba(255,255,255,0.08)');
-        g.addColorStop(1, 'rgba(0,0,0,0.45)');
-        ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
-        ctx.restore();
-        if (v === BOMB) {
-          const sg = ctx.createRadialGradient(x + r * 0.45, y - r * 0.6, 0, x + r * 0.45, y - r * 0.6, r * 0.6);
-          sg.addColorStop(0, 'rgba(255,240,200,1)');
-          sg.addColorStop(0.4, 'rgba(255,150,40,0.8)');
-          sg.addColorStop(1, 'rgba(255,90,0,0)');
-          ctx.fillStyle = sg; ctx.fillRect(x - r, y - r * 1.3, r * 2, r * 1.6);
-        }
+        this.drawBall2D(ctx, cx + p.x * k, cy + p.y * k, r, p.v, null);
       }
+    }
+
+    // One ball, flat, as the board draws it: its colour with a light on it, a
+    // bomb's spark, a sweep's dark band. A joker is six wedges of the palette
+    // when still (jokerHue null) or one colour on the move round the wheel, as
+    // in play. Shared by NEXT and the Special Balls page.
+    drawBall2D(ctx, x, y, r, v, jokerHue) {
+      const mats = this.renderer.ballMaterials;
+      const css = (c) => '#' + c.getHexString();
+      ctx.save();
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+      if (v === JOKER && jokerHue === null) {
+        for (let i = 0; i < 6; i++) {
+          ctx.beginPath(); ctx.moveTo(x, y);
+          ctx.arc(x, y, r, i * Math.PI / 3, (i + 1) * Math.PI / 3);
+          ctx.fillStyle = css(mats[i].userData.baseColor); ctx.fill();
+        }
+      } else if (v === JOKER) {
+        ctx.fillStyle = 'hsl(' + Math.round(jokerHue * 360) + ', 85%, 48%)';
+        ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      } else {
+        const m = mats[ballSlot(v)];
+        ctx.fillStyle = css(m.userData.baseColor || m.color);
+        ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      }
+      if (isCharged(v)) { ctx.fillStyle = '#08080c'; ctx.fillRect(x - r, y - r * 0.16, 2 * r, r * 0.32); }
+      if (isStone(v)) {
+        // a few facets, so it reads as rock at this size too
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = Math.max(1, r * 0.08);
+        ctx.beginPath();
+        ctx.moveTo(x - r * 0.7, y - r * 0.2); ctx.lineTo(x - r * 0.1, y - r * 0.5); ctx.lineTo(x + r * 0.6, y - r * 0.1);
+        ctx.moveTo(x - r * 0.1, y - r * 0.5); ctx.lineTo(x, y + r * 0.3); ctx.lineTo(x + r * 0.6, y + r * 0.5);
+        ctx.moveTo(x, y + r * 0.3); ctx.lineTo(x - r * 0.6, y + r * 0.5);
+        ctx.stroke();
+      }
+      // the light: a soft highlight up and to the left, shade below
+      const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.05);
+      g.addColorStop(0, 'rgba(255,255,255,0.55)');
+      g.addColorStop(0.35, 'rgba(255,255,255,0.08)');
+      g.addColorStop(1, 'rgba(0,0,0,0.45)');
+      ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      ctx.restore();
+      if (v === BOMB) {
+        const sg = ctx.createRadialGradient(x + r * 0.45, y - r * 0.6, 0, x + r * 0.45, y - r * 0.6, r * 0.6);
+        sg.addColorStop(0, 'rgba(255,240,200,1)');
+        sg.addColorStop(0.4, 'rgba(255,150,40,0.8)');
+        sg.addColorStop(1, 'rgba(255,90,0,0)');
+        ctx.fillStyle = sg; ctx.fillRect(x - r, y - r * 1.3, r * 2, r * 1.6);
+      }
+    }
+
+    // The Special Balls page, the demo's last screen: each special's name, what
+    // it does, and the ball as the board draws it -- the joker cycling its
+    // colours, the sweep with its band. The C64 build's page of the same name.
+    showSpecialsPage(on) {
+      const page = document.getElementById('attractSpecials');
+      const cap = document.getElementById('attractCaption');
+      if (!page) return;
+      if (this.specialsTimer) { clearInterval(this.specialsTimer); this.specialsTimer = null; }
+      if (!on) { page.classList.add('hidden'); return; }
+      const title = document.getElementById('attractModeTitle');
+      if (title) title.textContent = 'SPECIAL BALLS';
+      if (cap) cap.style.visibility = 'hidden';
+      page.classList.remove('hidden');
+      const balls = [...page.querySelectorAll('canvas[data-v]')];
+      const t0 = performance.now();
+      const paint = () => {
+        const hue = ((performance.now() - t0) / 4000) % 1;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        for (const cv of balls) {
+          const w = cv.clientWidth || 40;
+          if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(w * dpr); }
+          const ctx = cv.getContext('2d');
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, w);
+          this.drawBall2D(ctx, w / 2, w / 2, w * 0.42, +cv.dataset.v, hue);
+        }
+      };
+      paint();
+      this.specialsTimer = setInterval(paint, 80);
     }
 
     // The banners over the board: CHAIN n as a landing cascades, LEVEL n when one

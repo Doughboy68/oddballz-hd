@@ -32,12 +32,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=1.93.0">
+  <link rel="stylesheet" href="./style.css?v=1.94.2">
   <!-- What the update bar says this release brings, shown to anyone running an
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="Special balls, backgrounds and music|Jokers, bombs, stones and row sweeps from level 3|Six backgrounds to choose on the title card, or press B in a game|Seven songs on modern instruments, or the C64 sound in Audio Options|The next piece, lines cleared, and CHAIN and LEVEL banners">
+  <meta name="release-notes" content="Chains now play out step by step|Bombs go off with a deeper, longer blast|The row sweep crosses the row slowly enough to watch|A background button on the board, for touch screens|NEXT shows which way the piece will fall|The demo ends with a page on the special balls|Row Build now clears full rows">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -60,6 +60,8 @@
     <main id="canvasContainer">
       <div id="bannerChain" class="board-banner banner-chain" aria-live="polite"></div>
       <div id="bannerLevel" class="board-banner banner-level" aria-live="polite"></div>
+      <!-- The next background and its song, for anyone without a keyboard's B. -->
+      <button id="btnBgCycle" class="bg-cycle-btn" type="button" title="Next background (B)" aria-label="Next background">🌌</button>
     </main>
 
     <!-- Dedicated Controls Panel Physically Below 3D Playfield -->
@@ -127,7 +129,7 @@
         <span id="statTime" class="stat-value">0:00</span>
       </div>
       <div class="stat-card stat-next">
-        <span class="stat-label">NEXT</span>
+        <span class="stat-label">NEXT <span id="nextDir" class="next-dir"></span></span>
         <canvas id="nextCanvas" class="next-canvas" aria-label="Next piece"></canvas>
       </div>
     </aside>
@@ -208,6 +210,20 @@
         <h2 class="attract-mode-title" id="attractModeTitle">HOW TO PLAY</h2>
       </div>
       <div class="attract-caption glass-card" id="attractCaption">Watch how it works&hellip;</div>
+      <!-- The demo's last screen: the special balls, drawn as in play by
+           OddballzApp.showSpecialsPage. -->
+      <div class="attract-specials glass-card hidden" id="attractSpecials">
+        <p class="sp-intro">From level 3, about one piece in twenty brings one.</p>
+        <div class="sp-row"><canvas class="sp-ball" data-v="7"></canvas>
+          <div><b>JOKER</b><span>Matches any colour: it takes the colour of the line it sits in.</span></div></div>
+        <div class="sp-row"><canvas class="sp-ball" data-v="8"></canvas>
+          <div><b>BOMB</b><span>Clears itself and the six balls around it, wherever it lands.</span></div></div>
+        <div class="sp-row"><canvas class="sp-ball" data-v="18"></canvas>
+          <div><b>ROW SWEEP</b><span>Match the ball with the dark band and the bottom row is swept clear.</span></div></div>
+        <div class="sp-row"><canvas class="sp-ball" data-v="10"></canvas>
+          <div><b>STONE</b><span>Never matches. Dropped or falling, it crushes a ball; against a wall or the floor it crumbles. From level 6.</span></div></div>
+        <p class="sp-intro">In Row Build only bombs come.</p>
+      </div>
       <div class="attract-footer">
         <div class="attract-hint"><span class="kbd-only">Press <kbd>Enter</kbd> or </span>tap to play</div>
       </div>
@@ -370,7 +386,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=1.93.0"></script>
+  <script src="./oddballz-app.js?v=1.94.2"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what
