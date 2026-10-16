@@ -1834,6 +1834,20 @@
   // Unscaled, nebula measured RMS 0.07 in its intro (the SID's 0.029) and 0.11
   // in section A.
   const MODERN_LEVEL = 0.35;
+  // A song's own balance on the modern instruments, where one needs it: gains on
+  // the lead and on the chords (both 1 when absent).
+  //
+  // Nebula's lead plays in B3-B4 -- the C64 build took it down an octave to lose
+  // a SID whistle -- which is the same octave as its chords, G3 to F#4 sevenths,
+  // so the two mask each other and the tune is lost (the user, 16 Oct 2026: "the
+  // lead voice in nebula should be a bit louder"). Every other song's lead sits
+  // above its chords. Measured K-weighted over section A: lead 5.5 dB under the
+  // chords; the others' median 4.5 dB under, but none of them sharing a register.
+  // +3 dB on the lead and -2 dB on the chords puts it 0.5 dB under, at about the
+  // same overall loudness.
+  const MODERN_MIX = {
+    nebula: { lead: 1.41, chords: 0.79 }
+  };
 
   // ---- the songs, from oddballz-c64/music/songs/, copied as they stand ----
 
@@ -3075,6 +3089,7 @@ registerProcessor('odd-sid', OddSid);
     load(song) {
       this.stopAll(0);
       this.song = song;
+      this.mix = MODERN_MIX[song.id] || {};
       this.E = songEvents(song);
       this.rowSec = song.speed / SONG_FRAME_HZ;
       this.nextRow = 0;
@@ -3199,7 +3214,7 @@ registerProcessor('odd-sid', OddSid);
             lfo.connect(depth); depth.connect(o.detune); nodes.push(lfo);
           }
         }
-        end = this.envelope(g, I, t, off, 0.16, 0.012, 0.18);
+        end = this.envelope(g, I, t, off, 0.16 * (this.mix.lead || 1), 0.012, 0.18);
         post.connect(this.master); post.connect(this.delay);
         const s = ctx.createGain(); s.gain.value = 0.3; post.connect(s); s.connect(this.reverb);
       } else if (role === 'bass') {
@@ -3231,7 +3246,7 @@ registerProcessor('odd-sid', OddSid);
             o.connect(og); og.connect(f); nodes.push(o); freqParams.push([o.frequency, tn]);
           }
         }
-        end = this.envelope(g, I, t, off, 1, pad ? 0.35 : 0.006, pad ? 0.9 : 0.3);
+        end = this.envelope(g, I, t, off, this.mix.chords || 1, pad ? 0.35 : 0.006, pad ? 0.9 : 0.3);
         if (pan) pan.pan.value = pad ? 0 : (Math.random() * 0.5 - 0.25);
         post.connect(this.master);
         const s = ctx.createGain(); s.gain.value = pad ? 0.6 : 0.4; post.connect(s); s.connect(this.reverb);
