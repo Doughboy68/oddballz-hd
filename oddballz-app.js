@@ -254,20 +254,26 @@
   // the width, so nothing a picture needs can sit near its sides.
   const BACKDROPS = [
     { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula',
-      glow: { threshold: 0.28, strength: 0.35 } },                // its stars and ringed planet
+      glow: { threshold: 0.28, strength: 0.6, twinkle: true } },  // its stars and ringed planet
     { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber',
-      glow: { threshold: 0.42, strength: 0.42 } },                // the conduits
+      procedural: 'conduit' },                                    // drawn live: PROC_SHADERS
     { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace',
-      glow: { threshold: 0.28, strength: 0.9, radial: true } },   // the streaks, pulsed outward
+      procedural: 'warp' },                                       // drawn live: PROC_SHADERS
     { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership',
-      glow: { threshold: 0.42, strength: 0.4 } },                 // the lattice
+      procedural: 'lattice' },                                    // drawn live: PROC_SHADERS
     { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel',
-      glow: { threshold: 0.42, strength: 0.5 } },                 // the panel stripes and markers
+      glow: { threshold: 0.42, strength: 2.0 } },                 // the panel stripes and markers
     { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar',
-      glow: { threshold: 0.6, strength: 0.09 } }                  // the sun's core and the wires
+      glow: { threshold: 0.6, strength: 0.18 } }                  // the sun's core and the wires
   ];
   // ALL, the default, plays each picture in turn, as the C64 build's does; any
   // other choice holds that one picture for the whole game.
+  // procedural: drawn live by a shader instead of a picture (PROC_SHADERS), its
+  // lines made by the game and moving. Hyperspace first -- its picture's streaks
+  // were drawn in pieces with gaps between, which read as broken once they were
+  // lit -- then, at the user's asking, Cyber's conduits and Mothership's lattice,
+  // slowly drifting. The file stays as the fallback where a shader cannot run.
+  //
   // glow: the picture's bright parts -- neon lines, markers, stars -- are lifted
   // into a layer the renderer animates (ThreeRenderer.setGlow). Per picture,
   // because the threshold that finds the lines in one finds the haze in another:
@@ -283,6 +289,8 @@
   // of their own, so without this a browser that has the old one keeps it --
   // the same trap as the JS and CSS links in index.html.
   const BACKDROP_REV = 3;
+  // ?noglow on the address: the pictures without their animated glow, to compare.
+  const NO_GLOW = new URLSearchParams(location.search).has('noglow');
   const BACKDROP_KEY = 'oddballz_hd_backdrop';
   function storedBackdrop() {
     try {
@@ -335,6 +343,210 @@
   // How much of each background picture is blacked out before it is drawn: 0 is
   // the picture as painted, 1 is the plain backdrop.
   const BACKDROP_DIM = 0.45;
+  // The live backgrounds (BACKDROPS procedural): each a fragment shader drawn
+  // full screen behind everything, its brightness matched to the dimmed pictures
+  // so it sits back behind the board as they do, and the plain colour shown
+  // under it for the moment before its first frame.
+  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9 };
+  const PROC_BASE = { warp: 0x020308, conduit: 0x060b16, lattice: 0x03100b };
+
+  // Shared by all three: the uniforms, and the line helpers. Every line is drawn
+  // by its distance from a segment in screen pixels, with a pixel of soft edge,
+  // so lines are continuous and clean at any size -- the pictures' thin lines
+  // shimmered when scaled, and Hyperspace's were broken in the art.
+  const PROC_HEADER = `
+    uniform vec2 uRes;
+    uniform float uTime, uBright;
+    varying vec2 vUv;
+    float hash(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
+    float hash2(vec2 q) { return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+    // distance from p to segment ab, and how far along it the nearest point is
+    vec2 seg(vec2 p, vec2 a, vec2 b) {
+      vec2 pa = p - a, ba = b - a;
+      float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+      return vec2(length(pa - ba * h), h);
+    }
+    // a lit line: a crisp core about w pixels wide and a soft halo of radius hr
+    float lineCore(float d, float w) { return 1.0 - smoothstep(w * 0.5, w * 0.5 + 1.0, d); }
+    float lineHalo(float d, float hr) { return exp(-d / hr); }
+    // a bump of light centred where x = 0.5, of width 1/k. Squared by hand: pow()
+    // is undefined for a negative base in GLSL, and some GPUs return NaN for it.
+    float bump(float x, float k) { float d = (x - 0.5) * k; return exp(-d * d); }
+  `;
+
+  const PROC_SHADERS = {
+    // Hyperspace: streaks racing outward from a vanishing point behind the board,
+    // in the colours of the picture it replaced -- cyan, blue, violet and the odd
+    // white -- stretching as they accelerate, in three layers at different
+    // speeds, with faint rings drifting out and a small hot core. Each layer
+    // splits the circle into sectors, one streak to a sector at a jittered angle.
+    warp: `
+      vec3 hue(float h) {
+        if (h < 0.42) return vec3(0.16, 0.62, 0.92);
+        if (h < 0.68) return vec3(0.56, 0.40, 0.95);
+        if (h < 0.86) return vec3(0.22, 0.78, 0.98);
+        return vec3(0.78, 0.80, 0.88);
+      }
+      vec3 streaks(vec2 p, float a, float N, float speed, float seed, float px) {
+        float sector = floor((a / 6.2831853 + 0.5) * N);
+        float h1 = hash(sector + seed), h2 = hash(sector * 1.7 + seed + 3.1), h3 = hash(sector * 2.3 + seed + 7.7);
+        float ang = ((sector + 0.2 + 0.6 * h1) / N - 0.5) * 6.2831853;
+        vec2 dir = vec2(cos(ang), sin(ang));
+        float along = dot(p, dir);
+        float perp = abs(p.x * dir.y - p.y * dir.x);
+        float ph = fract(uTime * speed * (0.6 + 0.8 * h2) + h3);
+        float head = 0.06 + 1.8 * ph * ph;
+        float len = 0.04 + 0.5 * ph;
+        float sg = smoothstep(head - len, head - len * 0.4, along) * (1.0 - smoothstep(head - 0.006, head, along));
+        float w = px * (0.9 + 1.1 * h1) * (0.7 + 0.8 * along);
+        float line = 1.0 - smoothstep(w * 0.5, w * 0.5 + px, perp);
+        float fade = smoothstep(0.04, 0.22, along);
+        return hue(h2) * line * sg * fade * (0.45 + 0.55 * ph);
+      }
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y);
+        vec2 p = (frag - 0.5 * uRes) / m;
+        float r = length(p), a = atan(p.y, p.x), px = 1.0 / m;
+        vec3 c = vec3(0.010, 0.012, 0.022);
+        c += streaks(p, a, 150.0, 0.30, 1.0, px);
+        c += streaks(p, a, 95.0, 0.22, 11.0, px) * 0.8;
+        c += streaks(p, a, 60.0, 0.40, 23.0, px);
+        float ring = abs(fract(r * 3.0 - uTime * 0.06 + 0.5) - 0.5) / 3.0;
+        c += vec3(0.10, 0.16, 0.30) * (1.0 - smoothstep(px, px * 2.5, ring)) * smoothstep(0.12, 0.45, r) * 0.6;
+        c += vec3(0.55, 0.88, 1.0) * exp(-r * r * 500.0) + vec3(0.06, 0.20, 0.36) * exp(-r * r * 24.0) * 0.5;
+        gl_FragColor = vec4(c * uBright, 1.0);
+      }`,
+
+    // Cyber: the conduit spaceframe. A navy frame with a faint grid, a lighter
+    // band across the middle, hazard stripes along the top and bottom edges,
+    // two vertical beams that flicker, and four neon conduits running across:
+    // each a line through five nodes whose heights drift on their own slow
+    // cycles (10-20 s), so the conduits sway and re-bend, with a pulse of light
+    // travelling along each and a bright dot at every bend.
+    conduit: `
+      vec2 cnode(float i, float k, float t) {
+        float x = -0.08 + k * 0.29;
+        float y = 0.16 + i * 0.23 + 0.06 * (hash(i * 7.0 + k) - 0.5)
+                + 0.07 * sin(t * (0.06 + 0.04 * hash(i + k * 3.0)) + hash(i * 13.0 + k) * 6.2832)
+                + 0.025 * sin(t * 0.13 + k * 1.7 + i);
+        return vec2(x, y);
+      }
+      vec3 ccol(float i) {
+        if (i < 0.5) return vec3(0.15, 0.85, 0.95);
+        if (i < 1.5) return vec3(0.32, 0.46, 1.00);
+        if (i < 2.5) return vec3(0.45, 0.82, 1.00);
+        return vec3(0.25, 0.70, 0.95);
+      }
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = mix(vec3(0.018, 0.026, 0.050), vec3(0.030, 0.062, 0.115), 1.0 - smoothstep(0.1, 0.9, abs(vUv.y - 0.5) * 2.0));
+        // the grid, faint, a pixel wide
+        float gs = m * 0.16;
+        vec2 gd = abs(fract(frag / gs) - 0.5) * gs;
+        c += vec3(0.05, 0.08, 0.13) * (1.0 - smoothstep(0.5, 1.5, min(gd.x, gd.y))) * 0.55;
+        // the conduits
+        for (int ii = 0; ii < 4; ii++) {
+          float i = float(ii);
+          float best = 1e9, sAt = 0.0, acc = 0.0, bend = 1e9;
+          vec2 prev = cnode(i, 0.0, t) * uRes;
+          for (int kk = 1; kk < 5; kk++) {
+            vec2 nxt = cnode(i, float(kk), t) * uRes;
+            vec2 r = seg(frag, prev, nxt);
+            float L = length(nxt - prev);
+            if (r.x < best) { best = r.x; sAt = acc + r.y * L; }
+            if (kk < 4) bend = min(bend, length(frag - nxt));
+            acc += L; prev = nxt;
+          }
+          float sp = sAt / acc;
+          float pulse = bump(fract(sp - t * (0.05 + 0.02 * i) + hash(i * 5.0)), 9.0);
+          vec3 col = ccol(i);
+          c += col * (lineCore(best, 2.2) * (0.75 + 1.1 * pulse) + lineHalo(best, m * 0.012) * (0.35 + 0.7 * pulse));
+          c += vec3(0.9, 0.97, 1.0) * (1.0 - smoothstep(2.0, 3.5, bend)) * 0.9;
+        }
+        // two vertical beams
+        for (int vv = 0; vv < 2; vv++) {
+          float fv = float(vv);
+          float x = (vv == 0 ? 0.16 : 0.84) * uRes.x + sin(t * 0.05 + fv * 2.0) * m * 0.01;
+          float d = abs(frag.x - x);
+          float flick = 0.82 + 0.18 * sin(t * 1.7 + fv * 3.0) * sin(t * 0.43 + fv);
+          vec3 bc = vv == 0 ? vec3(0.20, 0.90, 0.95) : vec3(0.35, 0.50, 1.00);
+          c += bc * (lineCore(d, 2.0) * 0.8 + lineHalo(d, m * 0.008) * 0.28) * flick;
+        }
+        // hazard stripes along the top and bottom edges
+        float edge = min(vUv.y, 1.0 - vUv.y) * uRes.y;
+        float band = 1.0 - smoothstep(m * 0.012, m * 0.012 + 1.5, edge);
+        float stripe = smoothstep(0.45, 0.55, abs(fract((frag.x + frag.y) / (m * 0.03)) - 0.5) * 2.0);
+        c = mix(c, mix(vec3(0.02, 0.02, 0.03), vec3(0.80, 0.58, 0.08), stripe), band * 0.85);
+        gl_FragColor = vec4(c * uBright, 1.0);
+      }`,
+
+    // Mothership: the bio-reactor lattice. A deep green hex grid, faint, with
+    // glowing dots on scattered cells that breathe on their own phases, and six
+    // mint-green energy lines criss-crossing the screen -- four running top to
+    // bottom with a bend, two across -- each through four nodes that drift on
+    // slow cycles (15-40 s), with a pulse of light running along it.
+    lattice: `
+      // the hex grid: distance to the nearest edge, distance to the centre, the cell
+      vec4 hexInfo(vec2 q) {
+        const vec2 s = vec2(1.0, 1.7320508);
+        vec4 hC = floor(vec4(q, q - vec2(0.5, 1.0)) / s.xyxy) + 0.5;
+        vec4 h = vec4(q - hC.xy * s, q - (hC.zw + 0.5) * s);
+        bool first = dot(h.xy, h.xy) < dot(h.zw, h.zw);
+        vec2 hv = first ? h.xy : h.zw;
+        vec2 cid = first ? hC.xy : hC.zw + 0.5;
+        vec2 a = abs(hv);
+        return vec4(0.5 - max(dot(a, s * 0.5), a.x), length(hv), cid);
+      }
+      vec2 lnode(float i, float k, float t) {
+        float u = -0.08 + k * 0.3867;
+        float drift = 0.045 * sin(t * (0.03 + 0.03 * hash(i * 3.0 + k)) + hash(i * 11.0 + k) * 6.2832)
+                    + 0.02 * sin(t * 0.09 + k * 2.1 + i * 1.3);
+        if (i < 3.5) {                                  // top to bottom, with a bend
+          float x0 = 0.12 + i * 0.25 + 0.05 * (hash(i) - 0.5);
+          float bend = (k == 1.0 || k == 2.0) ? 0.05 * (hash(i * 9.0 + k) - 0.5) : 0.0;
+          return vec2(x0 + (u - 0.5) * 0.18 * (hash(i * 2.0) - 0.5) + bend + drift, u);
+        }
+        float y0 = i < 4.5 ? 0.22 : 0.78;               // across, diagonally
+        float slope = i < 4.5 ? 0.35 : -0.30;
+        return vec2(u, y0 + slope * (u - 0.5) + drift);
+      }
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = vec3(0.012, 0.050, 0.034);
+        // the hex grid
+        float hs = m * 0.032;
+        vec4 hx = hexInfo(frag / hs);
+        float breathe = 0.85 + 0.15 * sin(t * 0.5);
+        c += vec3(0.03, 0.17, 0.11) * (1.0 - smoothstep(0.4, 1.4, hx.x * hs)) * 0.55 * breathe;
+        // dots on scattered cells
+        float hr = hash2(hx.zw);
+        if (hr > 0.80) {
+          float tw = 0.55 + 0.45 * sin(t * (0.3 + 0.6 * hr) + hr * 40.0);
+          c += vec3(0.14, 0.62, 0.42) * (1.0 - smoothstep(1.4, 2.8, hx.y * hs)) * tw;
+        }
+        // the energy lines
+        vec3 mint = vec3(0.26, 0.96, 0.70);
+        for (int ii = 0; ii < 6; ii++) {
+          float i = float(ii);
+          float best = 1e9, sAt = 0.0, acc = 0.0;
+          vec2 prev = lnode(i, 0.0, t) * uRes;
+          for (int kk = 1; kk < 4; kk++) {
+            vec2 nxt = lnode(i, float(kk), t) * uRes;
+            vec2 r = seg(frag, prev, nxt);
+            float L = length(nxt - prev);
+            if (r.x < best) { best = r.x; sAt = acc + r.y * L; }
+            acc += L; prev = nxt;
+          }
+          float sp = sAt / acc;
+          float pulse = bump(fract(sp - t * (0.04 + 0.015 * i) + hash(i * 7.0)), 8.0);
+          c += mint * (lineCore(best, 2.0) * (0.7 + 1.0 * pulse) + lineHalo(best, m * 0.011) * (0.30 + 0.6 * pulse));
+        }
+        gl_FragColor = vec4(c * uBright, 1.0);
+      }`
+  };
 
   // Cruise starfield. Coordinates are camera space: x and y across the view, z
   // negative into the screen, stars travelling toward z = 0.
@@ -5740,6 +5952,11 @@ registerProcessor('odd-sid', OddSid);
       // The bomb's spark flickers: two sines out of step, so it never settles into
       // a visible beat, and it warms towards yellow as it flares.
       if (this.bgGlow && this.bgGlow.visible) this.bgGlow.material.uniforms.uTime.value = this._flightTime;
+      if (this.bgProc && this.bgProc.visible) {
+        const pu = this.bgProc.material.uniforms;
+        pu.uTime.value = this._flightTime;
+        this.renderer.getDrawingBufferSize(pu.uRes.value);
+      }
 
       if (this.bombSparkMat) {
         const t = this._flightTime;
@@ -6002,9 +6219,18 @@ registerProcessor('odd-sid', OddSid);
       if (i === null || i === undefined || !BACKDROPS[i]) {
         this.scene.background = this.plainBackground || (this.plainBackground = new THREE.Color(0x0a0c16));
         this.setGlow(null);
+        this.setProcedural(null);
         return;
       }
       if (!this.plainBackground) this.plainBackground = this.scene.background;
+      const kind = BACKDROPS[i].procedural;
+      if (kind && this.setProcedural(kind)) {
+        this.backdropKey = 'proc:' + kind;
+        this.scene.background = new THREE.Color(PROC_BASE[kind]);
+        this.setGlow(null);
+        return;
+      }
+      this.setProcedural(null);
       this.backdropTextures = this.backdropTextures || {};
       this.noPortraitCut = this.noPortraitCut || {};
       this.backdropPortrait = this.viewIsPortrait();
@@ -6076,64 +6302,145 @@ registerProcessor('odd-sid', OddSid);
 
     // The glow layer: the picture's bright parts, found by brightness and kept in
     // their own colours, measured from the undimmed image against the picture's
-    // own threshold (BACKDROPS glow).
+    // own threshold (BACKDROPS glow) -- and then softened, so what it adds is a
+    // haze of light around each line rather than a second, sharp copy of it.
     //
-    // At the picture's full resolution, smoothed (mipmaps) like the picture under
-    // it. It was half resolution, which looked right on a 1024-wide screen and
-    // broke on bigger ones: a phone shows the middle third of a picture, so the
-    // half-size layer was stretched over 3x, and a thin diagonal line -- pixels
-    // that touch only at their corners -- stretched like that turns into a
-    // string of beads. Hyperspace's streaks are exactly such lines, and they
-    // read as broken. At full size the glow is never stretched more than the
-    // picture itself, which is how the lines were drawn to be seen.
+    // Soft because a sharp copy breaks thin lines into dashes. A line a pixel
+    // wide, drawn at the half size most screens show these pictures at, wavers
+    // in brightness as it crosses the pixel grid; under the dimmed picture that
+    // goes unnoticed, but a bright sharp glow on top turns every waver into a
+    // dash. Hyperspace's streaks read as broken lines from the day the glow went
+    // in, and each sharper version made it worse. A blurred glow has no fine
+    // detail to waver, the picture keeps its own crisp line, and the layer can
+    // be half size, since enlarging something soft cannot bead it.
+    //
+    //   1. which pixels belong: judged by the brightest in the 3x3 around each,
+    //      at full size, so every pixel of an anti-aliased line goes in rather
+    //      than every other one; each keeps its own colour
+    //   2. shrunk to half size by averaging
+    //   3. blurred, a box of radius 2 twice -- near enough a gaussian
     glowMask(img, threshold) {
-      const W = img.naturalWidth, H = img.naturalHeight;
-      const cvs = document.createElement('canvas');
-      cvs.width = W; cvs.height = H;
-      const ctx = cvs.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const im = ctx.getImageData(0, 0, W, H), d = im.data;
-      // Whether a pixel belongs is decided by the brightest pixel around it (its
-      // 3x3 neighbourhood), and what it carries is its own colour. Judged on its
-      // own, a thin anti-aliased line failed in a pattern: the pixels the line
-      // runs through the middle of passed and the ones it only clips did not,
-      // so the glow was a dotted copy of a continuous line. Judged by the
-      // neighbourhood, every pixel of the line goes in at its own brightness and
-      // the glow is the line as drawn.
-      const L = new Float32Array(W * H);
+      const FW = img.naturalWidth, FH = img.naturalHeight;
+      const src = document.createElement('canvas');
+      src.width = FW; src.height = FH;
+      const sctx = src.getContext('2d');
+      sctx.drawImage(img, 0, 0);
+      const d = sctx.getImageData(0, 0, FW, FH).data;
+
+      // 1. membership by neighbourhood (max across, then down)
+      const L = new Float32Array(FW * FH);
       for (let i = 0, j = 0; j < L.length; i += 4, j++) {
         L[j] = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
       }
-      const R = new Float32Array(W * H);              // max across, then down
-      for (let y = 0; y < H; y++) {
-        const r0 = y * W;
-        for (let x = 0; x < W; x++) {
+      const R = new Float32Array(FW * FH);
+      for (let y = 0; y < FH; y++) {
+        const r0 = y * FW;
+        for (let x = 0; x < FW; x++) {
           let m = L[r0 + x];
           if (x > 0 && L[r0 + x - 1] > m) m = L[r0 + x - 1];
-          if (x < W - 1 && L[r0 + x + 1] > m) m = L[r0 + x + 1];
+          if (x < FW - 1 && L[r0 + x + 1] > m) m = L[r0 + x + 1];
           R[r0 + x] = m;
         }
       }
       const lo = threshold, span = 1 - lo;
-      for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-          const j = y * W + x;
+
+      // 2. into half size, averaging the four, with membership applied
+      const W = Math.floor(FW / 2), H = Math.floor(FH / 2);
+      const ch = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)];
+      for (let y = 0; y < FH; y++) {
+        for (let x = 0; x < FW; x++) {
+          const j = y * FW + x;
           let m = R[j];
-          if (y > 0 && R[j - W] > m) m = R[j - W];
-          if (y < H - 1 && R[j + W] > m) m = R[j + W];
-          const k = m <= lo ? 0 : Math.min(1, (m - lo) / span);
-          const i = j * 4;
-          d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; d[i + 3] = 255;
+          if (y > 0 && R[j - FW] > m) m = R[j - FW];
+          if (y < FH - 1 && R[j + FW] > m) m = R[j + FW];
+          if (m <= lo) continue;
+          const k = Math.min(1, (m - lo) / span) * 0.25;
+          const h = (y >> 1) * W + (x >> 1), i = j * 4;
+          if ((y >> 1) >= H || (x >> 1) >= W) continue;
+          ch[0][h] += d[i] * k; ch[1][h] += d[i + 1] * k; ch[2][h] += d[i + 2] * k;
         }
+      }
+
+      // 3. soften: box radius 2, across then down, twice
+      const box = (a, tmp) => {
+        const n = 5;
+        for (let y = 0; y < H; y++) {
+          const r0 = y * W;
+          let acc = a[r0] * 3 + a[r0 + 1] + a[r0 + 2];
+          for (let x = 0; x < W; x++) {
+            tmp[r0 + x] = acc / n;
+            acc += a[r0 + Math.min(W - 1, x + 3)] - a[r0 + Math.max(0, x - 2)];
+          }
+        }
+        for (let x = 0; x < W; x++) {
+          let acc = tmp[x] * 3 + tmp[W + x] + tmp[2 * W + x];
+          for (let y = 0; y < H; y++) {
+            a[y * W + x] = acc / n;
+            acc += tmp[Math.min(H - 1, y + 3) * W + x] - tmp[Math.max(0, y - 2) * W + x];
+          }
+        }
+      };
+      const tmp = new Float32Array(W * H);
+      for (const c of ch) { box(c, tmp); box(c, tmp); }
+
+      const cvs = document.createElement('canvas');
+      cvs.width = W; cvs.height = H;
+      const ctx = cvs.getContext('2d');
+      const im = ctx.createImageData(W, H), o = im.data;
+      for (let h = 0; h < W * H; h++) {
+        o[h * 4] = ch[0][h]; o[h * 4 + 1] = ch[1][h]; o[h * 4 + 2] = ch[2][h]; o[h * 4 + 3] = 255;
       }
       ctx.putImageData(im, 0, 0);
       return new THREE.CanvasTexture(cvs);    // mipmapped, as the picture is
+    }
+
+    // A live background (BACKDROPS procedural): one full-screen quad, drawn
+    // first and behind everything at the far plane, wearing the shader for the
+    // kind asked for (PROC_SHADERS). Materials are made once a kind and kept, so
+    // stepping back to one is instant. null hides it. Returns false where the
+    // shader will not compile, and the picture is used instead.
+    setProcedural(kind) {
+      if (!kind) { if (this.bgProc) this.bgProc.visible = false; return false; }
+      this.procMats = this.procMats || {};
+      let mat = this.procMats[kind];
+      if (mat === false) return false;
+      if (!mat) {
+        mat = new THREE.ShaderMaterial({
+          uniforms: {
+            uRes: { value: new THREE.Vector2(1, 1) },
+            uTime: { value: 0 },
+            uBright: { value: PROC_BRIGHTNESS[kind] || 0.85 }
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = vec4(position.xy, 0.9999, 1.0);
+            }`,
+          fragmentShader: PROC_HEADER + PROC_SHADERS[kind],
+          depthWrite: false,
+          depthTest: true,
+          fog: false
+        });
+        this.procMats[kind] = mat;
+      }
+      if (!this.bgProc) {
+        this.bgProc = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+        this.bgProc.frustumCulled = false;
+        this.bgProc.renderOrder = -2;
+        this.scene.add(this.bgProc);
+      }
+      this.bgProc.material = mat;
+      this.bgProc.visible = true;
+      return true;
     }
 
     // The glow for a background texture: built for it now, and the last one's
     // freed, so only the picture on screen holds a layer.
     applyGlow(tex) {
       const cfg = tex.userData.glowCfg;
+      // ?noglow on the address shows the pictures still, to compare.
+      if (NO_GLOW) { this.setGlow(null); return; }
       if (!cfg || !tex.userData.glowSrc) { this.setGlow(null); return; }
       if (this.glowFor === tex && this.bgGlow && this.bgGlow.visible) return;
       const mask = this.glowMask(tex.userData.glowSrc, cfg.threshold);
@@ -6151,8 +6458,9 @@ registerProcessor('odd-sid', OddSid);
     //   sweep    a soft band of light crosses the picture on a diagonal every
     //            7 s, lighting each line as it passes -- current along a conduit
     //   halo     a few taps around each point, so the light spills off the line
-    //   twinkle  lone points -- stars, markers -- flicker on their own phases;
-    //            lines do not, or they break into dashes
+    //   twinkle  on a picture whose points are stars (BACKDROPS glow twinkle),
+    //            they flicker on their own phases; nowhere else, since along a
+    //            line the same flicker reads as dashes
     setGlow(mask, cfg) {
       // The layer being replaced is freed: they are built per showing.
       const old = this.bgGlow && this.bgGlow.material.uniforms.tGlow.value;
@@ -6171,7 +6479,8 @@ registerProcessor('odd-sid', OddSid);
             uTexel: { value: new THREE.Vector2(1 / 960, 1 / 540) },
             uTime: { value: 0 },
             uStrength: { value: 0.5 },
-            uRadial: { value: 0 }
+            uRadial: { value: 0 },
+            uTwinkle: { value: 0 }
           },
           vertexShader: `
             varying vec2 vUv;
@@ -6182,7 +6491,7 @@ registerProcessor('odd-sid', OddSid);
           fragmentShader: `
             uniform sampler2D tGlow;
             uniform vec2 uRepeat, uOffset, uTexel;
-            uniform float uTime, uStrength, uRadial;
+            uniform float uTime, uStrength, uRadial, uTwinkle;
             varying vec2 vUv;
             void main() {
               vec2 uv = uOffset + vUv * uRepeat;
@@ -6190,7 +6499,7 @@ registerProcessor('odd-sid', OddSid);
               vec3 halo = vec3(0.0);
               for (int k = 0; k < 8; k++) {
                 float a = float(k) * 0.785398;
-                halo += texture2D(tGlow, uv + vec2(cos(a), sin(a)) * uTexel * 8.0).rgb;
+                halo += texture2D(tGlow, uv + vec2(cos(a), sin(a)) * uTexel * 4.0).rgb;
               }
               halo *= 0.125;
               float breathe = 0.5 + 0.5 * sin(uTime * 1.2566);
@@ -6198,18 +6507,14 @@ registerProcessor('odd-sid', OddSid);
               // whose lines already radiate from it.
               float x = uRadial > 0.5 ? length((uv - 0.5) * vec2(1.7778, 1.0)) : uv.x + uv.y * 0.45;
               float pos = fract(uTime / 7.0) * 2.0 - 0.4;
-              float band = exp(-pow((x - pos) / 0.07, 2.0));
+              float bd = (x - pos) / 0.07;
+              float band = exp(-bd * bd);              // squared by hand: pow() is undefined for a negative base
+              // The twinkle is set per small square of the picture, so along a
+              // line neighbouring squares would flicker out of step and break it
+              // into dashes. Only a picture whose bright points are stars has it.
               float n = fract(sin(dot(floor(uv * vec2(320.0, 180.0)), vec2(12.9898, 78.233))) * 43758.5453);
               float tw = 0.5 + 0.5 * sin(uTime * (1.5 + 3.0 * n) + n * 6.2832);
-              // Twinkle only what stands alone -- stars, markers -- never a line.
-              // The twinkle is set per small square of the picture, so along a
-              // line neighbouring squares flicker out of step and the line reads
-              // as dashes (Hyperspace's streaks did). The halo ring says which is
-              // which: around a lone point it finds nothing, around a line it
-              // catches the line itself, two of its eight taps at the least.
-              float cl = dot(core, vec3(0.333)), hl = dot(halo, vec3(0.333));
-              float alone = clamp(1.0 - 4.0 * hl / max(cl, 0.001), 0.0, 1.0);
-              vec3 c = core * (0.35 + 0.35 * breathe + 1.1 * band + 0.25 * tw * alone)
+              vec3 c = core * (0.35 + 0.35 * breathe + 1.1 * band + 0.25 * tw * uTwinkle)
                      + halo * (0.45 * breathe + 1.4 * band);
               gl_FragColor = vec4(c * uStrength, 1.0);
             }`,
@@ -6229,6 +6534,7 @@ registerProcessor('odd-sid', OddSid);
       u.uTexel.value.set(1 / mask.image.width, 1 / mask.image.height);
       u.uStrength.value = (cfg && cfg.strength) || 0.5;
       u.uRadial.value = cfg && cfg.radial ? 1 : 0;
+      u.uTwinkle.value = cfg && cfg.twinkle ? 1 : 0;
       this.bgGlow.visible = true;
     }
   }
