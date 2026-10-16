@@ -7181,10 +7181,12 @@ registerProcessor('odd-sid', OddSid);
         '&hellip;so it <b>breaks off and falls!</b>'
       ], 1800);
 
-      // Then the special balls, the way the C64 build's demo shows them.
+      // Then the special balls, the way the C64 build's demo shows them, and
+      // straight from that page to the title. Hiding the page first left the
+      // bare demo board on screen for the gap before the exit -- it read as the
+      // demo starting again and then giving up. exitAttract hides the page.
       at(600, () => this.showSpecialsPage(true));
-      at(SPECIALS_PAGE_MS, () => this.showSpecialsPage(false));
-      at(300, () => this.exitAttract(true));
+      at(SPECIALS_PAGE_MS, () => this.exitAttract(true));
     }
 
     // Every colour constraint all three lessons will need, so the heap can be
