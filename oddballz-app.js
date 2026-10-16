@@ -253,15 +253,31 @@
   // to the screen -- on a portrait phone that leaves only the middle quarter of
   // the width, so nothing a picture needs can sit near its sides.
   const BACKDROPS = [
-    { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula' },
-    { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber' },
-    { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace' },
-    { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership' },
-    { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel' },
-    { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar' }
+    { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula',
+      glow: { threshold: 0.28, strength: 0.35 } },                // its stars and ringed planet
+    { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber',
+      glow: { threshold: 0.42, strength: 0.55 } },                // the conduits
+    { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace',
+      glow: { threshold: 0.28, strength: 0.9, radial: true } },   // the streaks, pulsed outward
+    { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership',
+      glow: { threshold: 0.42, strength: 0.55 } },                // the lattice
+    { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel',
+      glow: { threshold: 0.42, strength: 0.5 } },                 // the panel stripes and markers
+    { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar',
+      glow: { threshold: 0.6, strength: 0.09 } }                  // the sun's core and the wires
   ];
   // ALL, the default, plays each picture in turn, as the C64 build's does; any
   // other choice holds that one picture for the whole game.
+  // glow: the picture's bright parts -- neon lines, markers, stars -- are lifted
+  // into a layer the renderer animates (ThreeRenderer.setGlow). Per picture,
+  // because the threshold that finds the lines in one finds the haze in another:
+  // measured, 0.42 lifts 2-3% of Cyber, Mothership and Citadel -- their lines --
+  // but 18% of Solar Array, whose sun is one large bright gradient; at 0.6 that
+  // is its hot core alone. strength is set so the lit parts brighten without
+  // blowing out: measured over a cycle, the share of lit pixels clipping to white
+  // at the peak stays near or under 10% (Solar's sun was 62% at 0.3, 20% at 0.15). radial
+  // sends the sweep outward from the centre rather than across, which is what
+  // Hyperspace's streaks are already doing.
   const BACKDROP_ALL = -1;
   // Bump when a picture is replaced under the same name. The JPEGs carry no ?v=
   // of their own, so without this a browser that has the old one keeps it --
@@ -5723,6 +5739,8 @@ registerProcessor('odd-sid', OddSid);
 
       // The bomb's spark flickers: two sines out of step, so it never settles into
       // a visible beat, and it warms towards yellow as it flares.
+      if (this.bgGlow && this.bgGlow.visible) this.bgGlow.material.uniforms.uTime.value = this._flightTime;
+
       if (this.bombSparkMat) {
         const t = this._flightTime;
         const fl = 0.5 + 0.5 * Math.sin(t * 23.0) * Math.sin(t * 7.3 + 1.1);
@@ -5983,6 +6001,7 @@ registerProcessor('odd-sid', OddSid);
       this.backdropIndex = i;
       if (i === null || i === undefined || !BACKDROPS[i]) {
         this.scene.background = this.plainBackground || (this.plainBackground = new THREE.Color(0x0a0c16));
+        this.setGlow(null);
         return;
       }
       if (!this.plainBackground) this.plainBackground = this.scene.background;
@@ -5993,7 +6012,8 @@ registerProcessor('odd-sid', OddSid);
       const key = portrait ? i + 'p' : String(i);
       this.backdropKey = key;
       const have = this.backdropTextures[key];
-      if (have) { this.scene.background = have; this.fitBackdrop(); return; }
+      if (have) { this.scene.background = have; this.setGlow(have.userData.glow, have.userData.glowCfg); this.fitBackdrop(); return; }
+      this.setGlow(null);
       if (have === null) return;          // still loading
       this.backdropTextures[key] = null;
       const img = new Image();
@@ -6006,11 +6026,12 @@ registerProcessor('odd-sid', OddSid);
         ctx.fillStyle = 'rgba(0, 0, 0, ' + BACKDROP_DIM + ')';
         ctx.fillRect(0, 0, cvs.width, cvs.height);
         const tex = new THREE.CanvasTexture(cvs);
-        tex.userData = { aspect: cvs.width / cvs.height };
+        const gc = BACKDROPS[i].glow;
+        tex.userData = { aspect: cvs.width / cvs.height, glow: gc ? this.glowMask(img, gc.threshold) : null, glowCfg: gc };
         this.backdropTextures[key] = tex;
         // Only if it is still the one wanted: a quick step past it while it loaded
         // must not snap back to it.
-        if (this.backdropKey === key) { this.scene.background = tex; this.fitBackdrop(); }
+        if (this.backdropKey === key) { this.scene.background = tex; this.setGlow(tex.userData.glow, tex.userData.glowCfg); this.fitBackdrop(); }
       };
       img.onerror = () => {
         delete this.backdropTextures[key];
@@ -6044,6 +6065,110 @@ registerProcessor('odd-sid', OddSid);
         tex.repeat.set(1, pic / view);
         tex.offset.set(0, (1 - pic / view) / 2);
       }
+      // The glow is cropped exactly as the picture under it.
+      if (this.bgGlow && this.bgGlow.visible) {
+        this.bgGlow.material.uniforms.uRepeat.value.copy(tex.repeat);
+        this.bgGlow.material.uniforms.uOffset.value.copy(tex.offset);
+      }
+    }
+
+    // The glow layer: the picture's bright parts, found by brightness and kept in
+    // their own colours, at half resolution -- it is lit light, not detail, and
+    // the shader softens it anyway. Measured from the undimmed image, against the
+    // picture's own threshold (BACKDROPS glow).
+    glowMask(img, threshold) {
+      const W = Math.round(img.naturalWidth / 2), H = Math.round(img.naturalHeight / 2);
+      const cvs = document.createElement('canvas');
+      cvs.width = W; cvs.height = H;
+      const ctx = cvs.getContext('2d');
+      ctx.drawImage(img, 0, 0, W, H);
+      const im = ctx.getImageData(0, 0, W, H), d = im.data;
+      const lo = threshold, span = 1 - lo;
+      for (let i = 0; i < d.length; i += 4) {
+        const l = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+        const k = l <= lo ? 0 : Math.min(1, (l - lo) / span);
+        d[i] *= k; d[i + 1] *= k; d[i + 2] *= k; d[i + 3] = 255;
+      }
+      ctx.putImageData(im, 0, 0);
+      const tex = new THREE.CanvasTexture(cvs);
+      tex.minFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      return tex;
+    }
+
+    // Show a glow layer over the background, or none. One full-screen quad, made
+    // on first use, drawn behind everything else: its depth is the far plane, so
+    // the board and the balls cover it, and it adds light where the picture's
+    // own lines are.
+    //
+    // What it does with them, all slow so it stays background:
+    //   breathe  the lines brighten and fade together, a 5 s cycle
+    //   sweep    a soft band of light crosses the picture on a diagonal every
+    //            7 s, lighting each line as it passes -- current along a conduit
+    //   halo     a few taps around each point, so the light spills off the line
+    //   twinkle  small points flicker on their own phases
+    setGlow(mask, cfg) {
+      if (!mask) { if (this.bgGlow) this.bgGlow.visible = false; return; }
+      if (!this.bgGlow) {
+        const mat = new THREE.ShaderMaterial({
+          uniforms: {
+            tGlow: { value: null },
+            uRepeat: { value: new THREE.Vector2(1, 1) },
+            uOffset: { value: new THREE.Vector2(0, 0) },
+            uTexel: { value: new THREE.Vector2(1 / 960, 1 / 540) },
+            uTime: { value: 0 },
+            uStrength: { value: 0.5 },
+            uRadial: { value: 0 }
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = vec4(position.xy, 0.9999, 1.0);   // full screen, a hair inside the far plane
+            }`,
+          fragmentShader: `
+            uniform sampler2D tGlow;
+            uniform vec2 uRepeat, uOffset, uTexel;
+            uniform float uTime, uStrength, uRadial;
+            varying vec2 vUv;
+            void main() {
+              vec2 uv = uOffset + vUv * uRepeat;
+              vec3 core = texture2D(tGlow, uv).rgb;
+              vec3 halo = vec3(0.0);
+              for (int k = 0; k < 8; k++) {
+                float a = float(k) * 0.785398;
+                halo += texture2D(tGlow, uv + vec2(cos(a), sin(a)) * uTexel * 4.0).rgb;
+              }
+              halo *= 0.125;
+              float breathe = 0.5 + 0.5 * sin(uTime * 1.2566);
+              // Across on a diagonal, or outward from the centre for a picture
+              // whose lines already radiate from it.
+              float x = uRadial > 0.5 ? length((uv - 0.5) * vec2(1.7778, 1.0)) : uv.x + uv.y * 0.45;
+              float pos = fract(uTime / 7.0) * 2.0 - 0.4;
+              float band = exp(-pow((x - pos) / 0.07, 2.0));
+              float n = fract(sin(dot(floor(uv * vec2(320.0, 180.0)), vec2(12.9898, 78.233))) * 43758.5453);
+              float tw = 0.5 + 0.5 * sin(uTime * (1.5 + 3.0 * n) + n * 6.2832);
+              vec3 c = core * (0.35 + 0.35 * breathe + 1.1 * band + 0.25 * tw)
+                     + halo * (0.45 * breathe + 1.4 * band);
+              gl_FragColor = vec4(c * uStrength, 1.0);
+            }`,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          depthTest: true,
+          fog: false
+        });
+        this.bgGlow = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+        this.bgGlow.frustumCulled = false;
+        this.bgGlow.renderOrder = -1;
+        this.scene.add(this.bgGlow);
+      }
+      const u = this.bgGlow.material.uniforms;
+      u.tGlow.value = mask;
+      u.uTexel.value.set(1 / mask.image.width, 1 / mask.image.height);
+      u.uStrength.value = (cfg && cfg.strength) || 0.5;
+      u.uRadial.value = cfg && cfg.radial ? 1 : 0;
+      this.bgGlow.visible = true;
     }
   }
 
