@@ -253,18 +253,18 @@
   // to the screen -- on a portrait phone that leaves only the middle quarter of
   // the width, so nothing a picture needs can sit near its sides.
   const BACKDROPS = [
-    { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula',
-      glow: { threshold: 0.28, strength: 0.6, twinkle: true } },  // its stars and ringed planet
+    { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula',      procedural: 'nebula',
+      glow: { threshold: 0.28, strength: 0.6, twinkle: true } },  // the glow is the fallback's
     { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber',
       procedural: 'conduit' },                                    // drawn live: PROC_SHADERS
     { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace',
       procedural: 'warp' },                                       // drawn live: PROC_SHADERS
     { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership',
       procedural: 'lattice' },                                    // drawn live: PROC_SHADERS
-    { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel',
-      glow: { threshold: 0.42, strength: 2.0 } },                 // the panel stripes and markers
-    { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar',
-      glow: { threshold: 0.6, strength: 0.18 } }                  // the sun's core and the wires
+    { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel',     procedural: 'citadel',
+      glow: { threshold: 0.42, strength: 2.0 } },                 // the glow is the fallback's
+    { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar',       procedural: 'solar',
+      glow: { threshold: 0.6, strength: 0.18 } }                  // the glow is the fallback's
   ];
   // ALL, the default, plays each picture in turn, as the C64 build's does; any
   // other choice holds that one picture for the whole game.
@@ -272,7 +272,8 @@
   // lines made by the game and moving. Hyperspace first -- its picture's streaks
   // were drawn in pieces with gaps between, which read as broken once they were
   // lit -- then, at the user's asking, Cyber's conduits and Mothership's lattice,
-  // slowly drifting. The file stays as the fallback where a shader cannot run.
+  // slowly drifting, and then the other three, the pictures as reference. The
+  // file stays as the fallback where a shader cannot run, glow and all.
   //
   // glow: the picture's bright parts -- neon lines, markers, stars -- are lifted
   // into a layer the renderer animates (ThreeRenderer.setGlow). Per picture,
@@ -347,8 +348,9 @@
   // full screen behind everything, its brightness matched to the dimmed pictures
   // so it sits back behind the board as they do, and the plain colour shown
   // under it for the moment before its first frame.
-  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9 };
-  const PROC_BASE = { warp: 0x020308, conduit: 0x060b16, lattice: 0x03100b };
+  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9, nebula: 0.9, citadel: 0.9, solar: 0.9 };
+  const PROC_BASE = { warp: 0x020308, conduit: 0x060b16, lattice: 0x03100b,
+                      nebula: 0x0b0a1e, citadel: 0x080a18, solar: 0x030203 };
 
   // Shared by all three: the uniforms, and the line helpers. Every line is drawn
   // by its distance from a segment in screen pixels, with a pixel of soft edge,
@@ -372,9 +374,197 @@
     // a bump of light centred where x = 0.5, of width 1/k. Squared by hand: pow()
     // is undefined for a negative base in GLSL, and some GPUs return NaN for it.
     float bump(float x, float k) { float d = (x - 0.5) * k; return exp(-d * d); }
+    // smooth value noise, and five octaves of it
+    float vnoise(vec2 x) {
+      vec2 i = floor(x), f = fract(x);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x),
+                 mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+    }
+    float fbm(vec2 x) {
+      float v = 0.0, a = 0.5;
+      for (int i = 0; i < 5; i++) { v += a * vnoise(x); x = x * 2.03 + vec2(17.1, 9.2); a *= 0.5; }
+      return v;
+    }
+    // a field of stars: one chance per cell of side cs pixels, at a random spot,
+    // twinkling on its own phase; the brightest wear a four-point sparkle.
+    vec3 starField(vec2 frag, float cs, float density, float t) {
+      vec2 cell = floor(frag / cs);
+      float h = hash2(cell);
+      if (h > density) return vec3(0.0);
+      vec2 at = (cell + 0.15 + 0.7 * vec2(hash2(cell + 3.7), hash2(cell + 9.1))) * cs;
+      vec2 d = frag - at;
+      float r = length(d);
+      float tw = 0.55 + 0.45 * sin(t * (0.6 + 2.0 * hash2(cell + 1.3)) + h * 50.0);
+      float big = step(0.6, hash2(cell + 5.5));
+      float core = exp(-r * r / (1.2 + 2.0 * big));
+      float spark = big * (exp(-abs(d.y) * 1.6) * exp(-abs(d.x) / 7.0) + exp(-abs(d.x) * 1.6) * exp(-abs(d.y) / 7.0)) * 0.6;
+      vec3 tint = mix(vec3(0.75, 0.85, 1.0), vec3(1.0, 0.92, 0.75), step(0.8, hash2(cell + 7.7)));
+      return tint * (core + spark) * tw;
+    }
   `;
 
   const PROC_SHADERS = {
+    // Nebula: the deep space nebula. Soft clouds -- violet towards the left, teal
+    // towards the lower right, a blue haze between -- of layered noise, warped
+    // by more noise so they drift and slowly swirl; a field of twinkling stars,
+    // the bright ones with the picture's four-point sparkle; and its small ringed
+    // planet, kept on screen at any shape -- placed by the screen, not the
+    // picture, so a phone sees it too.
+    nebula: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime * 0.018;
+        vec2 q = frag / m * 1.5;
+        vec2 w = vec2(fbm(q * 0.7 + vec2(t, -t * 0.6)), fbm(q * 0.7 + vec2(-t * 0.8, t) + 7.3));
+        float n1 = fbm(q + w * 1.4 + vec2(t * 0.5, 0.0));
+        float n2 = fbm(q * 1.3 - w * 1.1 + vec2(3.0, -t * 0.7));
+        float sx = vUv.x, sy = vUv.y;
+        vec3 c = mix(vec3(0.045, 0.040, 0.110), vec3(0.020, 0.060, 0.100), sx * 0.7 + (1.0 - sy) * 0.3);
+        float violet = smoothstep(0.38, 0.85, n1) * (1.15 - sx);
+        float teal = smoothstep(0.42, 0.88, n2) * (0.25 + sx * 0.75) * (0.45 + (1.0 - sy) * 0.55);
+        c += vec3(0.40, 0.11, 0.50) * violet * 0.55;
+        c += vec3(0.03, 0.30, 0.32) * teal * 0.6;
+        c += vec3(0.10, 0.12, 0.34) * smoothstep(0.35, 0.8, (n1 + n2) * 0.5) * 0.3;
+        c += starField(frag, m * 0.07, 0.30, uTime) * 0.8;
+        c += starField(frag + 37.0, m * 0.035, 0.18, uTime * 1.3) * 0.45;
+        // the ringed planet, upper right -- at 70% of the height, which on a phone
+        // is just clear of the stats bar and on a desktop well clear of the board
+        vec2 P = vec2(0.80, 0.70) * uRes;
+        float pr = m * 0.032;
+        vec2 v = frag - P;
+        float pd = length(v) / pr;
+        float ca = cos(-0.28), sa = sin(-0.28);
+        vec2 rv = vec2(ca * v.x - sa * v.y, sa * v.x + ca * v.y);
+        float e = length(rv * vec2(1.0, 3.6)) / (pr * 2.0);
+        float ring = (1.0 - smoothstep(0.035, 0.07, abs(e - 1.0))) * 0.8;
+        float front = step(0.0, -rv.y);
+        if (pd < 1.0) {
+          float z = sqrt(1.0 - pd * pd);
+          float lit = clamp(dot(normalize(vec3(v / pr, z)), normalize(vec3(-0.6, 0.6, 0.6))), 0.0, 1.0);
+          vec3 body = mix(vec3(0.18, 0.16, 0.45), vec3(0.62, 0.48, 0.95), lit);
+          c = mix(c, body, smoothstep(1.0, 0.92, pd));
+          c += vec3(0.75, 0.72, 0.95) * ring * front;
+        } else {
+          c += vec3(0.75, 0.72, 0.95) * ring;
+        }
+        c += vec3(0.30, 0.25, 0.60) * exp(-pd * 0.9) * 0.18;      // its haze
+        gl_FragColor = vec4(c * uBright, 1.0);
+      }`,
+
+    // Citadel: the deep space citadel. Slate side panels whose gold and blue
+    // bars light in a slow wave climbing them, like a readout; a centre framed by
+    // rails top and bottom, their beacon dots chasing in turn; dashed lines
+    // crossing it in an X, the dashes marching; and a red core glow breathing in
+    // the middle, behind the board, with stars about.
+    citadel: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec2 cp = (frag - 0.5 * uRes) / m;
+        float r = length(cp);
+        vec3 c = mix(vec3(0.028, 0.036, 0.085), vec3(0.075, 0.060, 0.135), exp(-r * r * 2.2));
+        c += vec3(0.32, 0.08, 0.15) * exp(-r * r * 6.0) * (0.75 + 0.25 * sin(t * 0.55));
+        c += starField(frag, m * 0.06, 0.22, t) * 0.55;
+        // the side panels
+        float pw = min(uRes.x * 0.17, m * 0.42);
+        float lx = min(frag.x, uRes.x - frag.x);
+        float isPanel = 1.0 - smoothstep(pw - 1.0, pw, lx);
+        bool leftSide = frag.x < uRes.x * 0.5;
+        c = mix(c, mix(vec3(0.050, 0.065, 0.100), vec3(0.085, 0.110, 0.150), smoothstep(pw, 0.0, lx) * 0.6), isPanel);
+        c += vec3(0.12, 0.16, 0.22) * (1.0 - smoothstep(0.5, 1.8, abs(lx - pw))) * 0.8;   // its edge
+        float sp = m * 0.024;
+        float row = floor(frag.y / sp), fy = fract(frag.y / sp);
+        float bar = smoothstep(0.30, 0.38, fy) * (1.0 - smoothstep(0.52, 0.60, fy));
+        float inBar = step(pw * 0.18, lx) * step(lx, pw * 0.74);
+        float wave = 0.35 + 0.65 * pow(0.5 + 0.5 * sin(row * 0.32 - t * 1.4 + (leftSide ? 0.0 : 2.0)), 3.0);
+        vec3 gold = vec3(0.85, 0.62, 0.20), blue = vec3(0.25, 0.58, 0.85);
+        vec3 bc = leftSide ? (hash(row) < 0.45 ? gold : blue) : blue;
+        c += bc * bar * inBar * isPanel * wave;
+        // the centre's rails, top and bottom, and their chasing beacons
+        float cx0 = pw, cx1 = uRes.x - pw;
+        float inC = step(cx0, frag.x) * step(frag.x, cx1);
+        for (int k = 0; k < 2; k++) {
+          float ry = (k == 0 ? 0.14 : 0.86) * uRes.y;
+          float d = abs(frag.y - ry);
+          c += vec3(0.20, 0.26, 0.36) * lineCore(d, 1.6) * inC * 0.8;
+          float slot = (cx1 - cx0) / 7.0;
+          float xi = floor((frag.x - cx0) / slot);
+          if (xi >= 0.5 && xi <= 6.5) {
+            vec2 bpos = vec2(cx0 + (xi + 0.0) * slot, ry);
+            float on = 0.25 + 0.75 * bump(fract(xi / 7.0 - t * 0.25 + float(k) * 0.5), 6.0);
+            float bd = length(frag - bpos);
+            c += vec3(1.0, 0.68, 0.18) * (exp(-bd * bd / 6.0) + exp(-bd / (m * 0.012)) * 0.35) * on;
+          }
+        }
+        // the dashed X across the centre, its dashes marching
+        for (int k = 0; k < 2; k++) {
+          vec2 a = vec2(cx0, (k == 0 ? 0.36 : 0.64) * uRes.y);
+          vec2 b = vec2(cx1, (k == 0 ? 0.64 : 0.36) * uRes.y);
+          vec2 sr = seg(frag, a, b);
+          float dash = step(0.5, fract(sr.y * length(b - a) / (m * 0.022) - t * 0.4));
+          c += vec3(0.14, 0.52, 0.75) * lineCore(sr.x, 1.4) * dash * 0.75;
+        }
+        gl_FragColor = vec4(c * uBright, 1.0);
+      }`,
+
+    // Solar Array: the orbital solar array. Black space and stars; a great sun
+    // in the upper right, its corona churning with noise and the whole slowly
+    // pulsing; and the blue solar array on the left -- a grid of cells round a
+    // central mast, wires above and below -- with a glint of sunlight sweeping
+    // across the cells now and then, as if the array turned through it.
+    solar: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = vec3(0.012, 0.010, 0.012);
+        c += starField(frag, m * 0.07, 0.20, t) * 0.5;
+        // the sun
+        float big = max(uRes.x, uRes.y);
+        // Lower on a tall screen, where the top of it sits behind the header.
+        bool tall = uRes.y > uRes.x;
+        vec2 S = vec2(0.96, tall ? 0.78 : 0.92) * uRes;
+        vec2 sv = (frag - S) / (big * 0.52);
+        float sd = length(sv);
+        float ang = atan(sv.y, sv.x);
+        float churn = fbm(vec2(ang * 2.5 + 3.0, sd * 3.0 - t * 0.12)) - 0.5;
+        float pulse = 1.0 + 0.03 * sin(t * 0.7);
+        float d = sd / pulse - churn * 0.07;
+        vec3 sun = vec3(0.0);
+        sun += vec3(1.00, 0.96, 0.80) * (1.0 - smoothstep(0.05, 0.18, d));
+        sun += vec3(1.00, 0.78, 0.30) * (1.0 - smoothstep(0.10, 0.42, d)) * 0.85;
+        sun += vec3(0.95, 0.38, 0.10) * (1.0 - smoothstep(0.30, 0.70, d)) * 0.70;
+        sun += vec3(0.70, 0.10, 0.12) * (1.0 - smoothstep(0.55, 1.00, d)) * 0.55;
+        c += sun * 0.62;
+        // the array
+        // A third of the width on a wide screen, as in the picture; less on a tall
+        // one, where a third of a phone is a wall.
+        float ax0 = uRes.x * 0.04, ax1 = ax0 + uRes.x * (tall ? 0.20 : 0.30);
+        float ay0 = uRes.y * 0.16, ay1 = uRes.y * 0.84;
+        float mast = (ax0 + ax1) * 0.5;
+        c += vec3(0.62, 0.66, 0.72) * lineCore(abs(frag.x - mast), 1.6) * step(frag.y, uRes.y) * 0.7;
+        bool inArray = frag.x > ax0 && frag.x < ax1 && frag.y > ay0 && frag.y < ay1;
+        if (inArray) {
+          float cw = m * (tall ? 0.018 : 0.024);
+          vec2 g = (frag - vec2(ax0, ay0)) / cw;
+          vec2 cell = floor(g), f = fract(g);
+          float inner = step(0.10, f.x) * step(f.x, 0.88) * step(0.10, f.y) * step(f.y, 0.86);
+          float hc = hash2(cell);
+          vec3 cellCol = hc > 0.96 ? vec3(0.45, 0.42, 0.20) : vec3(0.05, 0.40, 0.70);
+          float gl = bump(fract((g.x + g.y * 0.6) * 0.035 - t * 0.09), 5.0);
+          c = mix(c, vec3(0.03, 0.06, 0.10), 0.85);
+          c += cellCol * inner * (0.75 + 0.9 * gl);
+          c += vec3(0.85, 0.92, 1.0) * inner * gl * 0.25;
+        } else if (frag.x > ax0 && frag.x < ax1) {
+          // the wires above and below the cells
+          float wy = frag.y < ay0 ? (ay0 - frag.y) : (frag.y - ay1);
+          float lane = fract(wy / (m * 0.028));
+          float slant = abs(lane - 0.5 - (frag.x - mast) / (ax1 - ax0) * 0.15);
+          c += vec3(0.55, 0.58, 0.66) * (1.0 - smoothstep(0.02, 0.05, slant)) * 0.35;
+        }
+        gl_FragColor = vec4(c * uBright, 1.0);
+      }`,
+
     // Hyperspace: streaks racing outward from a vanishing point behind the board,
     // in the colours of the picture it replaced -- cyan, blue, violet and the odd
     // white -- stretching as they accelerate, in three layers at different
