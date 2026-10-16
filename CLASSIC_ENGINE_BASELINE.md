@@ -1,6 +1,6 @@
 # Classic Game Engine Baseline (`v1.0-classic-engine`)
 
-This document serves as the permanent reference and baseline snapshot for the 1992 Pascal Oddballz Classic Game Engine in `oddballz-hd`.
+This document serves as the permanent reference and baseline snapshot for the 1994 Pascal Oddballz Classic Game Engine in `oddballz-hd`.
 
 ## Git Snapshot & Revert Command
 - **Git Tag**: `v1.0-classic-engine`
@@ -19,6 +19,27 @@ This document serves as the permanent reference and baseline snapshot for the 19
 > bundle `oddballz-app.js`, whose six sections map onto the old module names:
 > hex math (1), engine logic (2), sound (3), particles (4), renderer (5), and the
 > application controller (6). The architecture itself is unchanged.
+
+> **What has changed since this snapshot.** The description below is left as the
+> record of what `v1.0-classic-engine` was, and is still accurate for that tag. Later
+> work diverged in these places — see `v1.1-board-widths` and
+> `v1.2-colour-and-lighting`, whose tag annotations carry the reasoning:
+>
+> - **Grid coordinates are now a preset**, not fixed. The `x: 4..20, y: 0..19` and the
+>   boundary condition below are the 9-wide "classic" entry in `BOARD_PRESETS`; 12- and
+>   18-wide presets also exist, and `gridToWorld()` scales by `WORLD_SCALE` so all
+>   three occupy the same world extent. `startPos` y and the spawn row scale with the
+>   preset. The classic board's geometry itself is unchanged.
+> - **Rows above the spawn row are masked** — still playable, not drawn.
+> - **The neon cell edges are gone.** The hex wireframe was removed; cells read from
+>   the gaps between them and the bevel. It was also the source of aliased cyan edges.
+> - **Tone mapping is Linear, not ACES**, and the six ball colours were re-tuned to
+>   suit it.
+> - **The End Game confirmation modal is gone.** Pause's End Game goes straight to the
+>   title screen.
+> - The engine itself — `supported()`, `checkGaps()`, `matchColors()`, the shapes and
+>   the transform matrices — is untouched. Only `levAttr`'s colour column and the fall
+>   speed expression were retuned for difficulty.
 
 ## Engine Core Architecture
 1. **Hexagonal Grid Geometry** (section 1, formerly `hexMath.js`):

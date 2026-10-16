@@ -104,6 +104,171 @@
   const END_ARM_MS = 4000;
   const hiscoreKey = (mode, board) => `${mode || 'Color Match'}|${board || 'Classic'}`;
 
+  // --- Difficulty -------------------------------------------------------
+  //
+  // Four ramps, carried over from the C64 port. The later shapes -- the hooks in
+  // particular -- are what make a full board unplayable, so the setting is mostly
+  // about how fast those arrive, with colours and fall speed following.
+  //
+  // HARD is exactly what this game has always done: shapes every two levels,
+  // colours 4@4 5@8 6@12, and 1.00 + 0.08 rows a second per level capped at 2.60.
+  // Verified against the old levAttr table before these were added, so choosing
+  // HARD reproduces every previous game. NORMAL is the new default.
+  const DIFFICULTIES = ['Easy', 'Normal', 'Hard', 'Relaxed'];
+  const DIFF_EASY = 0, DIFF_NORMAL = 1, DIFF_HARD = 2, DIFF_RELAXED = 3;
+
+  // Levels 1..21; level 21's entry applies from 21 upward. RELAXED never deals
+  // past shape 3 and holds at three colours until level 16 -- it is meant to stay
+  // playable indefinitely rather than to ramp.
+  const LEV_SHAPES = [
+    [2,2,2,2,3,3,3,3,3,4,4,4,4,4,5,5,5,5,6,6,7],   // Easy:    a shape every 4 levels
+    [2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7],   // Normal:  every 3
+    [2,2,3,3,4,4,5,5,6,7,7,7,7,7,7,7,7,7,7,7,7],   // Hard:    every 2 (the original's)
+    [2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]    // Relaxed: never past 3
+  ];
+  const LEV_COLORS = [
+    [3,3,3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,6,6,6,6],   // Easy:    4@6  5@12 6@18
+    [3,3,3,3,4,4,4,4,4,5,5,5,5,5,6,6,6,6,6,6,6],   // Normal:  4@5  5@10 6@15
+    [3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,6,6,6,6,6,6],   // Hard:    4@4  5@8  6@12
+    [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4]    // Relaxed: 3 until 16
+  ];
+  const LEV_N = 21;
+
+  // Rows a second x100: 1.00 at level 1, plus this much per level after.
+  const FALL_STEP = [5, 6, 8, 5];
+  const FALL_MAX = 260;
+  // Easy and Relaxed level off at 1.75 rather than 2.60 -- a speed to settle into
+  // rather than a ceiling to survive.
+  const FALL_MAX_GENTLE = 175;
+  const GENTLE = [true, false, false, true];
+
+  // Rows a second at a given level for a difficulty, as a float.
+  function fallSpeedFor(level, difficulty) {
+    const d = (difficulty >= 0 && difficulty < FALL_STEP.length) ? difficulty : DIFF_NORMAL;
+    let s = 100 + (Math.max(1, level) - 1) * FALL_STEP[d];
+    if (s > FALL_MAX) s = FALL_MAX;
+    if (GENTLE[d] && s > FALL_MAX_GENTLE) s = FALL_MAX_GENTLE;
+    return s / 100;
+  }
+
+  // Adaptive pieces: when the pile reaches within this many rows of the spawn row,
+  // only the first ADAPT_SHAPES shapes are dealt. Scaled by the board preset so the
+  // taller boards use the same fraction of the playfield rather than the same
+  // absolute depth.
+  const ADAPT_DEPTH = 6;
+  const ADAPT_SHAPES = 3;
+
+  // The entry slide, and the lock delay, both run at level 1 pace at every level.
+  const ENTRY_ROWS_PER_SEC = 1.0;
+  // A quarter of a row at level 1, in seconds: the grace after the piece is blocked
+  // below, during which it can still be moved, turned or flipped. Fixed rather than
+  // scaled with the fall, so the late game keeps the same room for a tight slide
+  // that level 1 has -- at the 2.60 ceiling a quarter row would be under 0.10s.
+  const LOCK_DELAY_S = 0.25;
+
+  // --- special balls --------------------------------------------------------
+  //
+  // Four extra ball kinds, ported from the C64 build. The numbering is that
+  // build's exactly, because it was chosen to make the awkward cases free:
+  // colours are 1..6, so `value & 15` recovers a ball's colour whatever else it
+  // carries, and a charged row clearer can be `RC_BASE | colour` and still match
+  // as its own colour with no special case in the match walk. 0 stays empty.
+  //
+  //   7  joker     counts as whatever colour a run through it has, so one ball
+  //                can complete two lines at once. Jokers alone match each
+  //                other. Dealt as one ball of an ordinary piece.
+  //   8  bomb      goes off where it lands: itself and its six neighbours,
+  //                whatever they hold. Comes as a piece of its own -- all four
+  //                balls the bomb on one cell -- because where it lands is the
+  //                whole of the decision.
+  //  16+ charged   a solid piece of one colour with one ball charged. It matches
+  //      row       as that colour; when it goes, by a match or a blast, the
+  //      clearer   bottom row sweeps on the next pass.
+  //  10  stone     never matches -- a joker does not help it -- and only a bomb
+  //                or a sweep removes it. Placed with its piece it merely rests;
+  //                once its support goes and it falls it crushes the one ball it
+  //                lands against, and a stone resting at a wall or the floor
+  //                crumbles, so none can be left stuck.
+  const JOKER = 7;
+  const BOMB = 8;
+  const STONE = 10;
+  const ZSTONE_L = 12;        // a fallen stone that stepped to (x,   y+1) ...
+  const ZSTONE_R = 13;        // ... or to (x+1, y+1): it crushes that one
+  const RC_BASE = 16;
+
+  const ballColor = (v) => v & 15;
+  const isStone = (v) => v >= STONE && v <= ZSTONE_R;
+  const isCharged = (v) => (v & 0xF0) === RC_BASE;
+  // A ball that never takes part in colour matching.
+  const isInert = (v) => v === 0 || v === BOMB || isStone(v);
+
+  const SPECIAL_LEVEL = 3;    // no specials before this level
+  const SPECIAL_ODDS = 20;    // one piece in this many
+  const SPECIAL_ODDS_HI = 8;  // ... and one in this many with the pile high, where
+                              // SPECIAL_HI_KIND is dealt instead: bombs and
+                              // sweeps, the two kinds that make room
+  const STONE_LEVEL = 6;      // stones only from here
+  const SPECIAL_HI_KIND = [JOKER, BOMB, BOMB, RC_BASE, RC_BASE];
+
+  // Which of the renderer's ball looks a value draws as: 0..5 the six colours,
+  // then the joker, the bomb and the stone. Every place that turns a cell's value
+  // into something drawn -- material, ghost, light, decal, particles -- goes
+  // through this, so they cannot drift apart. A charged sweep is its own colour's
+  // slot, because it plays as that colour and has to read as it; it wears a
+  // marker on top (ThreeRenderer.dressBall). Fallen stones draw as stones: they
+  // last a single resolve pass.
+  const SLOT_JOKER = 6;
+  const SLOT_BOMB = 7;
+  const SLOT_STONE = 8;
+  const ballSlot = (v) => {
+    if (v === JOKER) return SLOT_JOKER;
+    if (v === BOMB) return SLOT_BOMB;
+    if (isStone(v)) return SLOT_STONE;
+    const c = ballColor(v);
+    return (c >= 1 && c <= 6) ? c - 1 : 0;
+  };
+
+  const DIFFICULTY_KEY = 'oddballz_hd_difficulty';
+  function storedDifficulty() {
+    try {
+      const v = parseInt(localStorage.getItem(DIFFICULTY_KEY), 10);
+      if (v >= 0 && v < DIFFICULTIES.length) return v;
+    } catch (e) {}
+    return DIFF_NORMAL;
+  }
+
+  // The background pictures, each paired with the song it plays under. The first
+  // four are the C64 build's four themes in its order; the last two are new to HD,
+  // and so are their songs. Files are 1920x1080 JPEGs in backgrounds/, cover-cropped
+  // to the screen -- on a portrait phone that leaves only the middle quarter of
+  // the width, so nothing a picture needs can sit near its sides.
+  const BACKDROPS = [
+    { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula' },
+    { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber' },
+    { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace' },
+    { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership' },
+    { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel' },
+    { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar' }
+  ];
+  // ALL, the default, plays each picture in turn, as the C64 build's does; any
+  // other choice holds that one picture for the whole game.
+  const BACKDROP_ALL = -1;
+  // Bump when a picture is replaced under the same name. The JPEGs carry no ?v=
+  // of their own, so without this a browser that has the old one keeps it --
+  // the same trap as the JS and CSS links in index.html.
+  const BACKDROP_REV = 3;
+  const BACKDROP_KEY = 'oddballz_hd_backdrop';
+  function storedBackdrop() {
+    try {
+      const raw = localStorage.getItem(BACKDROP_KEY);
+      if (raw !== null) {
+        const v = parseInt(raw, 10);
+        if (v >= BACKDROP_ALL && v < BACKDROPS.length) return v;
+      }
+    } catch (e) {}
+    return BACKDROP_ALL;
+  }
+
   // The row pieces spawn on, and the first row of the visible playfield. Rows above
   // it are the staging area the original masked off, so a piece slides down into
   // view rather than sitting in open space above the board.
@@ -141,6 +306,9 @@
   // How much darker the falling piece is than the settled balls. The piece used to
   // share their materials, so it could only be as bright as they are.
   const ACTIVE_BALL_DIM = 0.85;
+  // How much of each background picture is blacked out before it is drawn: 0 is
+  // the picture as painted, 1 is the plain backdrop.
+  const BACKDROP_DIM = 0.45;
 
   // Cruise starfield. Coordinates are camera space: x and y across the view, z
   // negative into the screen, stars travelling toward z = 0.
@@ -381,6 +549,10 @@
       ];
 
       this.matcher = true;
+      // Which ramp of shapes, colours and fall speed. Held on the engine rather
+      // than read from storage here so the tests and the attract demo can set it
+      // directly; the app seeds it from the stored setting when a game starts.
+      this.difficulty = DIFF_NORMAL;
       this.level = 1;
       this.score = 0;
       this.skill = 1;
@@ -388,6 +560,13 @@
       this.rows = 0;
       this.rowCount = 0;
       this.matchesDone = 0;
+      this.rcFire = 0;
+      this.boomKind = 0;
+      // Every line cleared this game, for the HUD. matchesDone and rows cannot
+      // be shown: checkAdvance takes each level's threshold off them.
+      this.lines = 0;
+      // The piece after this one, dealt ahead so NEXT can show it.
+      this.nextDeal = null;
       this.levCol = 0;
       this.shapes = 2;
       this.colors = 3;
@@ -409,6 +588,7 @@
 
       this.onPlaySound = null;
       this.onPopBalls = null;
+      this.onChain = null;     // (step) for each chain step of a landing, from 2
 
       this.applyBoardGeometry();
     }
@@ -464,16 +644,37 @@
       this.rows = 0;
       this.rowCount = 0;
       this.matchesDone = 0;
+      this.rcFire = 0;
+      this.boomKind = 0;
+      // Every line cleared this game, for the HUD. matchesDone and rows cannot
+      // be shown: checkAdvance takes each level's threshold off them.
+      this.lines = 0;
+      // The piece after this one, dealt ahead so NEXT can show it.
+      this.nextDeal = null;
       this.matchCount = 0;
       this.sameBonus = 0;
       this.endGame = false;
 
-      const attr = this.levAttr[this.level - 1];
-      this.shapes = attr.lShapes;
-      this.pauseTime = attr.lDelay;
-      this.colors = attr.lColors;
-
+      this.applyLevelAttr();
       this.initColorInc();
+    }
+
+    // Shapes and colours for the current level, from the difficulty ramp.
+    //
+    // The ramps are 21 entries and level 21s applies from there on, which is why
+    // the index clamps rather than running off the end -- levAttr itself goes to
+    // 50 and is still the source for pauseTime.
+    //
+    // pauseTime comes from levAttr and is dead data: the original assigned lDelay
+    // and never read it, and that is preserved rather than quietly repurposed.
+    applyLevelAttr() {
+      const d = (this.difficulty >= 0 && this.difficulty < LEV_SHAPES.length)
+        ? this.difficulty : DIFF_NORMAL;
+      const i = Math.min(Math.max(1, this.level), LEV_N) - 1;
+      this.shapes = LEV_SHAPES[d][i];
+      this.colors = LEV_COLORS[d][i];
+      const attr = this.levAttr[Math.min(this.level, this.levAttr.length) - 1];
+      this.pauseTime = attr ? attr.lDelay : 100;
     }
 
     initColorInc() {
@@ -502,28 +703,113 @@
       return this.ballMap[pts.x][pts.y].inMap;
     }
 
-    build() {
-      this.direction = Math.random() < 0.5 ? 5 : 2;
-      const numAvailableShapes = Math.min(7, Math.max(1, this.shapes));
+    // Everything random about a piece, decided one piece early so NEXT can show
+    // it: shape, colours, any special ball, spawn corner and side, and the turns
+    // and flip it arrives with. Drawn in the order build() always drew them, and
+    // the colour sequence advances exactly as before -- dealing ahead changes
+    // when a piece is decided, not what is dealt. The one difference is that the
+    // pile-height and level tests see the board a piece earlier.
+    dealPiece() {
+      const direction = Math.random() < 0.5 ? 5 : 2;
+      const image = [0, 0, 0, 0];
+      // Adaptive pieces: once the pile reaches the top of the playfield, deal only
+      // the first three shapes. The later ones -- the hooks especially -- need room
+      // to turn, and a board that high has none, so the game stops handing out
+      // pieces that cannot be placed. Invisible by design: no announcement, the
+      // deal just gets kinder when it has to.
+      const high = this.pileIsHigh();
+      const cap = high ? ADAPT_SHAPES : 7;
+      const numAvailableShapes = Math.min(cap, Math.max(1, this.shapes));
       const config = Math.floor(Math.random() * numAvailableShapes) % 7;
       const pos = Math.floor(Math.random() * 4);
-      this.oddballz.shapeConfig = config;
 
       if (this.matcher) {
         for (let i = 0; i <= 3; i++) {
           if (i === 0) {
-            this.oddballz.image[i] = (this.colorCount[i] % this.colors) + 1;
+            image[i] = (this.colorCount[i] % this.colors) + 1;
           } else {
-            this.oddballz.image[i] = (Math.floor(this.colorCount[i] / (this.colorInc[i] - 1)) % this.colors) + 1;
+            image[i] = (Math.floor(this.colorCount[i] / (this.colorInc[i] - 1)) % this.colors) + 1;
           }
           this.colorCount[i] += this.colorInc[i];
         }
       } else {
         const sameColor = config < 6 ? config + 1 : Math.floor(Math.random() * 6) + 1;
         for (let i = 0; i <= 3; i++) {
-          this.oddballz.image[i] = sameColor;
+          image[i] = sameColor;
         }
       }
+
+      // Now and then, one of the special balls. Nothing before SPECIAL_LEVEL, so
+      // the first couple of levels teach the plain game; after that one piece in
+      // SPECIAL_ODDS carries one. With the pile high the odds shorten and the
+      // choice narrows to the kinds that make room, which is the one moment a
+      // player most needs the help -- the same test the adaptive shape cap uses.
+      if (this.level >= SPECIAL_LEVEL &&
+          Math.floor(Math.random() * (high ? SPECIAL_ODDS_HI : SPECIAL_ODDS)) === 0) {
+        if (!this.matcher) {
+          // Row Build gets bombs only. Colour carries no meaning in this mode --
+          // rows go when they fill -- so a joker has nothing to be wild about,
+          // and a sweep would only do what the mode already does.
+          for (let i = 0; i <= 3; i++) image[i] = BOMB;
+        } else {
+          const kinds = (this.level >= STONE_LEVEL)
+            ? [JOKER, BOMB, RC_BASE, STONE]
+            : [JOKER, BOMB, RC_BASE];
+          const kind = high
+            ? SPECIAL_HI_KIND[Math.floor(Math.random() * SPECIAL_HI_KIND.length)]
+            : kinds[Math.floor(Math.random() * kinds.length)];
+          const pick = Math.floor(Math.random() * 4);
+          if (kind === BOMB) {
+            // All four balls the bomb, on one cell (collapsed after the spawn
+            // transforms, below). Where it lands is the whole of the decision, so
+            // there is nothing for a shape to add.
+            for (let i = 0; i <= 3; i++) image[i] = BOMB;
+          } else if (kind === RC_BASE) {
+            // A solid piece of one colour with one ball charged: it plays exactly
+            // as that colour, so the sweep is a reward for a match rather than a
+            // thing to aim at separately.
+            const c = image[pick];
+            for (let i = 0; i <= 3; i++) image[i] = c;
+            image[pick] = RC_BASE | c;
+          } else {
+            image[pick] = kind;
+          }
+        }
+      }
+
+      const rotCount = Math.floor(Math.random() * 6);
+      const flip = Math.random() < 0.5;
+      return { direction, config, pos, image, rotCount, flip };
+    }
+
+    // The next piece as NEXT draws it: each ball's offset and value, turned and
+    // flipped the way it will arrive. The same arithmetic transform() applies,
+    // without a board -- the piece spawns in the open staging rows, where the
+    // transforms do not meet anything.
+    nextPreview() {
+      const d = this.nextDeal;
+      if (!d) return null;
+      let rel = [{ x: 0, y: 0 }];
+      for (let i = 1; i <= 3; i++) {
+        const o = (this.ballShapes[d.config] && this.ballShapes[d.config][i - 1]) || { x: 0, y: 0 };
+        rel.push({ x: o.x, y: o.y });
+      }
+      for (let k = 0; k < d.rotCount; k++) rel = rel.map(r => ({ x: r.x - r.y, y: r.x }));
+      if (d.flip) {
+        const out = rel.every(r => r.x >= -2 && r.x <= 2 && r.y >= -2 && r.y <= 2);
+        if (out) rel = rel.map(r => ({ x: this.flipX[r.y + 2][r.x + 2].x, y: this.flipX[r.y + 2][r.x + 2].y }));
+      }
+      if (d.image[0] === BOMB) rel = rel.map(() => ({ x: 0, y: 0 }));
+      return rel.map((r, i) => ({ x: r.x, y: r.y, v: d.image[i] }));
+    }
+
+    build() {
+      const d = this.nextDeal || this.dealPiece();
+      this.nextDeal = this.dealPiece();
+      this.direction = d.direction;
+      const config = d.config, pos = d.pos;
+      this.oddballz.shapeConfig = config;
+      for (let i = 0; i <= 3; i++) this.oddballz.image[i] = d.image[i];
 
       this.oddballz.map[0].x = this.startPos[pos].x;
       this.oddballz.map[0].y = this.startPos[pos].y;
@@ -552,14 +838,24 @@
         this.targetRel[i] = { x: this.oddballz.rel[i].x, y: this.oddballz.rel[i].y };
       }
 
-      const rotCount = Math.floor(Math.random() * 6);
-      for (let i = 0; i < rotCount; i++) this.transform(this.rotCW);
-      if (Math.random() < 0.5) this.transform(this.flipX);
+      for (let i = 0; i < d.rotCount; i++) this.transform(this.rotCW);
+      if (d.flip) this.transform(this.flipX);
 
       // Re-sync activeFloatPos/targetFloatX/activeRel/targetRel after initial transforms so shape is crisp
       this.activeFloatPos.x = this.oddballz.map[0].x;
       this.activeFloatPos.y = this.oddballz.map[0].y;
       this.targetFloatX = this.oddballz.map[0].x;
+
+      // A bomb piece is its four balls on one cell: collapsed here, after the
+      // spawn transforms, so no rotation can pull it apart.
+      if (this.oddballz.image[0] === BOMB) {
+        for (let i = 1; i <= 3; i++) {
+          this.oddballz.rel[i].x = 0;
+          this.oddballz.rel[i].y = 0;
+          this.oddballz.map[i].x = this.oddballz.map[0].x;
+          this.oddballz.map[i].y = this.oddballz.map[0].y;
+        }
+      }
 
       for (let i = 0; i <= 3; i++) {
         if (this.activeRel) {
@@ -573,6 +869,7 @@
       }
 
       this.isZipping = false;
+      this.lockTimer = 0;
       this.ballCount++;
     }
 
@@ -610,10 +907,11 @@
       // more forgiving ones -- so this is not normalised by board width.
       //
       // The slope was 0.12 and uncapped, which reached 6.9x by level 50 and undid
-      // the stretched colour ramp well before then. At 0.08 it tracks the colour
-      // curve, and the ceiling turns the late game into a demanding steady state
-      // rather than a wall. The cap is a feel judgement, not a derived number.
-      const baseSpeed = Math.min(2.6, 1.0 + (this.level - 1) * 0.08);
+      // the stretched colour ramp well before then. The step is now per difficulty
+      // (FALL_STEP), and Hard keeps the 0.08 and the 2.60 ceiling this game has
+      // always used, so a Hard game falls exactly as every game did before the
+      // setting existed. Easy and Relaxed level off at 1.75 instead.
+      const baseSpeed = fallSpeedFor(this.level, this.difficulty);
       const speed = this.isZipping ? 35.0 : baseSpeed;
 
       // Direction 2 = down-left (Y+1), Direction 5 = down-right (X+1, Y+1)
@@ -646,6 +944,32 @@
       }
 
       if (landingRowY !== -1) {
+        // --- Lock delay -------------------------------------------------
+        //
+        // Blocked below is no longer the same as landed. The piece comes to rest on
+        // its row and waits LOCK_DELAY_S, during which moves, turns and flips all
+        // still work -- which is the whole point: it buys the slide into a tight gap
+        // that was impossible when a touch meant an immediate stamp.
+        //
+        // The collision test above re-runs every frame while it waits, so if a move
+        // opens the row below, landingRowY comes back -1, control falls through to
+        // the fall path and the piece carries on down. The timer resets only there,
+        // on actually falling -- shuffling sideways while still blocked does not
+        // buy more time, or a piece could be held up indefinitely.
+        //
+        // A zip locks at once: having asked for the piece to slam down, being made
+        // to wait for it is the opposite of what the button is for.
+        if (!this.isZipping) {
+          const restX = isDownRight
+            ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
+            : Math.round(this.targetFloatX);
+          this.activeFloatPos.x = restX;
+          this.activeFloatPos.y = landingRowY;
+          this.targetFloatX = restX;
+          this.lockTimer = (this.lockTimer || 0) + dt;
+          if (this.lockTimer < LOCK_DELAY_S) return false;
+        }
+
         const targetX = isDownRight
           ? Math.round(this.targetFloatX + (landingRowY - curFloatY))
           : Math.round(this.targetFloatX);
@@ -689,7 +1013,9 @@
         return true;
       }
 
-      // No collision — advance smoothly
+      // No collision — advance smoothly. Falling is also what clears the lock
+      // delay: see the landing branch above.
+      this.lockTimer = 0;
       this.activeFloatPos.y = nextFloatY;
       if (isDownRight) {
         this.activeFloatPos.x += speed * dt;
@@ -1012,9 +1338,15 @@
                 }
                 flipGate = !flipGate;
 
+                const wentLeft = (chosenTarget === p1);
                 this.ballMap[current.x][current.y].bzMap = 0;
                 current = chosenTarget;
-                this.ballMap[current.x][current.y].bzMap = saveColor;
+                // A stone that FALLS becomes a fallen stone, tagged with the step
+                // it took: it will crush the ball it lands against, and which of
+                // the two cells below that is depends on the way it came.
+                this.ballMap[current.x][current.y].bzMap = isStone(saveColor)
+                  ? (wentLeft ? ZSTONE_L : ZSTONE_R)
+                  : saveColor;
                 hexPath.push({ x: current.x, y: current.y });
               }
 
@@ -1037,15 +1369,124 @@
       return noneDropped;
     }
 
+    // Everything the special balls do that is not matching, run as the first step
+    // of every resolve pass: bombs go off, a fallen stone crushes what it came
+    // down on, a stone resting at an edge crumbles, and a sweep armed last pass
+    // takes the bottom row. Returns the number of balls cleared.
+    //
+    // One pass per effect rather than all at once, because each of them can set up
+    // the next: a bomb uncovers a stone, the stone falls and crushes, the crush
+    // drops a line into place. checkMatches keeps going until a pass changes
+    // nothing, so the cascade resolves itself without this needing to recurse.
+    bombBlast() {
+      const mark = new Map();
+      const key = (x, y) => x + '_' + y;
+      // -1 outside the board, so a wall is distinguishable from an empty cell --
+      // which is the whole of the stone crumble test.
+      const at = (x, y) => (this.checkInMap({ x: x, y: y }) ? this.ballMap[x][y].bzMap : -1);
+      const put = (x, y) => {
+        const v = at(x, y);
+        if (v > 0) mark.set(key(x, y), { x: x, y: y, color: v });
+      };
+      const step = (x, y, d) => { const p = { x: x, y: y }; moveInDirection(p, d); return p; };
+
+      this.boomKind = 0;           // 0 a stone alone, 1 a sweep, 2 a bomb
+
+      if (this.rcFire) {
+        this.rcFire = 0;
+        this.boomKind = 1;
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+          const v = at(x, BOARD_BOUNDS.MAX_Y);
+          if (v > 0) {
+            // A charged ball caught in the sweep goes quietly, as its own colour:
+            // let one sweep arm the next and a single lucky match empties the
+            // board from the bottom up.
+            this.ballMap[x][BOARD_BOUNDS.MAX_Y].bzMap = ballColor(v);
+            put(x, BOARD_BOUNDS.MAX_Y);
+          }
+        }
+      }
+
+      for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y; y++) {
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+          const v = at(x, y);
+
+          if (v === STONE) {
+            // Resting against a wall or the floor, held up or not: it crumbles.
+            // Without this a stone can come to rest somewhere nothing will ever
+            // reach it again -- no match can touch it and no fall can move it --
+            // and the board slowly silts up with dead cells.
+            if (at(x - 1, y) < 0 || at(x + 1, y) < 0 ||
+                at(x, y + 1) < 0 || at(x + 1, y + 1) < 0) put(x, y);
+
+          } else if (v === ZSTONE_L || v === ZSTONE_R) {
+            // It has fallen, so it crushes -- and goes itself in the doing. Still
+            // in mid-air with both cells below free, and it waits: checkMatches
+            // settles between passes, so the next pass catches it at rest.
+            if (at(x, y + 1) === 0 && at(x + 1, y + 1) === 0) continue;
+            put(x, y);
+            // The ball in the direction it last stepped, else the other one under
+            // it. Neither, and it crumbles alone.
+            let d = (v === ZSTONE_L) ? 2 : 5;
+            let t = step(x, y, d);
+            if (at(t.x, t.y) <= 0) t = step(x, y, 7 - d);
+            put(t.x, t.y);
+
+          } else if (v === BOMB) {
+            this.boomKind = 2;
+            put(x, y);
+            for (let d = 0; d < 6; d++) {
+              const t = step(x, y, d);
+              put(t.x, t.y);
+            }
+          }
+        }
+      }
+
+      if (mark.size === 0) return 0;
+
+      const list = Array.from(mark.values());
+      if (this.onPopBalls) this.onPopBalls(list);
+      for (const m of list) {
+        // A charged ball caught in a blast arms the sweep just as a match does.
+        if (isCharged(this.ballMap[m.x][m.y].bzMap)) this.rcFire = 1;
+        this.ballMap[m.x][m.y].bzMap = 0;
+      }
+      if (this.onPlaySound) this.onPlaySound(this.boomKind ? 'boom' : 'thud');
+      return list.length;
+    }
+
     matchColors() {
       const matchList = [];
 
-      const rowLength = (startPts, dir, saveColor) => {
+      // A cell belongs to a run of col if it IS that colour -- a charged row
+      // clearer carries its colour in the low nibble, so it needs no special
+      // case -- or if it is a joker, which takes the colour of the run it is in.
+      // Empty cells, bombs and stones all fail this: 0, 8 and 10..13 are none of
+      // 1..6, and a stone is deliberately immune to jokers too.
+      const inRun = (c, col) => ballColor(c) === col || c === JOKER;
+
+      // What colour a run from (x, y) along dir is: the cell's own, or, past any
+      // jokers at its head, the first real ball's. JOKER if none comes, which is
+      // what lets a line of jokers alone match itself.
+      const runColour = (x, y, dir) => {
+        const curr = { x: x, y: y };
+        let c = this.ballMap[x][y].bzMap;
+        let guard = 40;
+        while (c === JOKER && guard-- > 0) {
+          moveInDirection(curr, dir);
+          if (!this.checkInMap(curr)) return JOKER;
+          c = this.ballMap[curr.x][curr.y].bzMap;
+        }
+        return isInert(c) ? JOKER : ballColor(c);
+      };
+
+      const rowLength = (startPts, dir, col) => {
         let sameCount = 1;
         let curr = { x: startPts.x, y: startPts.y };
         while (true) {
           moveInDirection(curr, dir);
-          if (this.checkInMap(curr) && this.ballMap[curr.x][curr.y].bzMap === saveColor) {
+          if (this.checkInMap(curr) && inRun(this.ballMap[curr.x][curr.y].bzMap, col)) {
             sameCount++;
           } else {
             break;
@@ -1054,12 +1495,15 @@
         return sameCount;
       };
 
-      const add2List = (startPts, rdir, saveColor) => {
+      const add2List = (startPts, rdir, col) => {
         this.matchesDone++;
         this.matchCount++;
+        this.lines++;
         let curr = { x: startPts.x, y: startPts.y };
-        while (this.checkInMap(curr) && this.ballMap[curr.x][curr.y].bzMap === saveColor) {
-          matchList.push({ x: curr.x, y: curr.y, color: saveColor });
+        while (this.checkInMap(curr) && inRun(this.ballMap[curr.x][curr.y].bzMap, col)) {
+          // The cell's own value, not the run's colour: the renderer pops what was
+          // actually there, so a joker in a line still pops as a joker.
+          matchList.push({ x: curr.x, y: curr.y, color: this.ballMap[curr.x][curr.y].bzMap });
           moveInDirection(curr, rdir);
         }
       };
@@ -1069,15 +1513,17 @@
           const startPts = { x: x, y: y };
           const saveColor = this.ballMap[x][y].bzMap;
 
-          if (this.checkInMap(startPts) && saveColor !== 0) {
+          // A bomb or a stone never starts a run, and never joins one.
+          if (this.checkInMap(startPts) && !isInert(saveColor)) {
             [4, 0, 3].forEach((dir, idx) => {
               const checkPrevDir = [1, 5, 2][idx];
+              const col = runColour(x, y, dir);
               const prev = { x: x, y: y };
               moveInDirection(prev, checkPrevDir);
-              if (!this.checkInMap(prev) || this.ballMap[prev.x][prev.y].bzMap !== saveColor) {
-                const len = rowLength(startPts, dir, saveColor);
+              if (!this.checkInMap(prev) || !inRun(this.ballMap[prev.x][prev.y].bzMap, col)) {
+                const len = rowLength(startPts, dir, col);
                 if (len >= 5) {
-                  add2List(startPts, dir, saveColor);
+                  add2List(startPts, dir, col);
                   this.sameBonus += lineLengthBonus(len - 5);
                 }
               }
@@ -1085,12 +1531,13 @@
 
             [11, 9, 10].forEach((dir, idx) => {
               const checkPrevDir = [6, 8, 7][idx];
+              const col = runColour(x, y, dir);
               const prev = { x: x, y: y };
               moveInDirection(prev, checkPrevDir);
-              if (!this.checkInMap(prev) || this.ballMap[prev.x][prev.y].bzMap !== saveColor) {
-                const len = rowLength(startPts, dir, saveColor);
+              if (!this.checkInMap(prev) || !inRun(this.ballMap[prev.x][prev.y].bzMap, col)) {
+                const len = rowLength(startPts, dir, col);
                 if (len >= 3) {
-                  add2List(startPts, dir, saveColor);
+                  add2List(startPts, dir, col);
                   this.sameBonus += lineLengthBonus(len - 3);
                 }
               }
@@ -1102,6 +1549,11 @@
       if (matchList.length > 0) {
         if (this.onPopBalls) this.onPopBalls(matchList);
         for (const m of matchList) {
+          // A charged row clearer taken in by a match arms the sweep, which fires
+          // on the next resolve pass rather than here: the match has to finish and
+          // the board settle first, or the sweep would clear balls still falling
+          // into the bottom row.
+          if (isCharged(this.ballMap[m.x][m.y].bzMap)) this.rcFire = 1;
           this.ballMap[m.x][m.y].bzMap = 0;
         }
         if (this.onPlaySound) this.onPlaySound('pop');
@@ -1185,15 +1637,32 @@
       let index = 0;
       let hasClearedRows = false;
       let noneDropped = false;
+      let blasted = 0;
+      // A chain, as the C64 build counts it: in Colour Match, each pass of a
+      // landing that clears something, from the second on -- balls that fell
+      // into a new match. Reported for the overlay only; nothing is scored for it.
+      let chain = 0;
 
       do {
-        if (this.matcher) {
+        // Blasts come first and, when one happens, instead of matching: the board
+        // a bomb leaves is not the board the match walk was about to look at, and
+        // running both in one pass would score lines that the blast had already
+        // taken apart. The pass after it matches as usual.
+        blasted = this.bombBlast();
+        if (blasted > 0) {
+          index = 0;
+          hasClearedRows = false;
+        } else if (this.matcher) {
           index = this.matchColors();
         } else {
           hasClearedRows = this.checkRows();
         }
+        if (this.matcher && (blasted > 0 || index > 0)) {
+          chain++;
+          if (chain >= 2 && this.onChain) this.onChain(chain);
+        }
         noneDropped = this.checkGaps();
-      } while (index > 0 || hasClearedRows || !noneDropped);
+      } while (index > 0 || hasClearedRows || blasted > 0 || !noneDropped);
     }
 
     checkAdvance() {
@@ -1203,6 +1672,7 @@
         const cnt = Math.min(this.rowCount, 10);
         this.score += Math.pow(2, cnt);
         this.rows += this.rowCount;
+        this.lines += this.rowCount;
         this.rowCount = 0;
       }
 
@@ -1259,12 +1729,22 @@
         // cascade into a burst of overlapping level-up sounds.
         if (this.onPlaySound) this.onPlaySound('levelup');
 
-        const attr = this.levAttr[this.level - 1];
-        this.shapes = attr.lShapes;
-        this.pauseTime = attr.lDelay;
-        this.colors = attr.lColors;
+        this.applyLevelAttr();
         this.initColorInc();
       }
+    }
+
+    // True once any settled ball sits in the top band of the playfield. Read by
+    // build() only -- it never changes a rule, just which shapes are offered.
+    pileIsHigh() {
+      const top = SPAWN_ROW;
+      const bottom = SPAWN_ROW + Math.round(ADAPT_DEPTH * BOARD_RATIO);
+      for (let y = top; y <= bottom; y++) {
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+          if (this.checkInMap({ x: x, y: y }) && this.ballMap[x][y].bzMap !== 0) return true;
+        }
+      }
+      return false;
     }
 
     checkGameOver() {
@@ -1280,6 +1760,1510 @@
       return false;
     }
   }  // --- 3. SOUND SYNTHESIS (128-STEP AMIGA TRACKER GAME SOUNDTRACK) ---
+  // --- 3a. THE C64 SONGS ---
+  //
+  // The C64 build's five songs, and two new ones in their format, as its music
+  // lab plays them (oddballz-c64's music/index.html): the song data verbatim, then the lab's own parser, its
+  // frame-by-frame player and its SID-style synth. Nothing here is the C64's
+  // integer player; the lab plays in fractional semitones, which is how the songs
+  // were written and judged, and the C64 port is the approximation of it.
+  //
+  // The synth runs in an AudioWorklet, generating as it plays. Rendering a song
+  // whole into a buffer, as the lab does, costs some 28 MB a song at 44.1 kHz --
+  // most of what iOS will give a page -- and seconds of work on a phone before a
+  // note sounds. The worklet holds only the song's register frames (about 1.5 MB)
+  // and costs a few percent of one core. It is built from a Blob URL so the game
+  // stays three files. Where worklets are unavailable, the old procedural
+  // soundtrack plays instead.
+  const SONGS = [];
+  const SONG_FRAME_HZ = 50;
+  const SONG_PAL_CLOCK = 985248;
+  // In a game, each song plays this many times round -- its first pass, then the
+  // loop part twice more -- before ALL moves to the next picture and its song.
+  // The C64 build's SONG_PLAYS.
+  const SONG_PLAYS = 3;
+  // The songs' level against the effects, applied after the synth. The lab's
+  // output at the default music volume measured RMS 0.085-0.10, against 0.045 for
+  // a match's pop and 0.016 for the procedural soundtrack: the songs would have
+  // buried the effects, which the C64 build deliberately sets louder than its
+  // music. At this they sit at about 0.03, between the two.
+  const SONG_LEVEL = 0.35;
+  // A song's own trim, inside the synth, for one that peaks over the clamp. The
+  // lab scales a finished song down whole when it peaks over 0.95 -- it keeps the
+  // balance inside the song, where clipping the peaks would not -- and only
+  // mothership does: measured peaks 1.031 at 44.1 kHz and 1.051 at 48 kHz, which
+  // the lab scales by 0.92 and 0.90. This is that, fixed, so it never clamps.
+  const SONG_TRIM = { mothership: 0.9 };
+  // The modern instruments' level, set against the SID synth's at SONG_LEVEL so
+  // switching style does not change how loud the music sits under the effects.
+  // Unscaled, nebula measured RMS 0.07 in its intro (the SID's 0.029) and 0.11
+  // in section A.
+  const MODERN_LEVEL = 0.35;
+
+  // ---- the songs, from oddballz-c64/music/songs/, copied as they stand ----
+
+  /* title.js - Title screen.
+   *
+   * The first thing heard, so catchy and bright, but in the same sci-fi voice as
+   * the picture songs. The idea is the name: a ball bouncing. The intro is one
+   * bouncing to rest (each hit quicker and lower, drums building under it), and
+   * every phrase of the hook ends in the same accelerating repeated note.
+   * C major with the flat seven (C Bb F C -- the "space adventure" lift), an
+   * A minor middle, 125 BPM. The intro plays once; the loop is A B A2.
+   * Format: see cyber.js.
+   */
+  SONGS.push({
+    id: 'title',
+    title: 'Title Screen',
+    speed: 6,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass + drums
+
+    instruments: {
+      tblip:  { adsr: [0, 6, 0, 0], wave: [['T', 12], ['T', 9], ['T', 6], ['T', 3], ['T', 0]] },
+      tlead:  { adsr: [2, 9, 7, 5], wave: [['S', 12], ['S', 0]], vib: [10, 0.2, 7], glide: 0.6 },
+                // (sawtooth and gentler since 12 Oct 2026 -- attack 2 slower,
+                // sustain 2 lower: the pulse leads whistled on the C64; the
+                // user's Q, as nebula's and cyber's)
+      tlead2: { adsr: [0, 9, 9, 5], wave: [['S', 12], ['S', 0]], vib: [10, 0.25, 7], glide: 0.6 },
+      tbass:  { adsr: [0, 7, 5, 3], wave: [['P', 12], ['P', 0]], pulse: [0x300, 0x40, 0x200, 0x900] },
+      tchord: { adsr: [0, 9, 4, 6], wave: [['P', 0]], pulse: [0x400, 0x30, 0x300, 0xC00], arpSpeed: 1,
+                filter: { mode: 'LP', res: 10, cutoff: [0x500, -0x18, 0x180, 0x7FF] } },
+      tswell: { adsr: [6, 11, 11, 8], wave: [['P', 0]], pulse: [0x600, 0x18, 0x300, 0xD00], arpSpeed: 1,
+                filter: { mode: 'LP', res: 11, cutoff: [0x100, 0x0C, 0x100, 0x700] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest1: '. . . . | . . . . | . . . . | . . . .',
+
+      // a ball dropped: gaps of 10, 7, 5, 4, 3, 2 rows, each hit a little lower
+      tBounce:
+        'C6:tblip . . . | . . . . | . . A5 . | . . . . ' +
+        '. G5 . . | . . E5 . | . . D5 . | . C5 . C5',
+
+      // hook (C Bb F C | C Bb F-G C); every fourth bar ends in the bounce
+      leadA:
+        'C5 . . . | . . G5 . | . . . E5 | . . G5 . ' +
+        'F5 . . . | . . D5 . | . . . F5 | . . Bb5 . ' +
+        'A5 . . . | . . . . | G5 . F5 . | . . C5 . ' +
+        'E5 . . . | . . . . | G5 . . . | G5 . G5 G5 ' +
+        'C5 . . . | . . G5 . | . . . E5 | . . G5 . ' +
+        'F5 . . . | . . D5 . | . . . F5 | . . Bb5 . ' +
+        'A5 . . . | . . C6 . | B5 . . . | . . D6 . ' +
+        'C6 . . . | . . . . | C5 . . . | C5 . C5 C5',
+      // middle (Am F Dm G | Am F Dm G): longer notes, then bounce back into the hook
+      leadB:
+        'E5 . . . | . . . . | A5 . . . | . . G5 . ' +
+        'F5 . . . | . . . . | C5 . . . | . . . . ' +
+        'D5 . . . | . . F5 . | . . A5 . | . . . . ' +
+        'G5 . . . | . . . . | . . . . | ^ . . . ' +
+        'E5 . . . | . . . . | A5 . . . | . . B5 . ' +
+        'C6 . . . | . . . . | A5 . . . | . . F5 . ' +
+        'A5 . . . | . . G5 . | . . F5 . | . . D5 . ' +
+        'B4 . . . | . . D5 . | G5 . . . | G5 . G5 G5',
+
+      // bass: bouncing octaves, drums between
+      tbBounce: 'K . C2:tbass C3 | S . C2 C3 | K C2 . C3 | S . C3 .',
+      tbFG:     'K . F2:tbass F3 | S . F2 F3 | K G2 . G3 | S . G3 .',
+      tbBuild:  'K . . . | K . . . | K . K . | S S S S',
+
+      // chords on C4, plucked 3+3+2
+      tMaj:  'C4~047:tchord . . C4~047 | . . C4~047 . | C4~047 . . C4~047 | . . C4~047 .',
+      tMin:  'C4~037:tchord . . C4~037 | . . C4~037 . | C4~037 . . C4~037 | . . C4~037 .',
+      tFG:   'F3~047:tchord . . F3~047 | . . F3~047 . | G3~047 . . G3~047 | . . G3~047 .',
+      tSwell:'C4~047:tswell . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['tBounce'],
+        v2: ['rest1', 'tbBuild'],
+        v3: ['rest1', 'tSwell'],
+      },
+      A: {
+        v1: ['leadA@tlead'],
+        v2: ['tbBounce', 'tbBounce-2', 'tbBounce+5', 'tbBounce', 'tbBounce', 'tbBounce-2', 'tbFG', 'tbBounce'],
+        v3: ['tMaj', 'tMaj-2', 'tMaj-7', 'tMaj', 'tMaj', 'tMaj-2', 'tFG', 'tMaj'],
+      },
+      B: {
+        v1: ['leadB@tlead'],
+        v2: ['tbBounce-3', 'tbBounce+5', 'tbBounce+2', 'tbBounce+7', 'tbBounce-3', 'tbBounce+5', 'tbBounce+2', 'tbBounce+7'],
+        v3: ['tMin-3', 'tMaj-7', 'tMin+2', 'tMaj-5', 'tMin-3', 'tMaj-7', 'tMin+2', 'tMaj-5'],
+      },
+      A2: {
+        v1: ['leadA@tlead2'],
+        v2: ['tbBounce', 'tbBounce-2', 'tbBounce+5', 'tbBounce', 'tbBounce', 'tbBounce-2', 'tbFG', 'tbBounce'],
+        v3: ['tMaj', 'tMaj-2', 'tMaj-7', 'tMaj', 'tMaj', 'tMaj-2', 'tFG', 'tMaj'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2'],
+    loopTo: 'A',
+  });
+
+  /* nebula.js - Deep Space Nebula (bg0). Began as the "Starbase" draft.
+   *
+   * Warm and safe: G major, four-note seventh chords arpeggiated at 25 Hz (softer
+   * than the 50 Hz shimmer), a round pulse-into-triangle bass on root and fifth,
+   * a relaxed singing lead. 107 BPM. Format: see cyber.js.
+   *
+   * The lead sawtooth, an octave below where its patterns are written (B3-B4).
+   * The user, 12 Oct 2026: "a weird whistle sound that is sorta irritating",
+   * all through, on the C64 (VICE, the lab's "Play as the C64 does"); the
+   * lead lowered first (version A of music/lab/nebula-versions.js), then, of
+   * three versions each taking one thing away -- the pulse's sweep, its
+   * vibrato, the pulse itself -- only sawtooth lost the whistle (G). Then,
+   * "a bit of harshness": gentler (the user's Q of music/lab's lead versions,
+   * as cyber's) -- attack 2 slower, sustain 2 lower.
+   *
+   * The chords fade a little after each strike (the user: "a bit too much ...
+   * constant trilling"; C4 first -- 12.5 Hz, sustain 3 -- then, having played
+   * it, C5 of music/lab/nebula-versions.js: 25 Hz as before, sustain 5, was 8).
+   *
+   * Arp digits: maj7 047b, m7 037a, dominant 7 047a, major 047.
+   */
+  SONGS.push({
+    id: 'nebula',
+    title: 'Deep Space Nebula',
+    speed: 7,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass + drums
+
+    instruments: {
+      slead:  { adsr: [4, 9, 8, 6], wave: [['S', 0]], vib: [16, 0.2, 9], glide: 0.5 },
+      slead2: { adsr: [3, 9, 8, 6], wave: [['S', 12], ['S', 0]], vib: [12, 0.25, 8], glide: 0.5 },
+      sbass:  { adsr: [0, 8, 6, 5], wave: [['P', 0], ['T', 0]], pulse: [0x800, 0, 0x800, 0x800] },
+      schord: { adsr: [2, 10, 5, 8], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 2,
+                filter: { mode: 'LP', res: 8, cutoff: [0x500, -0x06, 0x280, 0x7FF] } },
+      // the chords section by section (the user, 12 Oct 2026, V4 of
+      // music/lab/nebula-versions.js: "it makes the song nicer"): B soft held
+      // pads -- a slow swell, the trill slower, a long fade. (A2 had short
+      // stabs, sstab, too: "sounds too plain" -- A's chords again, W1.)
+      spad:   { adsr: [6, 10, 9, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 4,
+                filter: { mode: 'LP', res: 8, cutoff: [0x500, -0x06, 0x280, 0x7FF] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Gmaj7 Em7 Cmaj7 D | Gmaj7 Em7 Am7 D)
+      leadA:
+        'B4 . . . | . . . . | D5 . . . | . . G5 . ' +
+        'F#5 . . . | . . . . | E5 . . . | . . . . ' +
+        'G5 . . . | . . E5 . | . . . . | D5 . . . ' +
+        'F#5 . . . | . . . . | A5 . . . | . . . . ' +
+        'B5 . . . | . . . . | A5 . . . | G5 . . . ' +
+        'F#5 . . . | . . G5 . | . . . . | E5 . . . ' +
+        'E5 . . . | . . D5 . | . . C5 . | . . . . ' +
+        'D5 . . . | . . . . | . . . . | ^ . . .',
+      // lead B (Cmaj7 Bm7 Am7 D | Em7 Cmaj7 Am7 D)
+      leadB:
+        'E5 . . . | . . . . | G5 . . . | . . . . ' +
+        'F#5 . . . | . . . . | D5 . . . | . . . . ' +
+        'E5 . . . | . . . . | C5 . . . | . . D5 . ' +
+        'A4 . . . | . . . . | . . . . | . . . . ' +
+        'G5 . . . | . . . . | F#5 . . . | . . E5 . ' +
+        '>G5 . . . | . . . . | E5 . . . | . . . . ' +
+        'A5 . . . | . . G5 . | . . E5 . | . . D5 . ' +
+        'F#5 . . . | . . . . | . . . . | ^ . . .',
+
+      // bass + drums on G: root and fifth, kick on 1 and 3, snare on 2 and 4
+      sbWalk: 'K . G2:sbass . | S . D3 . | K . G2 G3 | S . D3 .',
+      sbSoft: 'G2:sbass . . . | . . . . | D3 . . . | . . . .',
+
+      // chords, on G3: struck on 1 and the "and" of 2 (the instrument the
+      // section's: schord, spad in B)
+      sMaj7: 'G3~047b . . . | . . G3~047b . | . . . . | . . . .',
+      sMin7: 'G3~037a . . . | . . G3~037a . | . . . . | . . . .',
+      sDom:  'G3~047a . . . | . . G3~047a . | . . . . | . . . .',
+      sMaj:  'G3~047 . . . | . . G3~047 . | . . . . | . . . .',
+
+      // the break (the user, 12 Oct 2026: "the only song without a break";
+      // BR3 of music/lab/nebula-versions.js): a slow melody over G Em C D, the
+      // bass soft, a drum fill into A
+      leadBreak:
+        'D5 . . . | . . . . | . . . . | . . . . ' +
+        'B4 . . . | . . . . | G4 . . . | . . . . ' +
+        'E5 . . . | . . . . | . . . . | . . . . ' +
+        'F#5 . . . | . . E5 . | D5 . . . | ^ . . .',
+      sbFill: 'K . D3:sbass . | S . . . | K K S . | S S S S',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['rest2', 'sbSoft-7', 'sbSoft-5'],
+        v3: ['sMaj7@schord', 'sMin7-3@schord', 'sMaj7+5@schord', 'sMaj-5@schord'],
+      },
+      A: {
+        v1: ['leadA-12@slead'],
+        v2: ['sbWalk', 'sbWalk-3', 'sbWalk-7', 'sbWalk-5', 'sbWalk', 'sbWalk-3', 'sbWalk+2', 'sbWalk-5'],
+        v3: ['sMaj7@schord', 'sMin7-3@schord', 'sMaj7+5@schord', 'sMaj-5@schord', 'sMaj7@schord', 'sMin7-3@schord', 'sMin7+2@schord', 'sDom-5@schord'],
+      },
+      B: {
+        v1: ['leadB-12@slead'],
+        v2: ['sbWalk-7', 'sbWalk+4', 'sbWalk+2', 'sbWalk-5', 'sbWalk-3', 'sbWalk-7', 'sbWalk+2', 'sbWalk-5'],
+        v3: ['sMaj7+5@spad', 'sMin7+4@spad', 'sMin7+2@spad', 'sMaj-5@spad', 'sMin7-3@spad', 'sMaj7+5@spad', 'sMin7+2@spad', 'sDom-5@spad'],
+      },
+      A2: {
+        v1: ['leadA-12@slead2'],
+        v2: ['sbWalk', 'sbWalk-3', 'sbWalk-7', 'sbWalk-5', 'sbWalk', 'sbWalk-3', 'sbWalk+2', 'sbWalk-5'],
+        v3: ['sMaj7@schord', 'sMin7-3@schord', 'sMaj7+5@schord', 'sMaj-5@schord', 'sMaj7@schord', 'sMin7-3@schord', 'sMin7+2@schord', 'sDom-5@schord'],
+      },
+      Break: {
+        v1: ['leadBreak-12@slead'],
+        v2: ['sbSoft', 'sbSoft-3', 'sbSoft-7', 'sbFill-5'],
+        v3: ['sMaj7@schord', 'sMin7-3@schord', 'sMaj7+5@schord', 'sMaj-5@schord'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* cyber.js - Cyber Conduit Spaceframe (bg1). Began as the in-game draft.
+   *
+   * Aim: Star Control 2 -- minor-key tracker music, 50 Hz arpeggio chords, a
+   * driving bass with the drums threaded between its notes, a singing pulse lead
+   * with vibrato and the odd glide. D minor, 125 BPM.
+   *
+   * Voices, as on the C64:
+   *   v1  lead
+   *   v2  bass + drums (K kick, S snare, played between the bass notes)
+   *   v3  arpeggio chords, the only voice through the filter -- the voice the
+   *       game's sound effects use, so the tune must still stand without it
+   *
+   * FORMAT (read by index.html; the C64 converter will read the same thing)
+   *
+   *   speed        frames a row at 50 Hz. 6 = 8.33 rows a second; with 4 rows a
+   *                beat and 16 a bar that is 125 BPM, 1.92 s a bar.
+   *   instruments  name -> {
+   *     adsr   [A, D, S, R], SID values 0-15
+   *     wave   one step a frame, the last held (or `loop` back to an index):
+   *            [waveform, pitch] -- waveform 'T' triangle, 'S' saw, 'P' pulse,
+   *            'N' noise, '-' silent; pitch a semitone offset from the note, or
+   *            '=C5' an absolute note (drums)
+   *     pulse  [start, speed, min, max], 12-bit width, sweeps back and forth
+   *     vib    [delay frames, depth semitones, period frames]
+   *     arp    default arpeggio offsets, cycled every `arpSpeed` frames
+   *     glide  semitones a frame for '>' notes
+   *     filter {mode 'LP'|'BP'|'HP', res 0-15, cutoff [start, per frame, min, max]}
+   *            11-bit cutoff; the SID has one filter, the voice that last played
+   *            a filtered instrument owns it. `keep: true` carries the cutoff
+   *            on across notes of the same instrument instead of restarting it;
+   *            `bounce: true` sweeps back and forth between min and max
+   *   }
+   *   patterns     name -> rows, whitespace separated, '|' ignored:
+   *     .      nothing new
+   *     ^      release (gate off)
+   *     C4     a note (C4 = middle C; sharps C#4, flats Bb3), with suffixes
+   *            :inst  switch instrument (sticks for the voice)
+   *            ~037   arpeggio offsets in hex digits, 50 Hz chord
+   *            prefix >  glide from the previous pitch, / change pitch legato
+   *     K S H  drum hit (does not change the voice's instrument)
+   *   sections     name -> { v1: [...], v2: [...], v3: [...] } lists of patterns
+   *                as 'name', 'name+5' / 'name-4' (transpose) or 'name@inst'
+   *                (instrument at the pattern's start). Voices in a section
+   *                must add up to the same number of rows.
+   *   order, loopTo  sections played in turn, then from loopTo forever
+   *   fx           the voice the game's effects borrow, { voice: 1-3, hand:
+   *                'strike' (its held note struck again after) | 'next' (quiet
+   *                till its next note) }; a section's own fx overrides the
+   *                song's. Without one, voice 3 and 'strike'.
+   *
+   * A new note is preceded by a two-frame hard restart (gate off, fast release),
+   * as a real C64 player does, so what is heard here is what the port plays.
+   */
+  SONGS.push({
+    id: 'cyber',
+    title: 'Cyber Conduit Spaceframe',
+    speed: 6,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass + drums
+
+    instruments: {
+      lead:   { adsr: [3, 9, 8, 5], wave: [['S', 0]], vib: [14, 0.22, 8], glide: 0.6 },
+                // (sawtooth since 12 Oct 2026: the pulse lead whistled on the
+                // C64 -- the user; as nebula's lead), both leads gentler
+                // (attack 2 slower, sustain 2 lower: the user's Q, "a bit of
+                // harshness")
+      lead2:  { adsr: [3, 9, 8, 5], wave: [['S', 12], ['S', 0]], vib: [12, 0.28, 7], glide: 0.6 },
+      bass:   { adsr: [0, 8, 5, 4], wave: [['P', 12], ['P', 0]], pulse: [0x300, 0x40, 0x200, 0x900] },
+      bassPad:{ adsr: [2, 11, 11, 9], wave: [['T', 0]] },   // the break's: triangle (14 Oct 2026, the
+                // user's T: the sweeping pulse sounded weird)
+      chord:  { adsr: [0, 9, 4, 6], wave: [['P', 0]], pulse: [0x400, 0x30, 0x300, 0xC00], arpSpeed: 1,
+                filter: { mode: 'LP', res: 10, cutoff: [0x480, -0x14, 0x100, 0x7FF] } },
+      swell:  { adsr: [9, 11, 12, 10], wave: [['P', 0]], pulse: [0x600, 0x18, 0x300, 0xD00], arpSpeed: 1,
+                filter: { mode: 'LP', res: 12, cutoff: [0x080, 0x05, 0x080, 0x500] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },   // (a hat, H, was never played: out, 3 Oct 2026 -- its 20 bytes)
+
+    patterns: {
+      rest1: '. . . . | . . . . | . . . . | . . . .',
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      rel1:  '^ . . . | . . . . | . . . . | . . . .',
+
+      // lead, section A (Dm Dm Bb C | Dm Dm Gm A)
+      leadA:
+        'A4 . . . | . . D5 . | E5 . . . | F5 . E5 . ' +
+        'D5 . . . | . . . . | . . . . | C5 . A4 . ' +
+        'F5 . . . | . . D5 . | Bb4 . . . | C5 . D5 . ' +
+        'E5 . . . | . . . . | . . . . | D5 . C5 . ' +
+        'A4 . . . | . . D5 . | E5 . . . | F5 . G5 . ' +
+        '>A5 . . . | . . . . | G5 . F5 . | E5 . F5 . ' +
+        'D5 . . . | . . Bb4 . | G5 . . . | . . F5 . ' +
+        'E5 . . . | . . . . | C#5 . . . | A4 . . .',
+
+      // lead, section B (Bb C Am Dm | Bb C Gm A)
+      leadB:
+        'F5 . . . | . . . . | . . . . | G5 . F5 . ' +
+        'E5 . . . | . . . . | G5 . . . | C5 . . . ' +
+        'E5 . . . | . . . . | . . . . | D5 . C5 . ' +
+        'D5 . . . | . . . . | . . . . | . . ^ . ' +
+        'F5 . . . | . . G5 . | >A5 . . . | . . . . ' +
+        'G5 . . . | . . . . | E5 . . . | G5 . . . ' +
+        'Bb5 . . . | . . . . | A5 . . . | G5 . . . ' +
+        'A5 . . . | . . . . | G5 . F5 . | E5 . C#5 .',
+
+      // lead, the break (Dm Bb Gm A): two bars out, then a lead-in back to A
+      leadBreak:
+        '^ . . . | . . . . | . . . . | . . . . ' +
+        '. . . . | . . . . | . . . . | . . . . ' +
+        'D5 . . . | . . . . | G5 . . . | . . . . ' +
+        'E5 . . . | . . . . | C#5 . . . | E5 . . .',
+
+      // bass + drums, one bar on D: kick, bass, snare, octave, kick, bass bass, snare, octave
+      bassDrive: 'K . D2:bass . | S . D3 . | K . D2 D2 | S . D3 .',
+      bassIntro: 'K . D2:bass . | K . D2 . | K . D2 . | K . D2 .',
+      bassFill:  'K . D2:bass . | K . D2 . | K . D2 . | S S S S',
+      bassBreak: 'D2:bassPad . . . | . . . . | . . . . | . . . .',
+
+      // chords: stabs on 3+3+2 through the bar, the filter plucking each one
+      arpMin:  'D4~037:chord . . D4~037 | . . D4~037 . | D4~037 . . D4~037 | . . D4~037 .',
+      arpMaj:  'D4~047:chord . . D4~047 | . . D4~047 . | D4~047 . . D4~047 | . . D4~047 .',
+      arpSwell:'D4~037:swell . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      holdMin: 'D4~037:swell . . . | . . . . | . . . . | . . . .',
+      holdMaj: 'D4~047:swell . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        fx: { voice: 1, hand: 'strike' },   // the lead rests here: the effects take it,
+                                           // not the bass intro (the user, 3 Oct 2026)
+        v1: ['rest2', 'rest2'],
+        v2: ['rest2', 'bassIntro-4', 'bassFill-2'],
+        v3: ['arpSwell', 'arpMaj-4', 'arpMaj-2'],
+      },
+      A: {
+        v1: ['leadA@lead'],
+        v2: ['bassDrive', 'bassDrive', 'bassDrive-4', 'bassDrive-2', 'bassDrive', 'bassDrive', 'bassDrive-7', 'bassDrive-5'],
+        v3: ['arpMin', 'arpMin', 'arpMaj-4', 'arpMaj-2', 'arpMin', 'arpMin', 'arpMin-7', 'arpMaj-5'],
+      },
+      B: {
+        v1: ['leadB@lead'],
+        v2: ['bassDrive-4', 'bassDrive-2', 'bassDrive-5', 'bassDrive', 'bassDrive-4', 'bassDrive-2', 'bassDrive-7', 'bassDrive-5'],
+        v3: ['arpMaj-4', 'arpMaj-2', 'arpMin-5', 'arpMin', 'arpMaj-4', 'arpMaj-2', 'arpMin-7', 'arpMaj-5'],
+      },
+      A2: {
+        v1: ['leadA@lead2'],
+        v2: ['bassDrive', 'bassDrive', 'bassDrive-4', 'bassDrive-2', 'bassDrive', 'bassDrive', 'bassDrive-7', 'bassDrive-5'],
+        v3: ['arpMin', 'arpMin', 'arpMaj-4', 'arpMaj-2', 'arpMin', 'arpMin', 'arpMin-7', 'arpMaj-5'],
+      },
+      Break: {
+        fx: { voice: 2, hand: 'strike' },   // the bass pad lends, struck again after (13 Oct
+                                           // 2026, the user: the lead lent here, its melody cut)
+        v1: ['leadBreak@lead'],
+        v2: ['bassBreak', 'bassBreak-4', 'bassBreak-7', 'bassFill-5'],
+        v3: ['holdMin', 'holdMaj-4', 'holdMin-7', 'holdMaj-5'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* hyperspace.js - Hyperspace Starfield (bg2).
+   *
+   * Dark and pulsing: a sixteenth-note bass through a resonant filter that
+   * sweeps slowly up and down across the notes (keep + bounce), hollow open-fifth
+   * pads, an eerie triangle lead that glides. E phrygian -- the F natural over E
+   * is the unease. 107 BPM. Format: see cyber.js.
+   */
+  SONGS.push({
+    id: 'hyperspace',
+    title: 'Hyperspace Starfield',
+    speed: 7,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass + drums
+
+    instruments: {
+      hlead:  { adsr: [3, 10, 11, 8], wave: [['T', 0]], vib: [18, 0.3, 10], glide: 0.25 },
+      hbass:  { adsr: [0, 6, 3, 2], wave: [['P', 0]], pulse: [0x200, 0x08, 0x200, 0x800],
+                filter: { mode: 'LP', res: 12, cutoff: [0x180, 0x04, 0x180, 0x700], bounce: true, keep: true } },
+      hbpad:  { adsr: [4, 11, 10, 9], wave: [['P', 0]], pulse: [0x400, 0x10, 0x300, 0xA00] },
+      hpad:   { adsr: [7, 11, 8, 10], wave: [['P', 0]], pulse: [0x300, 0x14, 0x300, 0xC00], arpSpeed: 3 },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Em Em F Em | Em Em Dm F)
+      leadA:
+        'B4:hlead . . . | . . . . | >C5 . . . | . . . . ' +
+        'B4 . . . | . . . . | G4 . . . | A4 . . . ' +
+        'C5 . . . | . . . . | . . . . | A4 . . . ' +
+        'B4 . . . | . . . . | . . . . | ^ . . . ' +
+        'E5 . . . | . . . . | D5 . . . | B4 . . . ' +
+        'G5 . . . | . . . . | >F5 . . . | E5 . . . ' +
+        'F5 . . . | . . . . | E5 . . . | D5 . . . ' +
+        'C5 . . . | . . . . | . . . . | . . ^ .',
+      // lead A2, higher
+      leadA2:
+        'E5 . . . | . . . . | >F5 . . . | . . . . ' +
+        'E5 . . . | . . . . | B4 . . . | D5 . . . ' +
+        'F5 . . . | . . . . | A5 . . . | G5 . . . ' +
+        'E5 . . . | . . . . | . . . . | . . . . ' +
+        'B5 . . . | . . . . | A5 . . . | G5 . . . ' +
+        '>F5 . . . | . . . . | E5 . . . | . . . . ' +
+        'D5 . . . | . . F5 . | . . . . | A5 . . . ' +
+        'G5 . . . | . . . . | >F5 . . . | . . ^ .',
+      // lead B (C C Dm Dm | Am Am B B)
+      leadB:
+        'G4 . . . | . . C5 . | . . . . | E5 . . . ' +
+        'D5 . . . | . . . . | C5 . . . | . . . . ' +
+        'A4 . . . | . . D5 . | . . . . | F5 . . . ' +
+        'E5 . . . | . . . . | D5 . . . | . . . . ' +
+        'C5 . . . | . . E5 . | . . . . | A5 . . . ' +
+        'G5 . . . | . . . . | E5 . . . | . . . . ' +
+        'F#5 . . . | . . . . | D#5 . . . | . . . . ' +
+        'B4 . . . | . . . . | . . . . | ^ . . .',
+      // break (Em F Em B): out for two bars, then a lead-in
+      leadBreak:
+        '^ . . . | . . . . | . . . . | . . . . ' +
+        '. . . . | . . . . | . . . . | . . . . ' +
+        'E5 . . . | . . . . | . . . . | . . . . ' +
+        '>D#5 . . . | . . . . | . . . . | ^ . . .',
+
+      // bass: sixteenths on E, the filter sweeping across them
+      hPulse: 'E2:hbass E2 E3 E2 | E2 E2 E3 E2 | E2 E2 E3 E2 | E2 E2 E3 E2',
+      hDrive: 'K E2:hbass E3 E2 | E2 E2 E3 E2 | K E2 E3 E2 | S E2 E3 E2',
+      hFill:  'K E2:hbass E3 E2 | K E2 E3 E2 | K E2 E3 E2 | S S S S',
+      hBreak: 'E2:hbpad . . . | . . . . | . . . . | . . . .',
+
+      // pads: open fifths (no third -- hollow), triads in B
+      hpad5:  'E4~07c:hpad . . . | . . . . | . . . . | . . . .',
+      hpad2:  'E4~07c:hpad . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      hMaj1:  'E4~047:hpad . . . | . . . . | . . . . | . . . .',
+      hMaj2:  'E4~047:hpad . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      hMin2:  'E4~037:hpad . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        fx: { voice: 1, hand: 'strike' },   // the lead rests here: the effects take it,
+                                           // not the bass's sixteenths (the user, 3 Oct 2026)
+        v1: ['rest2', 'rest2'],
+        v2: ['hPulse', 'hPulse', 'hPulse', 'hPulse'],
+        v3: ['rest2', 'hpad2'],
+      },
+      A: {
+        v1: ['leadA'],
+        v2: ['hDrive', 'hDrive', 'hDrive+1', 'hDrive', 'hDrive', 'hDrive', 'hDrive-2', 'hDrive+1'],
+        v3: ['hpad2', 'hpad5+1', 'hpad5', 'hpad2', 'hpad5-2', 'hpad5+1'],
+      },
+      A2: {
+        v1: ['leadA2@hlead'],
+        v2: ['hDrive', 'hDrive', 'hDrive+1', 'hDrive', 'hDrive', 'hDrive', 'hDrive-2', 'hDrive+1'],
+        v3: ['hpad2', 'hpad5+1', 'hpad5', 'hpad2', 'hpad5-2', 'hpad5+1'],
+      },
+      B: {
+        v1: ['leadB@hlead'],
+        v2: ['hDrive-4', 'hDrive-4', 'hDrive-2', 'hDrive-2', 'hDrive-7', 'hDrive-7', 'hDrive-5', 'hDrive-5'],
+        v3: ['hMaj2-4', 'hMin2-2', 'hMin2-7', 'hMaj2-5'],
+      },
+      Break: {
+        fx: { voice: 1, hand: 'strike' },   // the bass holds here: the lead lends instead
+        v1: ['leadBreak@hlead'],
+        v2: ['hBreak', 'hBreak+1', 'hBreak', 'hFill-5'],
+        v3: ['hpad5', 'hpad5+1', 'hpad5', 'hMaj1-5'],
+      },
+    },
+    order: ['Intro', 'A', 'A2', 'B', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* mothership.js - Alien Mothership Core (bg3).
+   *
+   * Dark and menacing, and steady rather than quirky: C minor (i VI iv V), a
+   * machine throb of a bass with a fast pulse-width sweep, half-time drums (kick
+   * on 1, snare on 3), minor pads through a resonant filter that breathes slowly
+   * open and shut across the chords (keep + bounce), a slow saw lead that sits
+   * low. 107 BPM. Replaces the whole-tone "Alien" draft, which grated.
+   * Format: see cyber.js.
+   */
+  SONGS.push({
+    id: 'mothership',
+    title: 'Alien Mothership Core',
+    speed: 7,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass + drums
+
+    instruments: {
+      mlead:  { adsr: [4, 10, 11, 9], wave: [['S', 0]], vib: [20, 0.2, 12], glide: 0.3 },
+      mlead2: { adsr: [3, 10, 11, 9], wave: [['S', 0]], vib: [16, 0.25, 10], glide: 0.3 },
+                // (sawtooth since 12 Oct 2026: its pulse whistled at bar 21 on
+                // the C64 -- the user; as nebula's and cyber's leads)
+      mbass:  { adsr: [0, 7, 5, 3], wave: [['P', 12], ['P', 0]], pulse: [0x100, 0x60, 0x100, 0x700] },
+      mbpad:  { adsr: [5, 11, 11, 10], wave: [['P', 0]], pulse: [0x300, 0x10, 0x300, 0x900] },
+      mpad:   { adsr: [8, 11, 9, 10], wave: [['P', 0]], pulse: [0x400, 0x10, 0x300, 0xB00], arpSpeed: 2,
+                filter: { mode: 'LP', res: 12, cutoff: [0x100, 0x03, 0x100, 0x480], bounce: true, keep: true } },
+      kick:   { adsr: [0, 9, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=F3'], ['P', '=C3'], ['T', '=G2'], ['T', '=D2'], ['T', '=A1']] },
+      snare:  { adsr: [0, 9, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=A4'], ['N', '=G6'], ['N', '=E6'], ['N', '=C6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Cm Cm Ab Ab | Fm Fm G G)
+      leadA:
+        'C5 . . . | . . . . | . . Eb5 . | D5 . . . ' +
+        'C5 . . . | . . . . | G4 . . . | . . . . ' +
+        'Ab4 . . . | . . . . | . . C5 . | Eb5 . . . ' +
+        'D5 . . . | . . . . | C5 . . . | . . . . ' +
+        'F5 . . . | . . . . | . . Ab5 . | G5 . . . ' +
+        'F5 . . . | . . . . | Eb5 . . . | C5 . . . ' +
+        'D5 . . . | . . . . | . . B4 . | . . . . ' +
+        '>G5 . . . | . . . . | . . . . | ^ . . .',
+      // lead B (Ab Bb Cm Cm | Fm Ab G G)
+      leadB:
+        'Eb5 . . . | . . . . | C5 . . . | Ab4 . . . ' +
+        'D5 . . . | . . . . | F5 . . . | . . . . ' +
+        'G5 . . . | . . . . | . . . . | Eb5 . . . ' +
+        'C5 . . . | . . . . | . . . . | ^ . . . ' +
+        'Ab5 . . . | . . . . | G5 . . . | F5 . . . ' +
+        'Eb5 . . . | . . . . | C5 . . . | Eb5 . . . ' +
+        'D5 . . . | . . . . | . . . . | B4 . . . ' +
+        'D5 . . . | . . F5 . | . . . . | ^ . . .',
+      // break (Cm Ab Fm G): out for two bars, then up to the leading note
+      leadBreak:
+        '^ . . . | . . . . | . . . . | . . . . ' +
+        '. . . . | . . . . | . . . . | . . . . ' +
+        'G4 . . . | . . . . | Ab4 . . . | . . . . ' +
+        '>B4 . . . | . . . . | . . . . | ^ . . .',
+
+      // bass: the throb, drums in half time
+      mThrob: 'K . C2:mbass C2 | . . C3 . | S . C2 C2 | . . G2 .',
+      mHum:   '. . C2:mbass C2 | . . C3 . | . . C2 C2 | . . G2 .',
+      mFill:  'K . C2:mbass C2 | . . C3 . | S . S . | S S S S',
+      mPad:   'C2:mbpad . . . | . . . . | . . . . | . . . .',
+
+      // pads on C4: one or two bars a chord
+      mMin1: 'C4~037:mpad . . . | . . . . | . . . . | . . . .',
+      mMaj1: 'C4~047:mpad . . . | . . . . | . . . . | . . . .',
+      mMin2: 'C4~037:mpad . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      mMaj2: 'C4~047:mpad . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['mHum', 'mHum', 'mThrob', 'mFill'],
+        v3: ['mMin2', 'mMin2'],
+      },
+      A: {
+        v1: ['leadA@mlead'],
+        v2: ['mThrob', 'mThrob', 'mThrob-4', 'mThrob-4', 'mThrob+5', 'mThrob+5', 'mThrob+7', 'mThrob+7'],
+        v3: ['mMin2', 'mMaj2-4', 'mMin2+5', 'mMaj2-5'],
+      },
+      B: {
+        v1: ['leadB@mlead'],
+        v2: ['mThrob-4', 'mThrob-2', 'mThrob', 'mThrob', 'mThrob+5', 'mThrob-4', 'mThrob+7', 'mFill+7'],
+        v3: ['mMaj1-4', 'mMaj1-2', 'mMin2', 'mMin1+5', 'mMaj1-4', 'mMaj2-5'],
+      },
+      A2: {
+        v1: ['leadA@mlead2'],
+        v2: ['mThrob', 'mThrob', 'mThrob-4', 'mThrob-4', 'mThrob+5', 'mThrob+5', 'mThrob+7', 'mThrob+7'],
+        v3: ['mMin2', 'mMaj2-4', 'mMin2+5', 'mMaj2-5'],
+      },
+      Break: {
+        fx: { voice: 1, hand: 'strike' },   // the bass holds here: the lead lends instead
+        v1: ['leadBreak@mlead'],
+        v2: ['mPad', 'mPad-4', 'mPad+5', 'mFill+7'],
+        v3: ['mMin1', 'mMaj1-4', 'mMin1+5', 'mMaj1-5'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  // ---- two songs new to HD, for the two pictures the C64 build never had ----
+  //
+  // Written in the C64 songs' own format, so they play on either style and could
+  // go back to the lab unchanged. Same layout as the five: v1 lead, v2 bass with
+  // the kick and snare between its notes, v3 chords.
+
+  /* citadel - Deep Space Citadel (deep_space_citadel.jpg). C minor, 94 BPM:
+   * stately and dark, for the ringed fortress round its red core. Half-time
+   * drums (kick on 1, snare on 3) under a pulsing eighth-note bass; a lead of
+   * long held notes, low; chords struck in A, held as slow pads in B. B leans
+   * on F minor and a Neapolitan D flat before the G that pulls back to C. */
+  SONGS.push({
+    id: 'citadel',
+    title: 'Deep Space Citadel',
+    speed: 8,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      clead:  { adsr: [5, 9, 9, 7], wave: [['S', 0]], vib: [18, 0.2, 10], glide: 0.4 },
+      clead2: { adsr: [3, 9, 9, 7], wave: [['P', 12], ['S', 0]], pulse: [0x600, 0x20, 0x300, 0xC00],
+                vib: [14, 0.25, 9], glide: 0.4 },
+      cbass:  { adsr: [0, 9, 7, 4], wave: [['P', 0], ['S', 0]], pulse: [0x400, 0x30, 0x200, 0xA00] },
+      cchord: { adsr: [1, 10, 4, 8], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 2,
+                filter: { mode: 'LP', res: 9, cutoff: [0x600, -0x08, 0x200, 0x7FF] } },
+      cpad:   { adsr: [8, 10, 10, 11], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 4,
+                filter: { mode: 'LP', res: 8, cutoff: [0x300, 0x04, 0x200, 0x600], bounce: true } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Cm Ab Eb Bb | Cm Ab Fm G)
+      leadA:
+        'G5 . . . | . . . . | . . . . | F5 . Eb5 . ' +
+        'C5 . . . | . . . . | . . . . | ^ . . . ' +
+        'Bb4 . . . | . . Eb5 . | . . . . | G5 . . . ' +
+        'F5 . . . | . . . . | D5 . . . | . . . . ' +
+        'G5 . . . | . . . . | . . C6 . | . . . . ' +
+        'Bb5 . . . | . . Ab5 . | . . . . | G5 . . . ' +
+        'Ab5 . . . | . . G5 . | . . F5 . | . . . . ' +
+        'G5 . . . | . . . . | F5 . Eb5 . | D5 . . .',
+      // lead B (Fm Cm Ab G | Fm Cm Db G)
+      leadB:
+        'Ab5 . . . | . . . . | C6 . . . | . . . . ' +
+        'G5 . . . | . . . . | Eb5 . . . | . . . . ' +
+        'F5 . . . | . . Eb5 . | . . C5 . | . . . . ' +
+        'D5 . . . | . . . . | . . . . | ^ . . . ' +
+        'Ab5 . . . | . . . . | C6 . . . | . . Db6 . ' +
+        'C6 . . . | . . . . | G5 . . . | . . . . ' +
+        'F5 . . . | . . Ab5 . | . . F5 . | Db5 . . . ' +
+        'D5 . . . | . . . . | B4 . . . | ^ . . .',
+      // the break (Cm Ab Eb G): the theme slowed to its bones
+      leadBreak:
+        'C5 . . . | . . . . | . . . . | . . . . ' +
+        'Eb5 . . . | . . . . | D5 . . . | . . . . ' +
+        'C5 . . . | . . . . | Bb4 . . . | . . . . ' +
+        'B4 . . . | . . . . | D5 . . . | ^ . . .',
+
+      // bass + drums on C: kick on 1, snare on 3, the bass pulsing between
+      cbDrive: 'K . C2:cbass . | C2 . C2 . | S . C2 . | C2 . C3 C2',
+      cbSoft:  'C2:cbass . . . | . . . . | . . . . | . . . .',
+      cbFill:  'K . C2:cbass . | S . C2 . | K K S . | S S S S',
+
+      // chords on C3: struck on 1 and the "and" of 3, or held the bar
+      cMinS:  'C3~037 . . . | . . . . | . . C3~037 . | . . . .',
+      cMajS:  'C3~047 . . . | . . . . | . . C3~047 . | . . . .',
+      cDomS:  'C3~047a . . . | . . . . | . . C3~047a . | . . . .',
+      cHold:  'C3~037 . . . | . . . . | . . . . | . . . .',
+      cHoldM: 'C3~047 . . . | . . . . | . . . . | . . . .',
+      cDomH:  'C3~047a . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['cbSoft', 'cbSoft-4', 'cbSoft', 'cbSoft-5'],
+        v3: ['cHold@cpad', 'cHoldM-4@cpad', 'cHold@cpad', 'cDomH-5@cpad'],
+      },
+      A: {
+        v1: ['leadA-12@clead'],
+        v2: ['cbDrive', 'cbDrive-4', 'cbDrive+3', 'cbDrive-2', 'cbDrive', 'cbDrive-4', 'cbDrive+5', 'cbDrive-5'],
+        v3: ['cMinS@cchord', 'cMajS-4@cchord', 'cMajS+3@cchord', 'cMajS-2@cchord',
+             'cMinS@cchord', 'cMajS-4@cchord', 'cMinS+5@cchord', 'cDomS-5@cchord'],
+      },
+      B: {
+        v1: ['leadB-12@clead'],
+        v2: ['cbDrive+5', 'cbDrive', 'cbDrive-4', 'cbDrive-5', 'cbDrive+5', 'cbDrive', 'cbDrive+1', 'cbFill-5'],
+        v3: ['cHold+5@cpad', 'cHold@cpad', 'cHoldM-4@cpad', 'cHoldM-5@cpad',
+             'cHold+5@cpad', 'cHold@cpad', 'cHoldM+1@cpad', 'cDomH-5@cpad'],
+      },
+      A2: {
+        v1: ['leadA-12@clead2'],
+        v2: ['cbDrive', 'cbDrive-4', 'cbDrive+3', 'cbDrive-2', 'cbDrive', 'cbDrive-4', 'cbDrive+5', 'cbDrive-5'],
+        v3: ['cMinS@cchord', 'cMajS-4@cchord', 'cMajS+3@cchord', 'cMajS-2@cchord',
+             'cMinS@cchord', 'cMajS-4@cchord', 'cMinS+5@cchord', 'cDomS-5@cchord'],
+      },
+      Break: {
+        v1: ['leadBreak-12@clead'],
+        v2: ['cbSoft', 'cbSoft-4', 'cbSoft+3', 'cbFill-5'],
+        v3: ['cHold@cpad', 'cHoldM-4@cpad', 'cHoldM+3@cpad', 'cDomH-5@cpad'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* solar - Orbital Solar Array (orbital_solar_array.jpg). D minor, 107 BPM:
+   * serious and wide rather than upbeat. Half-time drums (kick on 1, snare on
+   * 3) under a bass in spaced eighths; chords struck on 1 and the "and" of 2 and
+   * left to ring; a low lead, over Dm Bb F C turning on G minor and an A major
+   * that pulls back to D. B lifts through C and A minor and glides an octave up
+   * into the reprise. The break rises in arpeggios.
+   *
+   * First written in D major at 125 BPM; the user, 15 Oct 2026: "sounds too
+   * happy". Moved to D minor, then "still sounds a little too upbeat": the
+   * offbeat stabs, the pumping octave bass and the tempo went, the lead came
+   * down an octave. */
+  SONGS.push({
+    id: 'solar',
+    title: 'Orbital Solar Array',
+    speed: 7,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      olead:  { adsr: [3, 9, 9, 7], wave: [['S', 0]], vib: [16, 0.2, 9], glide: 0.5 },
+      olead2: { adsr: [3, 9, 9, 7], wave: [['P', 12], ['S', 0]], pulse: [0x600, 0x20, 0x300, 0xC00],
+                vib: [12, 0.25, 8], glide: 0.5 },
+      obass:  { adsr: [0, 8, 6, 4], wave: [['P', 0], ['S', 0]], pulse: [0x500, 0x20, 0x300, 0xA00] },
+      ochord: { adsr: [1, 10, 6, 9], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 2,
+                filter: { mode: 'LP', res: 8, cutoff: [0x500, -0x06, 0x280, 0x7FF] } },
+      oswell: { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
+                filter: { mode: 'LP', res: 8, cutoff: [0x200, 0x08, 0x200, 0x700] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Dm Bb F C | Dm Bb Gm A)
+      leadA:
+        'F5 . . . | A5 . . . | D6 . . . | . . A5 . ' +
+        'D6 . . . | . . . . | C6 . Bb5 . | . . F5 . ' +
+        'F5 . . . | . . . . | C5 . F5 . | . . A5 . ' +
+        'G5 . . . | . . E5 . | . . F5 . | . . G5 . ' +
+        'A5 . . . | . . . . | F5 . A5 . | . . D6 . ' +
+        'F6 . . . | . . . . | D6 . . . | . . Bb5 . ' +
+        'Bb5 . . . | . . A5 . | . . G5 . | . . D5 . ' +
+        'E5 . . . | . . . . | C#5 . . . | ^ . . .',
+      // lead B (Bb C Am Dm | Gm Bb C A), gliding an octave up at the end
+      leadB:
+        'D6 . . . | . . Bb5 . | . . F5 . | . . Bb5 . ' +
+        'C6 . . . | . . . . | E6 . . . | . . . . ' +
+        'C6 . . . | . . A5 . | . . E5 . | . . A5 . ' +
+        'A5 . . . | . . . . | . . . . | ^ . . . ' +
+        'G5 . . . | . . Bb5 . | . . D6 . | . . C6 . ' +
+        'D6 . . . | . . . . | Bb5 . . . | . . F5 . ' +
+        'G5 . . . | . . C6 . | . . E6 . | . . . . ' +
+        'E5 . . . | >E6 . . . | . . . . | ^ . . .',
+      // the break (Dm Bb Gm A): each chord climbed as an arpeggio
+      leadBreak:
+        'D5 . F5 . | A5 . D6 . | . . . . | . . . . ' +
+        'D5 . F5 . | Bb5 . D6 . | . . . . | . . . . ' +
+        'D5 . G5 . | Bb5 . D6 . | . . . . | . . . . ' +
+        'C#5 . E5 . | A5 . C#6 . | E6 . . . | ^ . . .',
+
+      // bass + drums on D, half time: kick on 1, snare on 3, the bass between
+      obPump: 'K . D2:obass . | . . D2 . | S . D2 . | . . D3 .',
+      obSoft: 'D2:obass . . . | . . D2 . | . . . . | D3 . . .',
+      obFill: 'K . D2:obass . | S . D2 . | K S K S | S S S S',
+
+      // chords on D4: struck on 1 and the "and" of 2 and left to ring, or held.
+      // Plain triads: the added ninths of the first version were much of what
+      // made it sweet, and stabs on every offbeat most of what made it bounce.
+      oStab:  'D4~047 . . . | . . D4~047 . | . . . . | . . . .',
+      oStabm: 'D4~037 . . . | . . D4~037 . | . . . . | . . . .',
+      oHold:  'D4~047 . . . | . . . . | . . . . | . . . .',
+      oHoldm: 'D4~037 . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['obSoft', 'obSoft-4', 'obSoft-7', 'obFill-5'],
+        v3: ['oHoldm@oswell', 'oHold-4@oswell', 'oHoldm-7@oswell', 'oHold-5@oswell'],
+      },
+      A: {
+        v1: ['leadA-12@olead'],
+        v2: ['obPump', 'obPump-4', 'obPump+3', 'obPump-2', 'obPump', 'obPump-4', 'obPump-7', 'obPump-5'],
+        v3: ['oStabm@ochord', 'oStab-4@ochord', 'oStab-9@ochord', 'oStab-2@ochord',
+             'oStabm@ochord', 'oStab-4@ochord', 'oStabm-7@ochord', 'oStab-5@ochord'],
+      },
+      B: {
+        v1: ['leadB-12@olead'],
+        v2: ['obPump-4', 'obPump-2', 'obPump-5', 'obPump', 'obPump-7', 'obPump-4', 'obPump-2', 'obFill-5'],
+        v3: ['oStab-4@ochord', 'oStab-2@ochord', 'oStabm-5@ochord', 'oStabm@ochord',
+             'oStabm-7@ochord', 'oStab-4@ochord', 'oStab-2@ochord', 'oStab-5@ochord'],
+      },
+      A2: {
+        v1: ['leadA-12@olead2'],
+        v2: ['obPump', 'obPump-4', 'obPump+3', 'obPump-2', 'obPump', 'obPump-4', 'obPump-7', 'obPump-5'],
+        v3: ['oStabm@ochord', 'oStab-4@ochord', 'oStab-9@ochord', 'oStab-2@ochord',
+             'oStabm@ochord', 'oStab-4@ochord', 'oStabm-7@ochord', 'oStab-5@ochord'],
+      },
+      Break: {
+        v1: ['leadBreak-12@olead'],
+        v2: ['obSoft', 'obSoft-4', 'obSoft-7', 'obFill-5'],
+        v3: ['oHoldm@oswell', 'oHold-4@oswell', 'oHoldm-7@oswell', 'oHold-5@oswell'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  const SONG_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const SONG_NOTE_RE = /^([>\/]?)([A-G])([#b]?)(-?\d)((?::\w+|~[0-9a-fA-F]+)*)$/;
+
+  function songNoteMidi(name) {
+    const m = /^([A-G])([#b]?)(-?\d)$/.exec(name);
+    if (!m) throw new Error('bad note ' + name);
+    return 12 * (+m[3] + 1) + SONG_SEMI[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+  }
+
+  function songParseToken(tok, song) {
+    if (tok === '.') return null;
+    if (tok === '^') return { off: true };
+    if (song.drums[tok]) return { drum: song.drums[tok] };
+    const m = SONG_NOTE_RE.exec(tok);
+    if (!m) throw new Error('bad token "' + tok + '"');
+    const ev = { midi: songNoteMidi(m[2] + m[3] + m[4]), glide: m[1] === '>', legato: m[1] === '/' };
+    for (const s of m[5].match(/:\w+|~[0-9a-fA-F]+/g) || []) {
+      if (s[0] === ':') ev.inst = s.slice(1);
+      else ev.arp = [...s.slice(1)].map(c => parseInt(c, 16));
+    }
+    return ev;
+  }
+
+  // The song as one row list per voice: the order once, then the loop part once
+  // more. The second pass is what loops, so the seam is a real one -- the notes
+  // ringing at the end of the order carry into it as they would on the C64.
+  function songFlatten(song) {
+    const pats = {};
+    for (const k of Object.keys(song.patterns)) {
+      pats[k] = song.patterns[k].split(/\s+/).filter(t => t && t !== '|');
+    }
+    const loopIdx = song.order.indexOf(song.loopTo);
+    const seq = song.order.concat(song.order.slice(loopIdx));
+    const voices = [[], [], []];
+    let loopStartRow = 0;
+    seq.forEach((secName, si) => {
+      const sec = song.sections[secName];
+      if (si === song.order.length) loopStartRow = voices[0].length;
+      ['v1', 'v2', 'v3'].forEach((vk, v) => {
+        for (const entry of sec[vk]) {
+          const m = /^(\w+)([+-]\d+)?(?:@(\w+))?$/.exec(entry);
+          const tr = m[2] ? +m[2] : 0;
+          pats[m[1]].forEach((tok, i) => {
+            voices[v].push({ ev: songParseToken(tok, song), tr, setInst: i === 0 ? m[3] : undefined });
+          });
+        }
+      });
+    });
+    return { voices, totalRows: voices[0].length, loopStartRow };
+  }
+
+  // Values per frame in the packed form the worklet reads: for each voice
+  // frequency register, pulse width, waveform, gate and A D S R; then the
+  // filter's voice (-1 none), cutoff, resonance and mode.
+  const SONG_STRIDE = 28;
+  const SONG_WAVE_CODE = { '-': 0, T: 1, S: 2, P: 3, N: 4 };
+  const SONG_MODE_CODE = { LP: 0, BP: 1, HP: 2 };
+
+  // The lab's player: song rows to SID registers, one 50 Hz frame at a time,
+  // packed. Unchanged in what it computes.
+  function songFrames(song) {
+    const flat = songFlatten(song);
+    const FREQ_MUL = 16777216 / SONG_PAL_CLOCK;
+    const midiToReg = m => Math.max(0, Math.min(65535, Math.round(440 * Math.pow(2, (m - 69) / 12) * FREQ_MUL)));
+    const out = new Float32Array(flat.totalRows * song.speed * SONG_STRIDE);
+    let o = 0;
+    const st = [0, 1, 2].map(() => ({ sticky: null, inst: null, pitch: 60, target: 60, arp: null,
+      frame: 0, pw: 0x800, pdir: 1, gate: false, adsr: [0, 0, 0, 0], hr: false, drum: false, playing: false }));
+    const filt = { owner: -1, cutoff: 0x7FF, dir: 1, res: 0, mode: 'LP', inst: null };
+    const inst = name => song.instruments[name];
+
+    for (let r = 0; r < flat.totalRows; r++) {
+      for (let f = 0; f < song.speed; f++) {
+        if (f === 0) for (let v = 0; v < 3; v++) {
+          const row = flat.voices[v][r], s = st[v];
+          if (row.setInst) s.sticky = row.setInst;
+          const ev = row.ev;
+          if (!ev) continue;
+          if (ev.off) { s.gate = false; continue; }
+          s.hr = false;
+          if (ev.drum) {
+            s.inst = inst(ev.drum); s.drum = true; s.arp = null; s.pitch = s.target = 60;
+          } else {
+            if (ev.inst) s.sticky = ev.inst;
+            const note = ev.midi + row.tr;
+            s.drum = false;
+            if ((ev.glide || ev.legato) && s.playing) {
+              s.target = note; if (ev.legato) s.pitch = note;
+              s.arp = ev.arp || s.inst.arp || null;
+              continue;                           // no retrigger
+            }
+            s.inst = inst(s.sticky); s.pitch = s.target = note;
+            s.arp = ev.arp || s.inst.arp || null;
+          }
+          s.frame = 0; s.gate = true; s.playing = true; s.adsr = s.inst.adsr;
+          const p = s.inst.pulse || [0x800, 0, 0x800, 0x800];
+          s.pw = p[0]; s.pdir = 1;
+          if (s.inst.filter) {
+            const Fi = s.inst.filter;
+            if (!(Fi.keep && filt.inst === Fi)) { filt.cutoff = Fi.cutoff[0]; filt.dir = 1; }
+            filt.owner = v; filt.inst = Fi; filt.res = Fi.res; filt.mode = Fi.mode;
+          } else if (filt.owner === v) filt.owner = -1;
+        }
+        // Hard restart: two frames before a fresh note, gate off with a fast
+        // release. The row after the last is the loop's first.
+        if (f === song.speed - 2) {
+          const nr = r + 1 < flat.totalRows ? r + 1 : flat.loopStartRow;
+          for (let v = 0; v < 3; v++) {
+            const nx = flat.voices[v][nr].ev;
+            if (nx && !nx.off && (nx.drum || !(nx.glide || nx.legato))) { st[v].gate = false; st[v].hr = true; }
+          }
+        }
+
+        for (let v = 0; v < 3; v++) {
+          const s = st[v], I = s.inst;
+          if (!I) { o += 8; continue; }           // zeros: silent, gate off
+          const W = I.wave, n = W.length;
+          const wi = s.frame < n ? s.frame : (I.loop != null ? I.loop + (s.frame - n) % (n - I.loop) : n - 1);
+          const wf = W[wi][0], pv = W[wi][1];
+          if (s.target !== s.pitch) {             // glide
+            const g = I.glide || 0.5, d = s.target - s.pitch;
+            s.pitch = Math.abs(d) <= g ? s.target : s.pitch + Math.sign(d) * g;
+          }
+          let note;
+          if (typeof pv === 'string') note = songNoteMidi(pv.slice(1));
+          else {
+            note = s.pitch + pv;
+            if (s.arp) note += s.arp[Math.floor(s.frame / (I.arpSpeed || 1)) % s.arp.length];
+            if (I.vib && s.frame >= I.vib[0]) {
+              const t = ((s.frame - I.vib[0]) % I.vib[2]) / I.vib[2];
+              note += I.vib[1] * (t < 0.25 ? 4 * t : t < 0.75 ? 2 - 4 * t : 4 * t - 4);
+            }
+          }
+          if (I.pulse) {
+            const sp = I.pulse[1], lo = I.pulse[2], hi = I.pulse[3];
+            s.pw += s.pdir * sp;
+            if (s.pw >= hi) { s.pw = hi; s.pdir = -1; } else if (s.pw <= lo) { s.pw = lo; s.pdir = 1; }
+          }
+          const adsr = s.hr ? [0, 0, 0, 0] : s.adsr;
+          out[o++] = midiToReg(note);
+          out[o++] = s.pw & 0xFFF;
+          out[o++] = SONG_WAVE_CODE[wf] || 0;
+          out[o++] = s.gate ? 1 : 0;
+          out[o++] = adsr[0]; out[o++] = adsr[1]; out[o++] = adsr[2]; out[o++] = adsr[3];
+          s.frame++;
+        }
+        if (filt.owner >= 0) {
+          const c = filt.inst.cutoff;
+          const nc = filt.cutoff + filt.dir * c[1];
+          if (filt.inst.bounce && (nc >= c[3] || nc <= c[2])) filt.dir = -filt.dir;
+          filt.cutoff = Math.max(c[2], Math.min(c[3], nc));
+          out[o++] = filt.owner; out[o++] = filt.cutoff; out[o++] = filt.res; out[o++] = SONG_MODE_CODE[filt.mode] || 0;
+        } else {
+          out[o++] = -1; out[o++] = 0; out[o++] = 0; out[o++] = 0;
+        }
+      }
+    }
+    return { frames: out, count: flat.totalRows * song.speed, loopFrame: flat.loopStartRow * song.speed,
+             trim: SONG_TRIM[song.id] || 1 };
+  }
+
+  // The lab's synth, as the worklet runs it: registers to samples, a block at a
+  // time, carrying its state from block to block. The arithmetic is the lab's
+  // render() line for line; what changed is only that it stops at the end of a
+  // block and picks up again, and that the end of the song jumps to the loop.
+  // The lab scales a finished song down if it peaks over 0.95; a song playing
+  // live cannot be measured first, so the one that needs it carries the same
+  // scaling as SONG_TRIM, and the clamp at 0.95 is only a backstop. Measured
+  // against the lab's render, sample for sample at 44.1 and 48 kHz: identical
+  // for four songs, and mothership within 1e-7 once the trim is allowed for.
+  const SONG_WORKLET_SRC = `
+const RATE = [9, 32, 63, 95, 149, 220, 267, 313, 392, 977, 1954, 3126, 3907, 11720, 19532, 31251];
+const expDiv = l => l >= 93 ? 1 : l >= 54 ? 2 : l >= 26 ? 4 : l >= 14 ? 8 : l >= 6 ? 16 : 30;
+function blep(t, dt) {
+  if (t < dt) { t /= dt; return t + t - t * t - 1; }
+  if (t > 1 - dt) { t = (t - 1) / dt; return t * t + t + t + 1; }
+  return 0;
+}
+const STRIDE = ${SONG_STRIDE}, CLOCK = ${SONG_PAL_CLOCK}, FRAME_HZ = ${SONG_FRAME_HZ};
+class OddSid extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.F = null; this.count = 0; this.loopFrame = 0; this.trim = 1;
+    this.playing = false;
+    this.reset();
+    this.port.onmessage = (e) => {
+      const m = e.data;
+      if (m.song) { this.F = m.song.frames; this.count = m.song.count; this.loopFrame = m.song.loopFrame; this.trim = m.song.trim; this.reset(); }
+      if (m.play !== undefined) this.playing = m.play;
+    };
+  }
+  reset() {
+    this.vs = [0, 1, 2].map(() => ({ acc: 0, lfsr: 0x7FFFF8, nout: 0, env: 0, st: 'rel', ecnt: 0, gate: false }));
+    this.low = 0; this.band = 0; this.dcx = 0; this.dcy = 0;
+    this.fi = -1; this.left = 0; this.loops = 0;
+  }
+  // Starts frame fi: gates, and the filter's coefficients for it.
+  enter(fi) {
+    const F = this.F, b = fi * STRIDE;
+    for (let v = 0; v < 3; v++) {
+      const s = this.vs[v], gate = F[b + v * 8 + 3] > 0;
+      if (gate && !s.gate) s.st = 'att';
+      if (!gate && s.gate) s.st = 'rel';
+      s.gate = gate;
+    }
+    const fv = F[b + 24];
+    this.fvoice = fv;
+    if (fv >= 0) {
+      const hz = Math.min(12500, 30 + F[b + 25] * 5.86);
+      this.ff = Math.min(1.2, 2 * Math.sin(Math.PI * hz / (2 * sampleRate)));
+      this.fq = 1.4 - F[b + 26] * 0.075;
+      this.fmode = F[b + 27];
+    }
+  }
+  process(inputs, outputs) {
+    const out = outputs[0][0];
+    if (!this.playing || !this.F) { out.fill(0); return true; }
+    const F = this.F, spf = sampleRate / FRAME_HZ, cps = CLOCK / sampleRate;
+    for (let i = 0; i < out.length; i++) {
+      if (this.left <= 0) {
+        let fi = this.fi + 1;
+        if (fi >= this.count) fi = this.loopFrame;
+        // Each arrival at the loop point is one more time round the song, the
+        // first at the end of the order and then at every wrap.
+        if (fi === this.loopFrame && this.fi >= 0) { this.loops++; this.port.postMessage({ loops: this.loops }); }
+        this.fi = fi;
+        this.enter(fi);
+        this.left += spf;
+      }
+      this.left--;
+      const b = this.fi * STRIDE;
+      let direct = 0, filtIn = 0;
+      for (let v = 0; v < 3; v++) {
+        const s = this.vs[v], r = b + v * 8;
+        const freq = F[r], pwr = F[r + 1], wf = F[r + 2];
+        const A = F[r + 4], D = F[r + 5], S = F[r + 6], R = F[r + 7];
+        s.ecnt += cps;
+        if (s.st === 'att') {
+          const p = RATE[A];
+          while (s.ecnt >= p) { s.ecnt -= p; if (++s.env >= 255) { s.env = 255; s.st = 'dec'; break; } }
+        } else {
+          const sus = S * 17;
+          const p = RATE[s.st === 'dec' ? D : R] * expDiv(s.env);
+          while (s.ecnt >= p) {
+            s.ecnt -= p;
+            if (s.st === 'dec') { if (s.env > sus) s.env--; }
+            else if (s.env > 0) s.env--;
+          }
+          if (s.st === 'dec' && s.ecnt > p) s.ecnt = 0;
+        }
+        const inc = freq * cps, dt = inc / 16777216;
+        const old = s.acc;
+        s.acc += inc; if (s.acc >= 16777216) s.acc -= 16777216;
+        if (wf === 0 || s.env === 0) continue;
+        const ph = s.acc / 16777216;
+        let w;
+        if (wf === 2) w = 2 * ph - 1 - blep(ph, dt);
+        else if (wf === 1) w = 1 - 4 * Math.abs(ph - 0.5);
+        else if (wf === 3) {
+          const pw = Math.min(0.98, Math.max(0.02, pwr / 4096));
+          w = (ph < pw ? 1 : -1) + blep(ph, dt) - blep((ph - pw + 1) % 1, dt);
+        } else {
+          let clocks = (Math.floor(s.acc / 1048576) - Math.floor(old / 1048576) + 16) % 16;
+          if (inc >= 1048576) clocks += Math.floor(inc / 16777216 * 16);
+          while (clocks-- > 0) {
+            const l = s.lfsr, fb = ((l >> 22) ^ (l >> 17)) & 1;
+            s.lfsr = ((l << 1) | fb) & 0x7FFFFF;
+          }
+          const l = s.lfsr;
+          s.nout = ((l >> 15) & 0x80) | ((l >> 14) & 0x40) | ((l >> 11) & 0x20) | ((l >> 9) & 0x10) |
+                   ((l >> 8) & 0x08) | ((l >> 5) & 0x04) | ((l >> 3) & 0x02) | ((l >> 2) & 0x01);
+          w = s.nout / 127.5 - 1;
+        }
+        const o = w * s.env / 255;
+        if (v === this.fvoice) filtIn += o; else direct += o;
+      }
+      let fo = 0;
+      if (this.fvoice >= 0) {
+        let high = 0;
+        for (let k = 0; k < 2; k++) { this.low += this.ff * this.band; high = filtIn - this.low - this.fq * this.band; this.band += this.ff * high; }
+        fo = this.fmode === 0 ? this.low : this.fmode === 1 ? this.band : high;
+      } else { this.low *= 0.99; this.band *= 0.99; }
+      const x = (direct + fo) * 0.25 * this.trim;
+      const y = x - this.dcx + 0.9995 * this.dcy; this.dcx = x; this.dcy = y;
+      out[i] = y > 0.95 ? 0.95 : y < -0.95 ? -0.95 : y;
+    }
+    return true;
+  }
+}
+registerProcessor('odd-sid', OddSid);
+`;
+
+  // ---- the songs on modern instruments ----
+  //
+  // The same notes, timing, arrangement and envelopes as the SID synth above,
+  // played on instruments built from Web Audio's own nodes instead: a detuned
+  // saw lead with delay, a sub bass under a filtered saw, real chords where the
+  // SID arpeggiates them at 50 Hz (the trill that most marks a song as C64),
+  // soft supersaw pads, synthesised drums, all in stereo through a reverb and
+  // a gentle compressor.
+  //
+  // Each voice's part is taken as its role in the C64 arrangement, which all
+  // five songs share: v1 the lead, v2 the bass with the kick and snare between
+  // its notes, v3 the chords. An instrument's name refines that -- a pad or a
+  // swell is held and soft, anything else on v3 is struck.
+
+  // SID envelope rates as seconds, from the 6581 datasheet: attack, and decay
+  // and release (three times the attack's).
+  const SID_ATTACK_S = [0.002, 0.008, 0.016, 0.024, 0.038, 0.056, 0.068, 0.08,
+                        0.1, 0.25, 0.5, 0.8, 1, 3, 5, 8];
+  const SID_DECAY_S = SID_ATTACK_S.map(t => t * 3);
+  const midiHz = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  // A song as note events: each voice's notes with where they start and end in
+  // rows, their bends (glides and legato changes) and their chord, and the drum
+  // hits. Built from songFlatten, so it is the same order-plus-loop the SID
+  // synth plays, with the same loop point.
+  function songEvents(song) {
+    const flat = songFlatten(song);
+    const byRow = [];
+    for (let r = 0; r < flat.totalRows; r++) byRow.push([]);
+    for (let v = 0; v < 3; v++) {
+      let cur = null, sticky = null;
+      const close = (r, byNote) => { if (cur) { cur.end = r; cur.byNote = byNote; cur = null; } };
+      for (let r = 0; r < flat.totalRows; r++) {
+        const row = flat.voices[v][r];
+        if (row.setInst) sticky = row.setInst;
+        const ev = row.ev;
+        if (!ev) continue;
+        if (ev.off) { close(r, false); continue; }
+        if (ev.drum) { close(r, true); byRow[r].push({ v, drum: ev.drum }); continue; }
+        if (ev.inst) sticky = ev.inst;
+        const note = ev.midi + row.tr;
+        if ((ev.glide || ev.legato) && cur) {
+          cur.bends.push({ row: r, midi: note, glide: ev.glide });
+          continue;
+        }
+        close(r, true);
+        const I = song.instruments[sticky];
+        cur = { v, row: r, end: flat.totalRows, byNote: false, midi: note, inst: sticky, I,
+                arp: ev.arp || I.arp || null, bends: [] };
+        byRow[r].push(cur);
+      }
+    }
+    return { byRow, totalRows: flat.totalRows, loopStartRow: flat.loopStartRow };
+  }
+
+  class ModernSongPlayer {
+    constructor(ctx, out) {
+      this.ctx = ctx;
+      this.playing = false;
+      this.song = null;
+      this.active = [];          // { nodes, gain, end } for a fast stop on pause
+      this.onLoop = null;
+
+      // master: compressor, then out
+      this.master = ctx.createGain();
+      this.master.gain.value = 1;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 3;
+      comp.attack.value = 0.01; comp.release.value = 0.2;
+      this.master.connect(comp);
+      comp.connect(out);
+
+      // reverb: a generated stereo hall, noise decaying over 2.6 s
+      const len = Math.floor(ctx.sampleRate * 2.6);
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+      }
+      this.reverb = ctx.createConvolver();
+      this.reverb.buffer = ir;
+      const revOut = ctx.createGain();
+      revOut.gain.value = 0.55;
+      this.reverb.connect(revOut);
+      revOut.connect(this.master);
+
+      // delay for the lead: tempo-synced when a song loads, darkened each repeat
+      this.delay = ctx.createDelay(2);
+      const fb = ctx.createGain(); fb.gain.value = 0.32;
+      const dlp = ctx.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 2600;
+      this.delay.connect(dlp); dlp.connect(fb); fb.connect(this.delay);
+      const dOut = ctx.createGain(); dOut.gain.value = 0.35;
+      dlp.connect(dOut); dOut.connect(this.master); dOut.connect(this.reverb);
+
+      // one second of white noise, shared by the drums
+      const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const nd = nb.getChannelData(0);
+      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      this.noise = nb;
+    }
+
+    load(song) {
+      this.stopAll(0);
+      this.song = song;
+      this.E = songEvents(song);
+      this.rowSec = song.speed / SONG_FRAME_HZ;
+      this.nextRow = 0;
+      this.loops = 0;
+      // A dotted eighth: three rows of a sixteenth each, at four rows a beat.
+      this.delay.delayTime.value = Math.min(1.9, this.rowSec * (song.rowsPerBeat || 4) * 0.75);
+    }
+
+    play() {
+      if (this.playing || !this.song) return;
+      this.playing = true;
+      // Row nextRow sounds a moment from now; every other time hangs off that.
+      this.t0 = this.ctx.currentTime + 0.06 - this.nextRow * this.rowSec;
+      this.tick();
+      this.timer = setInterval(() => this.tick(), 50);
+    }
+
+    pause() {
+      if (!this.playing) return;
+      this.playing = false;
+      clearInterval(this.timer);
+      // Back to the row now sounding, so a resume picks up where it was heard
+      // rather than where scheduling had reached, a quarter second ahead.
+      const now = Math.floor((this.ctx.currentTime - this.t0) / this.rowSec);
+      if (now >= 0 && now < this.nextRow) this.nextRow = now;
+      this.stopAll(0.06);
+    }
+
+    stopAll(fade) {
+      const t = this.ctx.currentTime;
+      for (const a of this.active) {
+        try {
+          a.gain.gain.cancelScheduledValues(t);
+          a.gain.gain.setValueAtTime(a.gain.gain.value, t);
+          a.gain.gain.linearRampToValueAtTime(0, t + fade + 0.005);
+          for (const n of a.nodes) n.stop(t + fade + 0.02);
+        } catch (e) {}
+      }
+      this.active = [];
+    }
+
+    tick() { this.scheduleUntil(this.ctx.currentTime + 0.3); }
+
+    // Everything that starts before `until`. Also what an offline render calls
+    // directly, with the whole length at once.
+    scheduleUntil(until) {
+      const E = this.E;
+      if (!E) return;
+      this.active = this.active.filter(a => a.end > this.ctx.currentTime);
+      while (this.t0 + this.nextRow * this.rowSec < until) {
+        const r = this.nextRow;
+        const t = this.t0 + r * this.rowSec;
+        for (const ev of E.byRow[r]) {
+          if (ev.drum) this.drum(ev.drum, t);
+          else this.note(ev, t);
+        }
+        this.nextRow++;
+        if (this.nextRow >= E.totalRows) {
+          // The loop part again: time carries on, the rows go back.
+          this.t0 += (E.totalRows - E.loopStartRow) * this.rowSec;
+          this.nextRow = E.loopStartRow;
+        }
+        if (this.nextRow === E.loopStartRow) {
+          // One more time round, the first at the end of the order -- the same
+          // count the SID synth reports, on time rather than scheduling-early.
+          this.loops++;
+          const n = this.loops, at = this.t0 + E.loopStartRow * this.rowSec;
+          const ms = Math.max(0, (at - this.ctx.currentTime) * 1000);
+          setTimeout(() => { if (this.onLoop) this.onLoop(n); }, ms);
+        }
+      }
+    }
+
+    // The note's amplitude: the instrument's SID envelope in seconds, with a
+    // floor under the attack and release so nothing clicks.
+    envelope(g, I, t, off, peak, minAtk, minRel) {
+      const a = I.adsr;
+      const atk = Math.max(minAtk, SID_ATTACK_S[a[0]]);
+      const dec = SID_DECAY_S[a[1]], sus = a[2] / 15, rel = Math.max(minRel, SID_DECAY_S[a[3]]);
+      const atkEnd = Math.min(t + atk, off);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(peak * Math.min(1, (atkEnd - t) / atk), atkEnd);
+      if (atkEnd < off) g.gain.setTargetAtTime(peak * sus, atkEnd, dec / 4);
+      g.gain.setTargetAtTime(0, off, rel / 4);
+      return off + rel * 1.2 + 0.05;
+    }
+
+    note(ev, t) {
+      const ctx = this.ctx, I = ev.I, name = ev.inst || '';
+      const role = ev.v === 0 ? 'lead' : ev.v === 1 ? 'bass' : (/pad|swell/.test(name) ? 'pad' : 'keys');
+      // Off where the next note's hard restart would close the gate, or at a release.
+      const off = Math.max(t + 0.03, this.t0 + ev.end * this.rowSec - (ev.byNote ? 0.04 : 0));
+      // The chord: the arpeggio's notes sounding together, each once. The bass
+      // keeps its root only -- stacked low notes turn to mud.
+      let tones = [0];
+      if (ev.arp && role !== 'bass') tones = [...new Set(ev.arp)].sort((x, y) => x - y);
+
+      const g = ctx.createGain();
+      const nodes = [];
+      const freqParams = [];      // [param, semitone offset] that bends follow
+      const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      const post = pan || g;
+      if (pan) g.connect(pan);
+      let end;
+
+      if (role === 'lead') {
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 0.9;
+        f.frequency.setValueAtTime(3200, t);
+        f.frequency.setTargetAtTime(2200, t, 0.3);
+        f.connect(g);
+        for (const [type, det, lvl, oct] of [['sawtooth', -7, 0.5, 0], ['sawtooth', 7, 0.5, 0], ['square', 0, 0.22, -12]]) {
+          const o = ctx.createOscillator(); o.type = type; o.detune.value = det;
+          const og = ctx.createGain(); og.gain.value = lvl;
+          o.connect(og); og.connect(f); nodes.push(o); freqParams.push([o.frequency, oct]);
+          // Vibrato as the instrument asks, but shallower: a modern lead sings
+          // round the note rather than wobbling a semitone off it.
+          if (I.vib) {
+            const lfo = ctx.createOscillator(); lfo.frequency.value = SONG_FRAME_HZ / I.vib[2];
+            const depth = ctx.createGain();
+            depth.gain.setValueAtTime(0, t);
+            depth.gain.setTargetAtTime(I.vib[1] * 100 * 0.45, t + I.vib[0] / SONG_FRAME_HZ, 0.15);
+            lfo.connect(depth); depth.connect(o.detune); nodes.push(lfo);
+          }
+        }
+        end = this.envelope(g, I, t, off, 0.16, 0.012, 0.18);
+        post.connect(this.master); post.connect(this.delay);
+        const s = ctx.createGain(); s.gain.value = 0.3; post.connect(s); s.connect(this.reverb);
+      } else if (role === 'bass') {
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 2;
+        f.frequency.setValueAtTime(1400, t);
+        f.frequency.setTargetAtTime(320, t, 0.08);
+        f.connect(g);
+        const sub = ctx.createOscillator(); sub.type = 'sine';
+        const subG = ctx.createGain(); subG.gain.value = 0.75;
+        sub.connect(subG); subG.connect(g);
+        const saw = ctx.createOscillator(); saw.type = 'sawtooth';
+        const sawG = ctx.createGain(); sawG.gain.value = 0.4;
+        saw.connect(sawG); sawG.connect(f);
+        nodes.push(sub, saw); freqParams.push([sub.frequency, 0], [saw.frequency, 0]);
+        end = this.envelope(g, I, t, off, 0.3, 0.004, 0.06);
+        post.connect(this.master);
+      } else {
+        const pad = role === 'pad';
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 0.6;
+        if (pad) f.frequency.value = 1500;
+        else { f.frequency.setValueAtTime(3400, t); f.frequency.setTargetAtTime(900, t, 0.25); }
+        f.connect(g);
+        const dets = pad ? [-12, 0, 12] : [-5, 5];
+        const each = (pad ? 0.22 : 0.3) / Math.sqrt(tones.length * dets.length);
+        for (const tn of tones) {
+          for (const det of dets) {
+            const o = ctx.createOscillator(); o.type = 'sawtooth'; o.detune.value = det;
+            const og = ctx.createGain(); og.gain.value = each;
+            o.connect(og); og.connect(f); nodes.push(o); freqParams.push([o.frequency, tn]);
+          }
+        }
+        end = this.envelope(g, I, t, off, 1, pad ? 0.35 : 0.006, pad ? 0.9 : 0.3);
+        if (pan) pan.pan.value = pad ? 0 : (Math.random() * 0.5 - 0.25);
+        post.connect(this.master);
+        const s = ctx.createGain(); s.gain.value = pad ? 0.6 : 0.4; post.connect(s); s.connect(this.reverb);
+      }
+
+      // Pitch, and its bends: a glide slides at the instrument's rate, legato
+      // steps straight there.
+      for (const [p, off2] of freqParams) p.setValueAtTime(midiHz(ev.midi + off2), t);
+      let from = ev.midi;
+      for (const b of ev.bends) {
+        const bt = this.t0 + b.row * this.rowSec;
+        if (bt >= off) break;
+        const dur = b.glide ? Math.abs(b.midi - from) / (I.glide || 0.5) / SONG_FRAME_HZ : 0;
+        for (const [p, off2] of freqParams) {
+          p.setValueAtTime(midiHz(from + off2), bt);
+          if (dur > 0) p.exponentialRampToValueAtTime(midiHz(b.midi + off2), bt + dur);
+          else p.setValueAtTime(midiHz(b.midi + off2), bt);
+        }
+        from = b.midi;
+      }
+      for (const n of nodes) { n.start(t); n.stop(end); }
+      this.active.push({ nodes, gain: g, end });
+    }
+
+    drum(name, t) {
+      const ctx = this.ctx;
+      const g = ctx.createGain();
+      const nodes = [];
+      let end;
+      if (/kick/.test(name)) {
+        const o = ctx.createOscillator(); o.type = 'sine';
+        o.frequency.setValueAtTime(150, t);
+        o.frequency.exponentialRampToValueAtTime(44, t + 0.12);
+        o.connect(g); nodes.push(o);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.55, t + 0.003);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+        // the beater: a few milliseconds of bright noise
+        const n = ctx.createBufferSource(); n.buffer = this.noise;
+        const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3000;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.12, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.015);
+        n.connect(hp); hp.connect(ng); ng.connect(this.master); nodes.push(n);
+        end = t + 0.4;
+        g.connect(this.master);
+      } else {
+        // snare: a band of noise for the wires, a short tone for the shell
+        const n = ctx.createBufferSource(); n.buffer = this.noise;
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 0.6;
+        n.connect(bp); bp.connect(g); nodes.push(n);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.32, t + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+        const o = ctx.createOscillator(); o.type = 'triangle';
+        o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(160, t + 0.08);
+        const og = ctx.createGain();
+        og.gain.setValueAtTime(0.25, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+        o.connect(og); og.connect(this.master); nodes.push(o);
+        end = t + 0.22;
+        g.connect(this.master);
+        const s = ctx.createGain(); s.gain.value = 0.35; g.connect(s); s.connect(this.reverb);
+      }
+      for (const nd of nodes) { nd.start(t); nd.stop(end); }
+      this.active.push({ nodes, gain: g, end });
+    }
+  }
+
   class SoundEngine {
     constructor() {
       this.ctx = null;
@@ -1295,6 +3279,19 @@
       this.bgmTimer = null;
       this.bgmStep = 0;
       this.bgmTempo = 76; // Deep, slow, floating cosmic space ambient tempo
+
+      // The C64 songs (section 3a). songId is the one wanted, null for the
+      // procedural soundtrack; loadedSongId the one the worklet holds.
+      this.songId = null;
+      this.loadedSongId = null;
+      this.songNode = null;
+      this.songReady = null;
+      this.songCache = {};
+      this.onSongLoop = null;   // (id, times round) from the worklet
+      // 'modern' plays the songs on ModernSongPlayer's instruments, 'c64' on the
+      // SID synth as the C64 build's lab does.
+      this.musicStyle = 'modern';
+      this.modern = null;
 
       // Note frequency mapping (Complete 12-Tone Equal Temperament Across 6 Octaves)
       const C1 = 32.70, Cs1 = 34.65, D1 = 36.71, Eb1 = 38.89, Ds1 = 38.89, E1 = 41.20, F1 = 43.65, Fs1 = 46.25, G1 = 49.00, Ab1 = 51.91, A1 = 55.00, Bb1 = 58.27, B1 = 61.74;
@@ -1417,11 +3414,99 @@
       }
     }
 
+    // The song worklet, loaded once. Resolves to its node, or to null where
+    // worklets are missing or refuse to load -- some browsers will not take a
+    // Blob module from a page opened as a file -- and then the procedural
+    // soundtrack stands in for every song.
+    songEngine() {
+      if (this.songReady) return this.songReady;
+      if (!this.ctx || !this.ctx.audioWorklet || typeof AudioWorkletNode === 'undefined') {
+        return (this.songReady = Promise.resolve(null));
+      }
+      const url = URL.createObjectURL(new Blob([SONG_WORKLET_SRC], { type: 'application/javascript' }));
+      this.songReady = this.ctx.audioWorklet.addModule(url).then(() => {
+        const node = new AudioWorkletNode(this.ctx, 'odd-sid', { numberOfInputs: 0, outputChannelCount: [1] });
+        const level = this.ctx.createGain();
+        level.gain.value = SONG_LEVEL;
+        node.connect(level);
+        level.connect(this.musicGain || this.ctx.destination);
+        node.port.onmessage = (e) => {
+          if (e.data.loops !== undefined && this.onSongLoop) this.onSongLoop(this.loadedSongId, e.data.loops);
+        };
+        this.songNode = node;
+        return node;
+      }).catch(() => null);
+      return this.songReady;
+    }
+
+    // Choose the song by id, or null for the procedural soundtrack. A different
+    // song, or restart, starts it from the top -- at once if music is playing,
+    // otherwise when it next starts. The same song again just carries on.
+    setSong(id, restart) {
+      if (id === this.songId && !restart) return;
+      this.songId = id;
+      this.loadedSongId = null;
+      if (this.bgmPlaying) { this.stopBGM(); this.startBGM(); }
+    }
+
+    // Whether one of the C64 songs is what is actually sounding.
+    songAudible() {
+      const engine = this.musicStyle === 'modern' ? this.modern : this.songNode;
+      return this.bgmPlaying && !!engine && this.songId !== null && this.loadedSongId === this.songId;
+    }
+
+    modernEngine() {
+      if (!this.modern) {
+        const level = this.ctx.createGain();
+        level.gain.value = MODERN_LEVEL;
+        level.connect(this.musicGain || this.ctx.destination);
+        this.modern = new ModernSongPlayer(this.ctx, level);
+        this.modern.onLoop = (n) => { if (this.onSongLoop) this.onSongLoop(this.loadedSongId, n); };
+      }
+      return this.modern;
+    }
+
+    // Switch between the modern instruments and the SID synth. The song starts
+    // again from the top on the new one.
+    setMusicStyle(style) {
+      if (style === this.musicStyle) return;
+      const was = this.bgmPlaying;
+      this.stopBGM();
+      this.musicStyle = style;
+      this.loadedSongId = null;
+      if (was) this.startBGM();
+    }
+
     startBGM() {
       if (this.bgmPlaying || !this.enabled || !this.musicEnabled) return;
       this.init();
       if (!this.ctx) return;
       this.bgmPlaying = true;
+      const song = this.songId && SONGS.find(sg => sg.id === this.songId);
+      if (!song) { this.startProcedural(); return; }
+      const id = this.songId;
+      if (this.musicStyle === 'modern') {
+        const m = this.modernEngine();
+        if (this.loadedSongId !== id) { m.load(song); this.loadedSongId = id; }
+        m.play();
+        return;
+      }
+      this.songEngine().then(node => {
+        if (!this.bgmPlaying || this.songId !== id) return;   // stopped or changed while loading
+        if (!node) { this.startProcedural(); return; }
+        if (this.loadedSongId !== id) {
+          const packed = this.songCache[id] || (this.songCache[id] = songFrames(song));
+          node.port.postMessage({ song: packed });
+          this.loadedSongId = id;
+        }
+        node.port.postMessage({ play: true });
+      });
+    }
+
+    // The procedural soundtrack that played before the C64 songs, kept for
+    // where they cannot.
+    startProcedural() {
+      if (this.bgmTimer) return;
       this.bgmStep = 0;
       const stepDuration = 60 / this.bgmTempo / 4;
       this.bgmTimer = setInterval(() => {
@@ -1437,6 +3522,9 @@
         clearInterval(this.bgmTimer);
         this.bgmTimer = null;
       }
+      // Paused, not reset: the next start picks the song up where it stopped.
+      if (this.songNode) this.songNode.port.postMessage({ play: false });
+      if (this.modern) this.modern.pause();
     }
 
     playAmigaStep(step) {
@@ -1844,6 +3932,89 @@
           osc2.start(now); osc2.stop(now + dur);
           break;
         }
+        case 'boom': {
+          // A special ball going off. param is the engine's boomKind: 2 a bomb,
+          // 1 a sweep with no bomb in the same pass.
+          //
+          // The bomb is the C64 build's boom -- noise falling from 3000 Hz over
+          // about 0.45s -- with a sub-bass drop under it, which the SID could not
+          // spare a voice for. The sweep is a rush rather than a bang: the noise
+          // rises through a narrow band, the way something passing reads.
+          const dur = param === 1 ? 0.42 : 0.55;
+          const len = Math.floor(this.ctx.sampleRate * dur);
+          const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+          const noise = this.ctx.createBufferSource();
+          noise.buffer = buf;
+          const filter = this.ctx.createBiquadFilter();
+          const gain = this.ctx.createGain();
+          if (param === 1) {
+            filter.type = 'bandpass';
+            filter.Q.value = 4;
+            filter.frequency.setValueAtTime(500, now);
+            filter.frequency.exponentialRampToValueAtTime(4200, now + dur);
+            gain.gain.setValueAtTime(0.001, now);
+            // 0.6: at 0.22 it measured RMS 0.008 against a pop's 0.045, and was
+            // lost under the bottom row's own pops.
+            gain.gain.linearRampToValueAtTime(0.6, now + dur * 0.6);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+          } else {
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(3000, now);
+            filter.frequency.exponentialRampToValueAtTime(120, now + dur);
+            gain.gain.setValueAtTime(0.001, now);
+            gain.gain.linearRampToValueAtTime(0.30, now + 0.008);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+            const sub = this.ctx.createOscillator();
+            const subGain = this.ctx.createGain();
+            sub.type = 'sine';
+            sub.frequency.setValueAtTime(110, now);
+            sub.frequency.exponentialRampToValueAtTime(32, now + 0.4);
+            subGain.gain.setValueAtTime(0.001, now);
+            subGain.gain.linearRampToValueAtTime(0.28, now + 0.01);
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+            sub.connect(subGain); subGain.connect(out);
+            sub.start(now); sub.stop(now + 0.45);
+          }
+          noise.connect(filter); filter.connect(gain); gain.connect(out);
+          noise.start(now); noise.stop(now + dur);
+          break;
+        }
+        case 'thud': {
+          // A stone crumbling alone, or crushing the ball it fell on: dull and
+          // short, a knock with a little grit on it, well under the bomb so the
+          // two are never confused.
+          const dur = 0.18;
+          const len = Math.floor(this.ctx.sampleRate * dur);
+          const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+          const grit = this.ctx.createBufferSource();
+          grit.buffer = buf;
+          const filter = this.ctx.createBiquadFilter();
+          const gritGain = this.ctx.createGain();
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(900, now);
+          filter.frequency.exponentialRampToValueAtTime(200, now + dur);
+          gritGain.gain.setValueAtTime(0.10, now);
+          gritGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+          grit.connect(filter); filter.connect(gritGain); gritGain.connect(out);
+          grit.start(now); grit.stop(now + dur);
+
+          const knock = this.ctx.createOscillator();
+          const knockGain = this.ctx.createGain();
+          knock.type = 'sine';
+          knock.frequency.setValueAtTime(150, now);
+          knock.frequency.exponentialRampToValueAtTime(55, now + 0.12);
+          knockGain.gain.setValueAtTime(0.001, now);
+          knockGain.gain.linearRampToValueAtTime(0.16, now + 0.004);
+          knockGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+          knock.connect(knockGain); knockGain.connect(out);
+          knock.start(now); knock.stop(now + 0.14);
+          break;
+        }
         case 'levelup': {
           // Was a square wave sweeping 300 -> 1400 Hz at 0.2 gain over 0.4s. Three
           // things made that harsh rather than celebratory: a square is nothing but
@@ -1957,8 +4128,17 @@
         new THREE.Color(0x10b981),
         new THREE.Color(0xf59e0b),
         new THREE.Color(0xa855f7),
-        new THREE.Color(0xec4899)
+        new THREE.Color(0xec4899),
+        // In ballSlot order after the six: joker, bomb, stone.
+        new THREE.Color(0xf2eeff),
+        new THREE.Color(0xff8a1e),
+        new THREE.Color(0x9c9a96)
       ];
+    }
+
+    // A ball value's particle colour, by the same mapping the renderer draws with.
+    colourFor(v) {
+      return this.colorPalette[ballSlot(v)] || new THREE.Color(0xffffff);
     }
 
     // One sprite shared by every burst. It used to be built per call, and
@@ -2012,23 +4192,82 @@
       this.particles.push({ mesh: cloud, velocities, life: 1.0, decay: opts.decay });
     }
 
+    // A bomb going off: the ordinary pop's white flare and coloured body, but
+    // bigger, hotter and in layers -- a yellow core, an orange body thrown wide,
+    // and slow dark embers left hanging after it -- so it reads as a blast where
+    // the balls around it only pop.
+    spawnFireball(worldPos) {
+      this.spawnShell(worldPos, new THREE.Color(0xffffff),
+        { count: 24, size: 1.6, speed: 1.0, spread: 3.0, decay: 4.2 });
+      this.spawnShell(worldPos, new THREE.Color(0xffd27a),
+        { count: 50, size: 1.05, speed: 2.0, spread: 4.5, decay: 1.9 });
+      this.spawnShell(worldPos, new THREE.Color(0xff6a10),
+        { count: 80, size: 0.8, speed: 3.4, spread: 6.8, decay: 0.95 });
+      this.spawnShell(worldPos, new THREE.Color(0x8a2a08),
+        { count: 30, size: 0.55, speed: 1.2, spread: 2.2, decay: 0.6 });
+    }
+
+    // The sweep crossing the bottom row: a white-hot head running from one end to
+    // the other in the charged ball's colour, shedding sparks that string out
+    // behind it. No gravity on any of it, so it stays a line along the row.
+    spawnSweep(fromPos, toPos, color, dur = 0.38) {
+      const dx = (toPos.x - fromPos.x) / dur;
+      const dy = (toPos.y - fromPos.y) / dur;
+      const make = (count, size, col, decay, spreadV) => {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(count * 3);
+        const velocities = [];
+        for (let i = 0; i < count; i++) {
+          positions[i * 3] = fromPos.x;
+          positions[i * 3 + 1] = fromPos.y;
+          positions[i * 3 + 2] = fromPos.z;
+          // The head runs at full speed; the sparks at anything down to a third
+          // of it, which is what spreads them out along the row behind it.
+          const f = count === 1 ? 1 : 0.35 + 0.65 * Math.random();
+          velocities.push(dx * f, dy * f + (Math.random() - 0.5) * spreadV,
+                          (Math.random() - 0.2) * spreadV);
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({
+          color: col, size: size, map: this.popSprite(), transparent: true,
+          blending: THREE.AdditiveBlending, depthWrite: false
+        });
+        const cloud = new THREE.Points(geometry, material);
+        this.scene.add(cloud);
+        this.particles.push({ mesh: cloud, velocities, life: 1.0, decay: decay, noGravity: true });
+      };
+      make(1, 2.2, new THREE.Color(0xffffff), 1 / dur, 0);
+      make(70, 0.6, color, 1.1, 1.2);
+    }
+
     // Two shells, not one. A single coloured puff was easy to miss in a cascade,
     // and simply adding particles to it just made a denser puff. What reads as an
     // explosion is the contrast: a white core that flares and is gone inside a
     // fifth of a second, then the ball's own colour thrown wider and lingering
     // long enough to see where it went.
-    spawnPopExplosion(worldPos, colorIndex = 1) {
-      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+    //
+    // Takes the ball's value, not a colour: a bomb gets the fireball instead, and
+    // a joker throws its body in three of the six colours rather than one.
+    spawnPopExplosion(worldPos, value = 1) {
+      if (value === BOMB) { this.spawnFireball(worldPos); return; }
       // Core flash: few, large, fast, white.
       this.spawnShell(worldPos, new THREE.Color(0xffffff),
         { count: 14, size: 0.85, speed: 1.4, spread: 2.6, decay: 5.2 });
       // Body: the ball's colour, thrown further and given time to be seen.
-      this.spawnShell(worldPos, color,
-        { count: 46, size: 0.55, speed: 2.8, spread: 5.4, decay: 1.05 });
+      if (value === JOKER) {
+        const first = Math.floor(Math.random() * 6);
+        for (let k = 0; k < 3; k++) {
+          this.spawnShell(worldPos, this.colorPalette[(first + k * 2) % 6],
+            { count: 16, size: 0.55, speed: 2.8, spread: 5.4, decay: 1.05 });
+        }
+      } else {
+        this.spawnShell(worldPos, this.colourFor(value),
+          { count: 46, size: 0.55, speed: 2.8, spread: 5.4, decay: 1.05 });
+      }
     }
 
-    spawnTrailParticle(worldPos, colorIndex = 1) {
-      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+    spawnTrailParticle(worldPos, value = 1) {
+      const color = this.colourFor(value);
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array([
         worldPos.x + (Math.random() - 0.5) * 0.3,
@@ -2056,8 +4295,8 @@
       });
     }
 
-    spawnLockSparks(worldPos, colorIndex = 1, count = 16) {
-      const color = this.colorPalette[(colorIndex - 1) % this.colorPalette.length] || new THREE.Color(0xffffff);
+    spawnLockSparks(worldPos, value = 1, count = 16) {
+      const color = this.colourFor(value);
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array(count * 3);
       const velocities = [];
@@ -2143,7 +4382,7 @@
           positions[j * 3] += p.velocities[j * 3] * dt;
           positions[j * 3 + 1] += p.velocities[j * 3 + 1] * dt;
           positions[j * 3 + 2] += p.velocities[j * 3 + 2] * dt;
-          p.velocities[j * 3 + 1] -= 2.0 * dt;
+          if (!p.noGravity) p.velocities[j * 3 + 1] -= 2.0 * dt;
         }
         p.mesh.geometry.attributes.position.needsUpdate = true;
       }
@@ -2247,7 +4486,19 @@
         { main: 0x00a83c, roughness: 0.18, metalness: 0.25, emissive: 0x00250d }, // 3: Vibrant Emerald Green
         { main: 0xd9a406, roughness: 0.20, metalness: 0.40, emissive: 0x2f2401 }, // 4: Amber Gold
         { main: 0x8020b8, roughness: 0.15, metalness: 0.30, emissive: 0x1c0728 }, // 5: Electric Amethyst Purple
-        { main: 0xd8009c, roughness: 0.15, metalness: 0.30, emissive: 0x2f0022 }  // 6: Hot Magenta
+        { main: 0xd8009c, roughness: 0.15, metalness: 0.30, emissive: 0x2f0022 }, // 6: Hot Magenta
+
+        // The special balls, in ballSlot order after the six. Each is told apart
+        // by something other than hue, because hue is what the six already use.
+        //
+        // Joker: the colour here is only a rest value -- render() cycles it round
+        // the hue wheel, which is how the C64 build shows a ball that is every
+        // colour at once. Bomb: dark gunmetal, with an orange spark that dressBall
+        // adds. Stone: matte and faceted, on its own rough geometry, so it reads
+        // as rock rather than as a grey ball.
+        { main: 0xc8c8d8, roughness: 0.12, metalness: 0.30, emissive: 0x2a2a30 }, // 7: Joker
+        { main: 0x30333a, roughness: 0.30, metalness: 0.65, emissive: 0x060708 }, // 8: Bomb
+        { main: 0x4a4845, roughness: 0.95, metalness: 0.02, emissive: 0x0a0a09, flat: true } // 9: Stone
       ];
 
       const clip = this.topClipPlane ? [this.topClipPlane] : null;
@@ -2259,6 +4510,7 @@
           metalness: c.metalness,
           emissive: c.emissive,
           emissiveIntensity: 0.25,
+          flatShading: !!c.flat,
           clippingPlanes: clip,
           clipShadows: true      // otherwise a masked ball still casts a shadow
         });
@@ -2271,6 +4523,7 @@
           color: c.main,
           roughness: 0.5,
           metalness: 0.1,
+          flatShading: !!c.flat,
           transparent: true,
           opacity: GHOST_OPACITY,
           clippingPlanes: clip,
@@ -2284,6 +4537,12 @@
         this.ballMaterials.push(mat);
         this.ghostMaterials.push(ghostMat);
       });
+
+      // The joker's colour is driven every frame instead of breathed: the value is
+      // the brightness it cycles at, so the falling piece's dimmed copy below can
+      // carry its own.
+      this.ballMaterials[SLOT_JOKER].userData.cycle = 1;
+      this.ghostMaterials[SLOT_JOKER].userData.cycle = 1;
 
       // The falling piece gets its own copies of the six, dimmed. It shares the
       // palette but not the brightness.
@@ -2313,8 +4572,109 @@
         // Its own rest value, or the breathe in render() would pull it back to the
         // settled balls' brightness on the first frame.
         a.userData = { baseColor: a.color.clone() };
+        if (m.userData.cycle) a.userData.cycle = ACTIVE_BALL_DIM;
         return a;
       });
+
+      this.initSpecialMarkers(clip);
+    }
+
+    // The pieces the special balls wear on top of a material, shared by every
+    // ball that needs them.
+    initSpecialMarkers(clip) {
+      // The charged sweep's slit: a dark band round the ball's equator, seen edge
+      // on so it crosses the face as a line. The C64 build's look, and chosen for
+      // the same reason -- it marks the ball without touching its colour, which is
+      // what the ball plays as.
+      this.slitGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.0, SPHERE_RADIUS * 0.13, 8, 40);
+      this.slitMat = new THREE.MeshStandardMaterial({
+        color: 0x08080c, roughness: 0.4, metalness: 0.2,
+        clippingPlanes: clip, clipShadows: true
+      });
+
+      // The bomb's spark: a soft orange glow on its shoulder, flickered in
+      // render(). One material for every bomb, so one write flickers them all.
+      const S = 64;
+      const cvs = document.createElement('canvas');
+      cvs.width = S; cvs.height = S;
+      const ctx = cvs.getContext('2d');
+      const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.2, 'rgba(255,240,200,0.95)');
+      g.addColorStop(0.45, 'rgba(255,160,60,0.45)');
+      g.addColorStop(1, 'rgba(255,90,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, S, S);
+      this.bombSparkMat = new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(cvs),
+        color: 0xff9a3a,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        clippingPlanes: clip
+      });
+
+      // The stone's rock: an icosahedron with its corners pushed in and out. The
+      // displacement is keyed on the corner's position, not its index, because the
+      // geometry is unindexed -- each face has its own copy of every corner, and
+      // moving the copies separately would split the faces apart.
+      const rock = new THREE.IcosahedronGeometry(SPHERE_RADIUS, 1);
+      const pos = rock.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        const h = Math.sin(Math.round(v.x * 1e3) * 12.9898 + Math.round(v.y * 1e3) * 78.233 +
+                           Math.round(v.z * 1e3) * 37.719) * 43758.5453;
+        v.multiplyScalar(0.86 + 0.16 * (h - Math.floor(h)));
+        pos.setXYZ(i, v.x, v.y, v.z);
+      }
+      rock.computeVertexNormals();
+      this.stoneGeo = rock;
+    }
+
+    // Puts a ball into the look its value calls for: material, geometry and any
+    // marker. Every mesh that shows a cell or a piece goes through here, because
+    // meshes are reused as balls fall and a reused one has to shed the last
+    // ball's marker as well as take the new material.
+    dressBall(mesh, val, mats) {
+      const slot = ballSlot(val);
+      mesh.material = mats[slot];
+      mesh.geometry = slot === SLOT_STONE ? this.stoneGeo : this.sphereGeo;
+
+      const want = isCharged(val) ? 'slit' : (val === BOMB ? 'spark' : null);
+      if ((mesh.userData.marker || null) === want) return;
+      if (mesh.userData.markerObj) mesh.remove(mesh.userData.markerObj);
+      mesh.userData.markerObj = null;
+      mesh.userData.marker = want;
+      if (want === 'slit') {
+        const o = new THREE.Mesh(this.slitGeo, this.slitMat);
+        o.rotation.x = Math.PI / 2;
+        mesh.add(o);
+        mesh.userData.markerObj = o;
+      } else if (want === 'spark') {
+        const o = new THREE.Sprite(this.bombSparkMat);
+        // Up and towards the camera, so it sits on the visible shoulder.
+        o.position.set(SPHERE_RADIUS * 0.35, SPHERE_RADIUS * 0.6, SPHERE_RADIUS * 0.8);
+        o.scale.setScalar(SPHERE_RADIUS * 1.3);
+        mesh.add(o);
+        mesh.userData.markerObj = o;
+      }
+    }
+
+    // The joker's colour now: round the whole hue wheel every four seconds, at the
+    // saturation and lightness the six sit at, scaled by k for the dimmed piece.
+    // Round the wheel rather than stepping through the six, because a joker that
+    // paused on red would read, for that moment, as a red ball.
+    jokerColour(target, k) {
+      const h = ((this._flightTime || 0) * 0.25) % 1;
+      target.setHSL(h, 0.85, 0.42);
+      target.multiplyScalar(k);
+    }
+
+    // The colour a ball lights the board with as it falls. A bomb glows with its
+    // spark rather than its dark shell, which would light nothing.
+    glowColour(val) {
+      return val === BOMB ? this.bombSparkMat.color : this.ballMaterials[ballSlot(val)].color;
     }
 
     initLights() {
@@ -2578,8 +4938,6 @@
 
           if (val > 0) {
             currentKeys.add(key);
-            const colorIdx = (val - 1) % this.ballMaterials.length;
-            const mat = this.ballMaterials[colorIdx];
             const wPos = gridToWorld(x, y, SPHERE_RADIUS);
 
             let mesh = this.staticBallMeshes.get(key);
@@ -2592,9 +4950,10 @@
               if (sourceMesh && !assignedMeshes.has(sourceMesh)) {
                 mesh = sourceMesh;
                 this.staticBallMeshes.delete(fromKey);
-                mesh.material = mat;
+                this.dressBall(mesh, val, this.ballMaterials);
               } else {
-                mesh = new THREE.Mesh(this.sphereGeo, mat);
+                mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+                this.dressBall(mesh, val, this.ballMaterials);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
                 this.ballsGroup.add(mesh);
@@ -2612,14 +4971,15 @@
             }
 
             if (!mesh) {
-              mesh = new THREE.Mesh(this.sphereGeo, mat);
+              mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+              this.dressBall(mesh, val, this.ballMaterials);
               mesh.castShadow = true;
               mesh.receiveShadow = true;
               mesh.targetPos = new THREE.Vector3(wPos.x, wPos.y, wPos.z);
               mesh.position.set(wPos.x, wPos.y, wPos.z);
               this.ballsGroup.add(mesh);
             } else {
-              mesh.material = mat;
+              this.dressBall(mesh, val, this.ballMaterials);
               if (!mesh.isPathDropping) {
                 mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
               }
@@ -2673,8 +5033,7 @@
 
           if (val > 0) {
             mesh.visible = true;
-            const colorIdx = (val - 1) % this.ballMaterials.length;
-            mesh.material = this.activeBallMaterials[colorIdx];
+            this.dressBall(mesh, val, this.activeBallMaterials);
 
             const relX = engine.activeRel ? engine.activeRel[i].x : engine.oddballz.rel[i].x;
             const relY = engine.activeRel ? engine.activeRel[i].y : engine.oddballz.rel[i].y;
@@ -2732,7 +5091,7 @@
             // wide soft pool. Spreading the glow properly needs a flat additive
             // decal on the board rather than a light.
             L.position.set(mesh.position.x, mesh.position.y, mesh.position.z - SPHERE_RADIUS);
-            L.color.copy(this.ballMaterials[(val - 1) % this.ballMaterials.length].color);
+            L.color.copy(this.glowColour(val));
             // Base only. render() pulses around this each frame, so setting
             // intensity directly here would fight it.
             //
@@ -2758,7 +5117,7 @@
             // ball's z: the decal is a mark on the surface, so it must not rise
             // and fall with the piece's hover.
             decal.position.set(mesh.position.x, mesh.position.y, glowZ);
-            decal.material.color.copy(this.ballMaterials[(val - 1) % this.ballMaterials.length].color);
+            decal.material.color.copy(this.glowColour(val));
             decal.visible = true;
           } else {
             decal.visible = false;
@@ -2787,9 +5146,9 @@
           const val = engine.oddballz.image[i];
 
           if (val > 0 && gPts) {
-            const colorIdx = (val - 1) % this.ghostMaterials.length;
-            const mat = this.ghostMaterials[colorIdx];
-            const ghostMesh = new THREE.Mesh(this.sphereGeo, mat);
+            const slot = ballSlot(val);
+            const ghostMesh = new THREE.Mesh(slot === SLOT_STONE ? this.stoneGeo : this.sphereGeo,
+                                             this.ghostMaterials[slot]);
 
             const wPos = gridToWorld(gPts.x, gPts.y, SPHERE_RADIUS);
             ghostMesh.position.set(wPos.x, wPos.y, wPos.z);
@@ -3254,11 +5613,23 @@
         for (let i = 0; i < set.length; i++) {
           const m = set[i];
           const base = m.userData && m.userData.baseColor;
-          if (base) {
+          if (m.userData && m.userData.cycle) {
+            this.jokerColour(m.color, m.userData.cycle);
+          } else if (base) {
             const f = 0.96 + 0.06 * Math.sin(this._flightTime * 1.6 + i * 1.05);
             m.color.setRGB(base.r * f, base.g * f, base.b * f);
           }
         }
+      }
+      if (this.ghostMaterials[SLOT_JOKER]) this.jokerColour(this.ghostMaterials[SLOT_JOKER].color, 1);
+
+      // The bomb's spark flickers: two sines out of step, so it never settles into
+      // a visible beat, and it warms towards yellow as it flares.
+      if (this.bombSparkMat) {
+        const t = this._flightTime;
+        const fl = 0.5 + 0.5 * Math.sin(t * 23.0) * Math.sin(t * 7.3 + 1.1);
+        this.bombSparkMat.opacity = 0.65 + 0.35 * fl;
+        this.bombSparkMat.color.setRGB(1.0, 0.5 + 0.3 * fl, 0.15 + 0.15 * fl);
       }
 
       // === 3D SPACE FLIGHT MOTION ===
@@ -3490,6 +5861,91 @@
 
     onWindowResize() {
       this.updateCameraFraming();
+      // Turned between portrait and landscape: the other cut of the picture.
+      if (this.backdropIndex !== null && this.backdropIndex !== undefined &&
+          this.viewIsPortrait() !== this.backdropPortrait) this.setBackdrop(this.backdropIndex);
+      else this.fitBackdrop();
+    }
+
+    // Show background picture i (an index into BACKDROPS), or the plain colour for
+    // null. Loaded on first use and kept, so stepping through them later costs
+    // nothing; a picture that fails to load leaves the plain colour in place.
+    //
+    // A portrait screen takes the picture's portrait cut, <file>_portrait.jpg,
+    // where there is one. The pictures are landscape compositions, most of them a
+    // frame round an empty middle, and a portrait phone's cover-crop keeps only
+    // the middle third of the width -- the frame is exactly what it loses. With no
+    // portrait cut, the landscape picture is cropped as before.
+    //
+    // It goes in as scene.background, so it is drawn first and everything else --
+    // the flying stars included -- passes in front of it. Dimmed on the way in:
+    // the board and balls are lit for a near-black surround, and a full-strength
+    // picture behind them competes with the balls for the eye.
+    setBackdrop(i) {
+      this.backdropIndex = i;
+      if (i === null || i === undefined || !BACKDROPS[i]) {
+        this.scene.background = this.plainBackground || (this.plainBackground = new THREE.Color(0x0a0c16));
+        return;
+      }
+      if (!this.plainBackground) this.plainBackground = this.scene.background;
+      this.backdropTextures = this.backdropTextures || {};
+      this.noPortraitCut = this.noPortraitCut || {};
+      this.backdropPortrait = this.viewIsPortrait();
+      const portrait = this.backdropPortrait && !this.noPortraitCut[i];
+      const key = portrait ? i + 'p' : String(i);
+      this.backdropKey = key;
+      const have = this.backdropTextures[key];
+      if (have) { this.scene.background = have; this.fitBackdrop(); return; }
+      if (have === null) return;          // still loading
+      this.backdropTextures[key] = null;
+      const img = new Image();
+      img.onload = () => {
+        const cvs = document.createElement('canvas');
+        cvs.width = img.naturalWidth;
+        cvs.height = img.naturalHeight;
+        const ctx = cvs.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        ctx.fillStyle = 'rgba(0, 0, 0, ' + BACKDROP_DIM + ')';
+        ctx.fillRect(0, 0, cvs.width, cvs.height);
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.userData = { aspect: cvs.width / cvs.height };
+        this.backdropTextures[key] = tex;
+        // Only if it is still the one wanted: a quick step past it while it loaded
+        // must not snap back to it.
+        if (this.backdropKey === key) { this.scene.background = tex; this.fitBackdrop(); }
+      };
+      img.onerror = () => {
+        delete this.backdropTextures[key];
+        // No portrait cut of this one: remember, and fall back to the landscape.
+        if (portrait) {
+          this.noPortraitCut[i] = true;
+          if (this.backdropKey === key) this.setBackdrop(i);
+        }
+      };
+      img.src = './backgrounds/' + BACKDROPS[i].file + (portrait ? '_portrait' : '') + '.jpg?v=' + BACKDROP_REV;
+    }
+
+    viewIsPortrait() {
+      const el = this.renderer.domElement;
+      return (el.clientWidth || 1) < (el.clientHeight || 1);
+    }
+
+    // Cover-crop: fill the screen and trim whichever way the picture overhangs,
+    // centred. A background texture is otherwise stretched to the viewport, which
+    // on a portrait phone squeezes a 16:9 picture to a third of its width.
+    fitBackdrop() {
+      const tex = this.scene.background;
+      if (!tex || !tex.isTexture) return;
+      const el = this.renderer.domElement;
+      const view = (el.clientWidth || 1) / (el.clientHeight || 1);
+      const pic = tex.userData.aspect || 16 / 9;
+      if (view < pic) {
+        tex.repeat.set(view / pic, 1);
+        tex.offset.set((1 - view / pic) / 2, 0);
+      } else {
+        tex.repeat.set(1, pic / view);
+        tex.offset.set(0, (1 - pic / view) / 2);
+      }
     }
   }
 
@@ -3524,26 +5980,192 @@
       if (savedAudio.musicEnabled !== undefined) this.audio.musicEnabled = savedAudio.musicEnabled;
       if (savedAudio.sfxEnabled !== undefined) this.audio.sfxEnabled = savedAudio.sfxEnabled;
       if (savedAudio.masterEnabled !== undefined) this.audio.enabled = savedAudio.masterEnabled;
+      if (savedAudio.musicStyle === 'c64' || savedAudio.musicStyle === 'modern') this.audio.musicStyle = savedAudio.musicStyle;
 
       this.initHooks();
+      this.initUpdateCheck();
       this.initEventListeners();
       this.initTouchControls();
       this.updateUI();
 
+      this.applyBackdropChoice();
+      // The title's song on the first touch or key, since a page may not start
+      // sound before one. Capture phase, so it runs before a key that starts a
+      // game -- which then simply switches to the game's song.
+      const firstGesture = () => {
+        window.removeEventListener('pointerdown', firstGesture, true);
+        window.removeEventListener('keydown', firstGesture, true);
+        this.playTitleSong();
+      };
+      window.addEventListener('pointerdown', firstGesture, true);
+      window.addEventListener('keydown', firstGesture, true);
       this.renderer.updateScene(this.engine);
       requestAnimationFrame((t) => this.gameLoop(t));
 
       this.scheduleAttractIdle();
     }
 
+    // Offers a newer deploy, the way the timesheet app does: a bar saying what is
+    // new and which version is on offer, and a Reload button. It never reloads by
+    // itself, and never shows over a game in play -- only on the title, the pause
+    // screen or game over -- so an update cannot cost a game in progress.
+    //
+    // No service worker (index.html says why it is off): the deployed index.html
+    // is the version record. It is fetched past the cache, its ?v= on the script
+    // compared with the one running, and its release-notes meta tag read for what
+    // changed. Checked at start, on coming back to the page -- which on an iPhone
+    // is reopening the home-screen app -- and every 15 minutes.
+    initUpdateCheck() {
+      if (!/^https?:$/.test(location.protocol)) return;
+      const tag = document.querySelector('script[src*="oddballz-app.js"]');
+      const m = tag && /[?&]v=([\d.]+)/.exec(tag.src);
+      if (!m) return;
+      this.runningVersion = m[1];
+      const page = location.origin + location.pathname;
+      let busy = false;
+      const check = async () => {
+        if (busy || this.updateOffer) return;
+        busy = true;
+        try {
+          const res = await fetch(page, { cache: 'no-store' });
+          if (!res.ok) return;
+          const html = await res.text();
+          const v = /oddballz-app\.js\?v=([\d.]+)/.exec(html);
+          if (!v || v[1] === this.runningVersion) return;
+          const n = /<meta\s+name="release-notes"\s+content="([^"]*)"/.exec(html);
+          this.updateOffer = { version: v[1], notes: n ? n[1] : '' };
+          this.showUpdateBar();
+        } catch (e) {
+          // offline, or the host is down: try again at the next check
+        } finally {
+          busy = false;
+        }
+      };
+      setTimeout(check, 3000);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+      window.addEventListener('focus', check);
+      setInterval(check, 15 * 60 * 1000);
+    }
+
+    // Fills the bar from the offer and shows it, or hides it while a game is in
+    // play. Called when an offer arrives and at every change of screen.
+    showUpdateBar() {
+      const bar = document.getElementById('updateBar');
+      const offer = this.updateOffer;
+      if (!bar || !offer) return;
+      const inPlay = this.isPlaying && !this.isPaused && !this.engine.endGame;
+      if (inPlay) { bar.classList.add('hidden'); return; }
+      if (!bar.dataset.filled) {
+        bar.dataset.filled = '1';
+        // The notes: lines split on |, the first the headline, the rest a list;
+        // a line starting ! is something the player has to do, marked out.
+        const lines = offer.notes.split('|').map(t => t.trim()).filter(Boolean);
+        if (lines.length) document.getElementById('updHead').textContent = 'New version: ' + lines[0];
+        const ul = document.getElementById('updList');
+        ul.innerHTML = '';
+        for (const t of lines.slice(1)) {
+          const li = document.createElement('li');
+          li.textContent = t.startsWith('!') ? t.slice(1).trim() : t;
+          if (t.startsWith('!')) li.className = 'warn';
+          ul.appendChild(li);
+        }
+        ul.hidden = lines.length < 2;
+        // Which version is on offer and which is running. Without it, an update
+        // followed straight away by another looks like a Reload that did nothing
+        // -- the timesheet's lesson.
+        document.getElementById('updVer').textContent =
+          'Going from ' + this.runningVersion + ' to ' + offer.version;
+        const btn = document.getElementById('updateBtn');
+        btn.onclick = async () => {
+          btn.disabled = true;
+          btn.textContent = 'Reloading…';
+          // Refresh the cached copy of the page first: a plain reload can be
+          // answered from the HTTP cache, which is the old version again.
+          try { await fetch(location.origin + location.pathname, { cache: 'reload' }); } catch (e) {}
+          location.reload();
+        };
+      }
+      bar.classList.remove('hidden');
+    }
+
     initHooks() {
-      this.engine.onPlaySound = (type, param) => this.audio.playSound(type, param);
+      // The engine calls onPopBalls and then, straight after, the sound for what
+      // just happened -- 'boom' or 'thud' from bombBlast, 'pop' from a match or a
+      // row. So the sound is what says where the last pops came from, and it is
+      // the point at which the sweep's own effect can be drawn.
+      //
+      // The sweep cannot be read off engine.boomKind alone: a bomb in the same
+      // pass overwrites the 1 with a 2. What does say it is rcFire, which the
+      // engine leaves set after a charged ball goes and clears at the start of
+      // the next pass, where the sweep fires. Read after every sound, it tells
+      // whether the next blast carries a sweep.
+      this.engine.onPlaySound = (type, param) => {
+        // Under ALL the picture moves on when its song has played SONG_PLAYS
+        // times (onSongLoop, below). With no song sounding -- music off, or a
+        // picture that has none -- a new level is the beat instead.
+        if (type === 'levelup' && this.backdropAll && !this.audio.songAudible()) this.stepTheme();
+        if (type === 'levelup' && this.isPlaying) this.showBanner('bannerLevel', 'LEVEL ' + this.engine.level);
+        if (type === 'boom' && this.sweepArmed) this.drawSweep(this.lastPops || []);
+        this.sweepArmed = this.engine.rcFire === 1;
+        if (this.sweepArmed) {
+          const c = (this.lastPops || []).find(m => isCharged(m.color));
+          if (c) this.sweepFrom = c;
+        }
+        this.lastPops = null;
+        this.audio.playSound(type, type === 'boom' ? this.engine.boomKind : param);
+      };
+      this.engine.onChain = (step) => {
+        if (this.isPlaying) this.showBanner('bannerChain', 'CHAIN ' + step);
+      };
+      this.audio.onSongLoop = (id, loops) => {
+        if (!this.isPlaying || !this.backdropAll || loops < SONG_PLAYS) return;
+        const cur = BACKDROPS[this.renderer.backdropIndex];
+        if (cur && cur.song === id) this.stepTheme();
+      };
       this.engine.onPopBalls = (matchList) => {
+        this.lastPops = matchList;
         for (const m of matchList) {
           const wPos = gridToWorld(m.x, m.y, SPHERE_RADIUS);
           this.particles.spawnPopExplosion(wPos, m.color || 1);
         }
       };
+    }
+
+    // The picture a game starts on: the one chosen on the title card, or under ALL
+    // the first, as the C64 build's every game does. Also what the title shows.
+    applyBackdropChoice() {
+      const b = storedBackdrop();
+      this.backdropAll = (b === BACKDROP_ALL);
+      this.renderer.setBackdrop(this.backdropAll ? 0 : b);
+    }
+
+    // The next picture and its song, from the top.
+    stepTheme() {
+      const next = (this.renderer.backdropIndex + 1) % BACKDROPS.length;
+      this.renderer.setBackdrop(next);
+      this.audio.setSong(BACKDROPS[next].song, true);
+    }
+
+    // The title's song, wherever the title is showing and sound can start.
+    playTitleSong() {
+      if (this.isPlaying) return;
+      this.audio.setSong('title');
+      this.audio.startBGM();
+    }
+
+    // The sweep's run along the bottom row, from the end nearer the charged ball
+    // that set it off to the far end, in that ball's colour. Drawn over the row's
+    // own pops, which spawnPopExplosion has already thrown.
+    drawSweep(pops) {
+      const row = pops.filter(m => m.y === BOARD_BOUNDS.MAX_Y);
+      if (row.length === 0) return;
+      let lo = row[0].x, hi = row[0].x;
+      for (const m of row) { lo = Math.min(lo, m.x); hi = Math.max(hi, m.x); }
+      const src = this.sweepFrom;
+      const fromLeft = !src || (src.x - lo) <= (hi - src.x);
+      const a = gridToWorld(fromLeft ? lo : hi, BOARD_BOUNDS.MAX_Y, SPHERE_RADIUS);
+      const b = gridToWorld(fromLeft ? hi : lo, BOARD_BOUNDS.MAX_Y, SPHERE_RADIUS);
+      this.particles.spawnSweep(a, b, this.particles.colourFor(src ? src.color : 1));
     }
 
     initEventListeners() {
@@ -3596,6 +6218,20 @@
             if (el && !el.classList.contains('hidden')) { close(); closed = true; break; }
           }
           if (!closed && this.isPlaying) this.togglePause();   // pause, or resume
+          e.preventDefault(); return;
+        }
+
+        // B steps to the next background and its song. In a game the one it lands
+        // on is then held, as the C64 build's B does; on the title it is the
+        // Background button.
+        if (code === 'KeyB' || key === 'b' || key === 'B') {
+          if (!this.isPlaying) {
+            const btn = document.getElementById('btnBackdrop');
+            if (btn) btn.click();
+          } else if (!this.isPaused) {
+            this.backdropAll = false;
+            this.stepTheme();
+          }
           e.preventDefault(); return;
         }
 
@@ -3706,8 +6342,9 @@
       if (toggleMaster) {
         toggleMaster.addEventListener('change', (e) => {
           this.audio.setMasterEnabled(e.target.checked);
-          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && (!this.isPaused || this.wasPausedByModal)) {
-            this.audio.startBGM();
+          if (this.audio.enabled && this.audio.musicEnabled && (!this.isPlaying || !this.isPaused || this.wasPausedByModal)) {
+            // On the title that means the title's song, whatever the last game left.
+            if (this.isPlaying) this.audio.startBGM(); else this.playTitleSong();
           } else {
             this.audio.stopBGM();
           }
@@ -3719,8 +6356,9 @@
       if (toggleMusic) {
         toggleMusic.addEventListener('change', (e) => {
           this.audio.setMusicEnabled(e.target.checked);
-          if (this.audio.enabled && this.audio.musicEnabled && this.isPlaying && (!this.isPaused || this.wasPausedByModal)) {
-            this.audio.startBGM();
+          if (this.audio.enabled && this.audio.musicEnabled && (!this.isPlaying || !this.isPaused || this.wasPausedByModal)) {
+            // On the title that means the title's song, whatever the last game left.
+            if (this.isPlaying) this.audio.startBGM(); else this.playTitleSong();
           } else {
             this.audio.stopBGM();
           }
@@ -3875,12 +6513,18 @@
     }
 
     startGame() {
+      if (this.updateOffer) document.getElementById('updateBar').classList.add('hidden');
       if (this.attractActive) this.exitAttract(false);
       if (this.attractIdleTimer) { clearTimeout(this.attractIdleTimer); this.attractIdleTimer = null; }
       // Belt and braces: the demo borrows the classic board, so make sure the
       // player's chosen board is back before a real game starts.
       this.setLiveBoardWidth(storedBoardWidth());
+      // Read here rather than held on the app: the title screen can change it
+      // between games without anything having to push the new value anywhere.
+      this.engine.difficulty = storedDifficulty();
+      this.applyBackdropChoice();
       this.audio.init();
+      this.audio.setSong(BACKDROPS[this.renderer.backdropIndex].song, true);
       this.engine.initGame();
       this.engine.build();
       this.particles.clearAll();
@@ -3919,6 +6563,7 @@
 
     togglePause() {
       if (!this.isPlaying) return;
+      setTimeout(() => this.showUpdateBar(), 0);
       // Leaving the pause screen at all cancels a half-pressed End Game, so it can
       // never still be armed when the player next opens it.
       this.disarmEndGame();
@@ -3935,6 +6580,7 @@
     }
 
     returnToTitle() {
+      setTimeout(() => this.showUpdateBar(), 0);
       this.disarmEndGame();
       this.isPlaying = false;
       this.isPaused = false;
@@ -3942,6 +6588,7 @@
       this.wasPausedByFocusLoss = false;
       this.engine.endGame = true;
       this.audio.stopBGM();
+      this.playTitleSong();
 
       this.setModeTabsDisabled(false);
 
@@ -4840,7 +7487,7 @@
       const settle = () => { let g = 0; while (g++ < 40 && !e.checkGaps()) { /* fall */ } };
       const finish = () => {
         e.score = 0; e.level = 1; e.skill = 1; e.ballCount = 0;
-        e.rows = 0; e.rowCount = 0; e.matchesDone = 0; e.matchCount = 0; e.sameBonus = 0;
+        e.rows = 0; e.rowCount = 0; e.matchesDone = 0; e.matchCount = 0; e.sameBonus = 0; e.lines = 0;
         this.renderer.updateScene(e);
         this.updateUI();
         play.phase = 'done';
@@ -5011,7 +7658,10 @@
 
             // The engine's own fall rate, in world units per second, so the piece
             // crosses the crop line at exactly the speed it will continue at.
-            const rowsPerSec = Math.min(2.6, 1.0 + (this.engine.level - 1) * 0.08);
+            // Level 1 pace at every level. The entry reads as the piece arriving,
+            // not as part of the fall, and at level 20 the current speed made it a
+            // flicker -- the slower the entry stays, the more it keeps that job.
+            const rowsPerSec = ENTRY_ROWS_PER_SEC;
             this.slideOffset -= rowsPerSec * HEX_SPACING_Y * PIECE_SLIDE_SPEED_MULT * Math.min(dt, 0.05);
             if (this.slideOffset <= 0) {
               this.slideOffset = 0;
@@ -5144,6 +7794,7 @@
       this.updateHighScores(this.engine.score, this.engine.level, this.engine.skill);
       document.getElementById('finalScore').textContent = this.engine.score;
       document.getElementById('overlayGameOver').classList.remove('hidden');
+      this.showUpdateBar();
       document.getElementById('btnPause').disabled = true;
     }
 
@@ -5156,10 +7807,95 @@
       } else {
         lvlEl.style.color = '';
       }
-      document.getElementById('statSkill').textContent = this.engine.skill;
+      document.getElementById('statLines').textContent = this.engine.lines;
       document.getElementById('statBalls').textContent = this.engine.ballCount;
       const timeEl = document.getElementById('statTime');
       if (timeEl) timeEl.textContent = formatPlayTime(this.playTime);
+      this.drawNext();
+    }
+
+    // NEXT: the coming piece, drawn flat in the same hex arrangement and the same
+    // turn it will arrive in, specials included. Redrawn only when the piece or
+    // the canvas size changes -- updateUI runs every frame.
+    drawNext() {
+      const cv = document.getElementById('nextCanvas');
+      if (!cv) return;
+      const cells = (this.isPlaying && !this.engine.endGame) ? this.engine.nextPreview() : null;
+      const w = cv.clientWidth, h = cv.clientHeight;
+      const key = (cells ? JSON.stringify(cells) : '-') + '@' + w + 'x' + h;
+      if (key === this._nextKey) return;
+      this._nextKey = key;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = Math.max(1, Math.round(w * dpr));
+      cv.height = Math.max(1, Math.round(h * dpr));
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      if (!cells || !w || !h) return;
+
+      // Board positions, through gridToWorld so the shape is the board's; y flips
+      // because the canvas counts down. In units of one ball spacing.
+      const o = gridToWorld(0, 0);
+      const pts = cells.map(c => {
+        const p = gridToWorld(c.x, c.y);
+        return { x: (p.x - o.x) / HEX_SPACING_X, y: -(p.y - o.y) / HEX_SPACING_X, v: c.v };
+      });
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+      const k = Math.min(w / (x1 - x0 + 1.1), h / (y1 - y0 + 1.1), h * 0.55);
+      const cx = w / 2 - (x0 + x1) / 2 * k, cy = h / 2 - (y0 + y1) / 2 * k;
+      const r = k * 0.46;
+      const mats = this.renderer.ballMaterials;
+      const css = (c) => '#' + c.getHexString();
+
+      // Draw each ball once: a bomb piece is four balls on one cell.
+      const seen = new Set();
+      for (const p of pts) {
+        const id = p.x.toFixed(2) + ',' + p.y.toFixed(2);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const x = cx + p.x * k, y = cy + p.y * k, v = p.v;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+        if (v === JOKER) {
+          // every colour at once: six wedges of the palette
+          for (let i = 0; i < 6; i++) {
+            ctx.beginPath(); ctx.moveTo(x, y);
+            ctx.arc(x, y, r, i * Math.PI / 3, (i + 1) * Math.PI / 3);
+            ctx.fillStyle = css(mats[i].userData.baseColor); ctx.fill();
+          }
+        } else {
+          ctx.fillStyle = css(mats[ballSlot(v)].userData.baseColor || mats[ballSlot(v)].color);
+          ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+        }
+        if (isCharged(v)) { ctx.fillStyle = '#08080c'; ctx.fillRect(x - r, y - r * 0.16, 2 * r, r * 0.32); }
+        // the light: a soft highlight up and to the left, shade below
+        const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.05);
+        g.addColorStop(0, 'rgba(255,255,255,0.55)');
+        g.addColorStop(0.35, 'rgba(255,255,255,0.08)');
+        g.addColorStop(1, 'rgba(0,0,0,0.45)');
+        ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+        ctx.restore();
+        if (v === BOMB) {
+          const sg = ctx.createRadialGradient(x + r * 0.45, y - r * 0.6, 0, x + r * 0.45, y - r * 0.6, r * 0.6);
+          sg.addColorStop(0, 'rgba(255,240,200,1)');
+          sg.addColorStop(0.4, 'rgba(255,150,40,0.8)');
+          sg.addColorStop(1, 'rgba(255,90,0,0)');
+          ctx.fillStyle = sg; ctx.fillRect(x - r, y - r * 1.3, r * 2, r * 1.6);
+        }
+      }
+    }
+
+    // The banners over the board: CHAIN n as a landing cascades, LEVEL n when one
+    // is reached. Restarting the animation is what lets a second chain step, or a
+    // level straight after a chain, show again rather than being swallowed.
+    showBanner(id, text) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove('show');
+      void el.offsetWidth;
+      el.classList.add('show');
     }
 
     updateHighScores(score, level, skill) {
@@ -5348,7 +8084,8 @@
         musicEnabled: this.audio.musicEnabled,
         sfxEnabled: this.audio.sfxEnabled,
         musicVolume: this.audio.musicVolume,
-        sfxVolume: this.audio.sfxVolume
+        sfxVolume: this.audio.sfxVolume,
+        musicStyle: this.audio.musicStyle
       };
       localStorage.setItem('oddballz_hd_audio_settings', JSON.stringify(settings));
     }
@@ -5443,6 +8180,9 @@
         const el = document.querySelector(sel);
         if (el) el.style.display = 'none';
       });
+      // The plain backdrop: colour figures from this sheet are compared against
+      // ones taken before the pictures existed.
+      app.renderer.setBackdrop(null);
       app.showPaletteSheet();
     }
 
@@ -5456,6 +8196,56 @@
     } else {
       window.addEventListener('resize', syncControlsHeightVar);
       window.addEventListener('orientationchange', () => setTimeout(syncControlsHeightVar, 150));
+    }
+
+    // Difficulty cycles in place -- no reload, unlike the board width. The board
+    // preset rebuilds geometry the locked camera maths depends on; this only picks
+    // which ramp the next game reads, and startGame re-reads it.
+    const btnDiff = document.getElementById('btnDifficulty');
+    if (btnDiff) {
+      const paintDiff = (d) => {
+        btnDiff.textContent = '🎚️ Difficulty: ' + DIFFICULTIES[d];
+        btnDiff.classList.toggle('active', d !== DIFF_NORMAL);
+      };
+      paintDiff(storedDifficulty());
+      btnDiff.addEventListener('click', () => {
+        const next = (storedDifficulty() + 1) % DIFFICULTIES.length;
+        try { localStorage.setItem(DIFFICULTY_KEY, String(next)); } catch (e) {}
+        paintDiff(next);
+      });
+    }
+
+    // Music style: the modern instruments or the C64's SID sound.
+    const btnStyle = document.getElementById('btnMusicStyle');
+    if (btnStyle) {
+      const app = window.oddApp;
+      const paintStyle = () => {
+        btnStyle.textContent = app.audio.musicStyle === 'modern' ? '🎹 Style: Modern' : '🕹️ Style: C64 SID';
+      };
+      paintStyle();
+      btnStyle.addEventListener('click', () => {
+        app.audio.setMusicStyle(app.audio.musicStyle === 'modern' ? 'c64' : 'modern');
+        app.saveAudioSettings();
+        paintStyle();
+      });
+    }
+
+    // Background cycles in place like difficulty, and shows at once behind the
+    // title so the choice can be seen being made.
+    const btnBackdrop = document.getElementById('btnBackdrop');
+    if (btnBackdrop) {
+      const paintBackdrop = (b) => {
+        btnBackdrop.textContent = '🌌 Background: ' + (b === BACKDROP_ALL ? 'All' : BACKDROPS[b].label);
+        btnBackdrop.classList.toggle('active', b !== BACKDROP_ALL);
+      };
+      paintBackdrop(storedBackdrop());
+      btnBackdrop.addEventListener('click', () => {
+        const cur = storedBackdrop();
+        const next = cur + 1 >= BACKDROPS.length ? BACKDROP_ALL : cur + 1;
+        try { localStorage.setItem(BACKDROP_KEY, String(next)); } catch (e) {}
+        paintBackdrop(next);
+        window.oddApp.applyBackdropChoice();
+      });
     }
 
     const btnBoard = document.getElementById('btnDensePlayfield');

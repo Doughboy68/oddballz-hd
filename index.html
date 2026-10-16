@@ -32,17 +32,35 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=1.83.0">
+  <link rel="stylesheet" href="./style.css?v=1.93.0">
+  <!-- What the update bar says this release brings, shown to anyone running an
+       older version. Lines split on |: the first is the headline, the rest a short
+       list; start a line with ! for something the player has to do. Rewrite it
+       with each release, alongside the ?v= numbers. -->
+  <meta name="release-notes" content="Special balls, backgrounds and music|Jokers, bombs, stones and row sweeps from level 3|Six backgrounds to choose on the title card, or press B in a game|Seven songs on modern instruments, or the C64 sound in Audio Options|The next piece, lines cleared, and CHAIN and LEVEL banners">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
 <body>
+  <!-- A newer version is live: what it brings, and a Reload. Filled and shown by
+       OddballzApp.showUpdateBar, never over a game in play. -->
+  <div id="updateBar" class="update-bar glass-card hidden" role="status">
+    <div class="upd-txt">
+      <b id="updHead">A new version is ready.</b>
+      <ul id="updList" hidden></ul>
+      <div class="upd-ver" id="updVer"></div>
+    </div>
+    <button id="updateBtn" class="btn btn-primary btn-sm" type="button">Reload</button>
+  </div>
   <!-- App Layout Grid: Canvas Viewport Top, Dedicated Controls Bar Bottom -->
   <div id="appLayout">
     <!-- 3D Three.js Canvas Container -->
-    <main id="canvasContainer"></main>
+    <main id="canvasContainer">
+      <div id="bannerChain" class="board-banner banner-chain" aria-live="polite"></div>
+      <div id="bannerLevel" class="board-banner banner-level" aria-live="polite"></div>
+    </main>
 
     <!-- Dedicated Controls Panel Physically Below 3D Playfield -->
     <footer id="bottomControlsBar" class="glass-card">
@@ -97,8 +115,8 @@
         <span id="statLevel" class="stat-value text-cyan">1</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label">SKILL RATING</span>
-        <span id="statSkill" class="stat-value text-emerald">1</span>
+        <span class="stat-label">LINES</span>
+        <span id="statLines" class="stat-value text-emerald">0</span>
       </div>
       <div class="stat-card">
         <span class="stat-label">BALLS</span>
@@ -107,6 +125,10 @@
       <div class="stat-card">
         <span class="stat-label">TIME</span>
         <span id="statTime" class="stat-value">0:00</span>
+      </div>
+      <div class="stat-card stat-next">
+        <span class="stat-label">NEXT</span>
+        <canvas id="nextCanvas" class="next-canvas" aria-label="Next piece"></canvas>
       </div>
     </aside>
 
@@ -118,6 +140,7 @@
       <div class="key-row"><kbd>X</kbd> <kbd>Y</kbd> <span class="key-alt"><kbd>Q</kbd> <kbd>E</kbd></span> Flip</div>
       <div class="key-row"><kbd class="key-highlight">F</kbd> Cycle Color</div>
       <div class="key-row"><kbd class="key-space">Space</kbd> Hard Drop</div>
+      <div class="key-row"><kbd>B</kbd> Background</div>
     </div>
 
     <!-- Start Overlay Modal -->
@@ -147,6 +170,8 @@
 
         <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem; margin:0.9rem 0 0.2rem;">
           <button id="btnDensePlayfield" class="btn btn-secondary btn-sm">⬢ Board: 9 wide (classic)</button>
+          <button id="btnDifficulty" class="btn btn-secondary btn-sm">🎚️ Difficulty: Normal</button>
+          <button id="btnBackdrop" class="btn btn-secondary btn-sm">🌌 Background: All</button>
           <p style="font-size:0.75rem; opacity:0.7; margin:0; color: var(--text-muted); max-width:36ch;">
             Tap to cycle the bottom edge: 9 → 12 → 18 balls. Wider boards use smaller balls on the same playfield. Reloads the game. The how-to-play demo always runs on the classic board.
           </p>
@@ -312,6 +337,9 @@
                 <span id="valMusicVolume" class="volume-badge">70%</span>
               </div>
             </div>
+            <div class="audio-slider-row">
+              <button id="btnMusicStyle" class="btn btn-secondary btn-sm" type="button">🎹 Style: Modern</button>
+            </div>
           </div>
 
           <!-- Sound Effects (SFX) Settings Section -->
@@ -342,7 +370,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=1.83.0"></script>
+  <script src="./oddballz-app.js?v=1.93.0"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what

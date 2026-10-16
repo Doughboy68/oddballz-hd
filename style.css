@@ -208,14 +208,16 @@ body, html {
    That last part is also the trap: because it is a MINIMUM, a panel that outgrows
    it silently stops matching instead of breaking visibly. It was 201px for four
    stat cards; adding a TIME card took the stats panel to 244px while the guide sat
-   at its floor of 201, and the pair went 43px out of step. 245 now clears the
-   taller of the two, so both settle on exactly that.
+   at its floor of 201, and the pair went 43px out of step. Then NEXT took the
+   stats panel to 308px against the guide's 245, the same trap again. 310 now
+   clears the taller of the two, so both settle on exactly that.
 
    Measure both and update this if a stat card or a control row is ever added --
-   the natural heights are 244px for five stat cards and 173px for the guide. */
+   the natural heights are 308px for five stat cards and NEXT, and about 200px
+   for the guide with its B row. */
 :root {
   --side-panel-w: 160px;
-  --side-panel-h: 245px;
+  --side-panel-h: 310px;
 }
 
 .stats-panel {
@@ -1164,3 +1166,102 @@ input:checked + .slider::before {
   .attract-caption { font-size: 0.95rem; padding: 0.75rem 1.1rem; }
 }
 
+
+/* NEXT: the coming piece, in the stats card. Sized to sit inside the card's own
+   line height on the phone strip, so the strip does not grow and push the board. */
+.next-canvas {
+  display: block;
+  width: 64px;
+  height: 40px;
+}
+
+@media (max-width: 600px) {
+  .next-canvas {
+    width: 36px;
+    height: 18px;
+  }
+}
+
+/* CHAIN n and LEVEL n over the board. Absolutely placed inside the canvas
+   container, so they take no part in the layout and cannot move the board. */
+.board-banner {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  pointer-events: none;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.banner-chain {
+  top: 30%;
+  font-size: clamp(1.4rem, 6vw, 2.6rem);
+  color: #ffd27a;
+  text-shadow: 0 0 12px rgba(255, 150, 40, 0.85), 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+.banner-level {
+  top: 45%;
+  font-size: clamp(2rem, 9vw, 3.8rem);
+  color: #67e8f9;
+  text-shadow: 0 0 16px rgba(56, 189, 248, 0.9), 0 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+.board-banner.show {
+  animation: board-banner-pop 1.3s ease-out forwards;
+}
+
+@keyframes board-banner-pop {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  12%  { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  22%  { transform: translate(-50%, -50%) scale(1); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* A newer version is live. Fixed above everything and outside the layout, so it
+   cannot move the board; shown only off the playfield's busy moments (title,
+   pause, game over). */
+.update-bar {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.6rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: min(30rem, calc(100vw - 1.2rem));
+  padding: 0.7rem 0.9rem;
+  border: 1px solid rgba(103, 232, 249, 0.45);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.update-bar.hidden { display: none; }
+
+.upd-txt {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.upd-txt b { color: #67e8f9; }
+
+.upd-txt ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+}
+
+.upd-txt li.warn { color: #fbbf24; }
+
+.upd-ver {
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
