@@ -6775,8 +6775,10 @@ registerProcessor('odd-sid', OddSid);
     // began as floating side cards, then cards or strips chosen to keep off the
     // board; now the one choice left is the controls guide, which when asked for
     // is a card at the right under the bars, shown only if it clears the board
-    // and the buttons (else body.guide-blocked). The camera ignores the HUD, so
-    // none of this feeds back on itself.
+    // and the buttons (else body.guide-blocked). It is measured whether or not it
+    // is on, so the ? icon can be hidden where the guide would not fit (the user,
+    // 17 Oct 2026). The camera ignores the HUD, so none of this feeds back on
+    // itself.
     updateHudLayout() {
       const body = document.body, root = document.documentElement.style;
       body.classList.remove('guide-blocked');
@@ -6787,9 +6789,16 @@ registerProcessor('odd-sid', OddSid);
       root.setProperty('--hud-top', Math.ceil(barsBottom + 8) + 'px');
 
       const guide = document.querySelector('.keybinds-panel');
-      if (!guide || getComputedStyle(guide).display === 'none') return;
       const R = this.renderer;
-      if (!R || !R.boardGroup || !R.boardGroup.children.length) return;
+      if (!guide || !R || !R.boardGroup || !R.boardGroup.children.length) return;
+      // Shown for the moment it takes to measure, if it is off.
+      const wasOn = body.classList.contains('guide-on');
+      body.classList.add('guide-on');
+      if (getComputedStyle(guide).display === 'none') {
+        if (!wasOn) body.classList.remove('guide-on');
+        body.classList.add('guide-blocked');
+        return;
+      }
       R.camera.updateMatrixWorld();
       R.boardGroup.updateMatrixWorld(true);
       const rect = R.renderer.domElement.getBoundingClientRect();
@@ -6809,6 +6818,7 @@ registerProcessor('odd-sid', OddSid);
       const controls = document.getElementById('bottomControlsBar');
       const bottom = controls ? controls.getBoundingClientRect().top : window.innerHeight;
       const c = guide.getBoundingClientRect();
+      if (!wasOn) body.classList.remove('guide-on');
       const clear = c.bottom <= bottom - 6 &&
         !pts.some(p => p.x + pad > c.left && p.x - pad < c.right && p.y + pad > c.top && p.y - pad < c.bottom);
       if (!clear) body.classList.add('guide-blocked');

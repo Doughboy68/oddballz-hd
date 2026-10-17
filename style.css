@@ -1921,6 +1921,9 @@ body.hud-strip.guide-on .keybinds-panel { display: none; }
 /* The controls guide, when it would cover the board, is not shown at all. */
 body.guide-blocked .keybinds-panel { display: none; }
 
+/* ...and the ? icon goes too, where the guide could not be shown anyway. */
+body.guide-blocked .board-icon-guide { display: none !important; }
+
 /* The logo never breaks across lines or gives up its room to its neighbours:
    squeezed, its letters wrapped to three lines (the user's screenshot, 17 Oct
    2026). */
