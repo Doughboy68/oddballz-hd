@@ -265,13 +265,24 @@
   // that cannot run the shaders gets an error screen (ThreeRenderer.precompile-
   // Backgrounds), and every current browser can.
   const BACKDROPS = [
-    { label: 'Cosmic Stellar Nebula',    song: 'nebula',     procedural: 'nebula' },
-    { label: 'Cyber Conduit Spaceframe', song: 'cyber',      procedural: 'conduit' },
-    { label: 'Quantum Hyperspace Warp',  song: 'hyperspace', procedural: 'warp' },
-    { label: 'Alien Bio-Reactor Core',   song: 'mothership', procedural: 'lattice' },
-    { label: 'Deep Space Citadel',       song: 'citadel',    procedural: 'citadel' },
-    { label: 'Orbital Solar Array',      song: 'solar',      procedural: 'solar' }
+    { label: 'Cosmic Stellar Nebula',    song: 'nebula',     procedural: 'nebula',
+      tints: ['#c46bff', '#ff6bd5', '#7b74ff', '#3fd6d0'] },
+    { label: 'Cyber Conduit Spaceframe', song: 'cyber',      procedural: 'conduit',
+      tints: ['#3fe4ff', '#5c86ff', '#8fd8ff', '#2fb8e8'] },
+    { label: 'Quantum Hyperspace Warp',  song: 'hyperspace', procedural: 'warp',
+      tints: ['#3ab0ff', '#a07bff', '#5ae0ff', '#dfe6ff'] },
+    { label: 'Alien Bio-Reactor Core',   song: 'mothership', procedural: 'lattice',
+      tints: ['#2fd88f', '#55ffc0', '#b8ff6b', '#3fd6d0'] },
+    { label: 'Deep Space Citadel',       song: 'citadel',    procedural: 'citadel',
+      tints: ['#ff5a7e', '#9a7bd8', '#8fb0d8', '#ff8fb0'] },
+    { label: 'Orbital Solar Array',      song: 'solar',      procedural: 'solar',
+      tints: ['#fff3c8', '#ffc24d', '#ff7a2a', '#e8454f'] }
   ];
+  // tints: the header logo's colours on that background, bright cuts of the
+  // colours its shader draws in -- the nebula's violet, pink, indigo and teal,
+  // the conduits' cyans and blue, the warp's blues and violet, the reactor's
+  // greens, the citadel's crimson lights and steel, the array's sun from white
+  // to red. Spread along the word, drifting slowly through it.
   // ALL, the default, plays each background in turn, as the C64 build's does; any
   // other choice holds that one for the whole game.
   const BACKDROP_ALL = -1;
@@ -807,6 +818,21 @@
   // ruby, emerald, gold, amethyst, magenta): brighter cuts of the balls' own,
   // which are dark until lit.
   const TITLE_COLOURS = ['#2ea0ff', '#ff3b52', '#22d35f', '#ffc21a', '#a64dff', '#ff2fc0'];
+
+  // The bars in the spectrum beside the header logo.
+  const SPEC_BARS = 14;
+
+  // A colour from a looping palette at position u (0..1 round it, any real
+  // number), blended between its two nearest entries.
+  function paletteAt(hexes, u) {
+    const n = hexes.length;
+    if (n === 1) return hexes[0];
+    const x = (((u % 1) + 1) % 1) * n;
+    const i = Math.floor(x), f = x - i;
+    const a = parseInt(hexes[i].slice(1), 16), b = parseInt(hexes[(i + 1) % n].slice(1), 16);
+    const mix = (sh) => Math.round(((a >> sh) & 255) * (1 - f) + ((b >> sh) & 255) * f);
+    return 'rgb(' + mix(16) + ',' + mix(8) + ',' + mix(0) + ')';
+  }
 
   // Whether the sweep should start at the left end of the bottom row (lo..hi),
   // being the end nearer the charged ball at src. Compared where the cells are
@@ -3831,8 +3857,14 @@ registerProcessor('odd-sid', OddSid);
       if (this.ctx && !this.musicGain) {
         this.musicGain = this.ctx.createGain();
         this.sfxGain = this.ctx.createGain();
-        this.musicGain.connect(this.ctx.destination);
-        this.sfxGain.connect(this.ctx.destination);
+        // Everything heard passes through one analyser on its way out, for the
+        // spectrum beside the header logo. It passes the sound on unchanged.
+        this.analyser = this.ctx.createAnalyser();
+        this.analyser.fftSize = 512;
+        this.analyser.smoothingTimeConstant = 0.7;
+        this.musicGain.connect(this.analyser);
+        this.sfxGain.connect(this.analyser);
+        this.analyser.connect(this.ctx.destination);
         this.updateGains();
       }
       if (this.ctx && this.ctx.state === 'suspended') {
@@ -6571,7 +6603,7 @@ registerProcessor('odd-sid', OddSid);
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.updateHudLayout());
     }
 
-    // ODDBALLZ on the title card and in the header, moving as the C64 build's logo does (screens.s
+    // ODDBALLZ on the title card, moving as the C64 build's logo does (screens.s
     // logo_step): four ways of moving, 250 frames each -- a wave running along
     // the word, each letter hopping in turn, all eight bobbing together, odd and
     // even letters see-sawing -- and the ball colours flowing along the word, a
@@ -6581,10 +6613,19 @@ registerProcessor('odd-sid', OddSid);
     // for reduced motion: it is a gentle bob, the user wants it, and Windows
     // with its animation effects off asks for that (the user, 17 Oct 2026, on
     // Edge: "just the colors").
+    //
+    // The header's ODDBALLZ is quieter, being in view through a game: still,
+    // in the current background's tint, until a chain, a row sweep or a new
+    // level (logoBurst), when the letters hop in turn along the word in the
+    // ball colours and settle back (the user, 17 Oct 2026: the dancing logo
+    // looked out of place against the space themes while playing).
     startTitleLogo() {
+      const header = document.querySelector('.logo-text .title-letters');
       const groups = Array.from(document.querySelectorAll('.title-letters'))
         .map(g => Array.from(g.children));
       if (!groups.length) return;
+      const headerLetters = header ? Array.from(header.children) : null;
+      const BURST = 7 * 3 + 12;                      // frames: the last letter's hop done
       const START = [5, 6, 1, 2, 3, 4, 5, 6];        // the C64's T_ODDIDX: ball values
       const LINE = 0.045;                            // em for one C64 sprite line
       const t0 = performance.now();
@@ -6597,9 +6638,26 @@ registerProcessor('odd-sid', OddSid);
         lastStep = step;
         const mode = Math.floor(t / 250) % 4;
         const wave = (k) => 4 * Math.sin(k * 2 * Math.PI / 32);   // LSIN
+        this.drawSpectrum(t);
         // A logo under a hidden screen (the title card in a game) is skipped.
         for (const letters of groups) {
           if (letters[0].closest('.hidden')) continue;
+          if (headerLetters && letters[0] === headerLetters[0]) {
+            const b = this.logoBurstAt ? (now - this.logoBurstAt) / 20 : Infinity;
+            const bursting = b < BURST;
+            const back = BACKDROPS[this.renderer.backdropIndex];
+            const tints = (back && back.tints) || ['#9fdcff'];
+            letters.forEach((el, i) => {
+              const f = (b - 3 * i) / 12;             // each letter 3 frames after the last
+              const y = (bursting && f > 0 && f < 1) ? -6 * Math.sin(Math.PI * f) : 0;
+              el.style.transform = y ? 'translateY(' + (y * LINE).toFixed(3) + 'em)' : '';
+              // The palette laid along the word, half of it across the eight
+              // letters, the whole cycling past once every 20 seconds.
+              el.style.color = bursting ? TITLE_COLOURS[(((START[i] - 1 - step) % 6) + 6) % 6]
+                                        : paletteAt(tints, i / 14 - t / 1000);
+            });
+            continue;
+          }
           if (recolour || !letters[0].style.color) {
             letters.forEach((el, i) => {
               el.style.color = TITLE_COLOURS[(((START[i] - 1 - step) % 6) + 6) % 6];
@@ -6617,6 +6675,69 @@ registerProcessor('odd-sid', OddSid);
         }
       };
       requestAnimationFrame(frame);
+    }
+
+    // The spectrum beside the header logo: what is playing, music and effects
+    // together, as SPEC_BARS bars from low to high, in the current background's
+    // colours drifting as the logo's do, each with a cap that falls back
+    // slowly from its peak. Bands are spaced evenly in pitch, not in frequency,
+    // so the bass and the melody get as many bars as the hiss above them.
+    // A row of dots when nothing is sounding.
+    drawSpectrum(t) {
+      const cv = this.spectrumCanvas || (this.spectrumCanvas = document.getElementById('spectrumCanvas'));
+      if (!cv) return;
+      const w = cv.clientWidth, h = cv.clientHeight;
+      if (!w || !h) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+        cv.width = Math.round(w * dpr);
+        cv.height = Math.round(h * dpr);
+      }
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const an = this.audio && this.audio.analyser;
+      let bins = null;
+      if (an && this.audio.ctx && this.audio.ctx.state === 'running') {
+        bins = this.spectrumBins || (this.spectrumBins = new Uint8Array(an.frequencyBinCount));
+        an.getByteFrequencyData(bins);
+      }
+      const peaks = this.spectrumPeaks || (this.spectrumPeaks = new Float32Array(SPEC_BARS));
+      const back = BACKDROPS[this.renderer.backdropIndex];
+      const tints = (back && back.tints) || ['#9fdcff'];
+      const gap = 1.5, bw = (w - gap * (SPEC_BARS - 1)) / SPEC_BARS;
+      const hz = this.audio && this.audio.ctx ? this.audio.ctx.sampleRate / 2 : 22050;
+      for (let b = 0; b < SPEC_BARS; b++) {
+        let v = 0;
+        if (bins) {
+          // This bar's band, 60 Hz to 8 kHz in equal steps of pitch: little above
+          // that is loud enough to show.
+          const f0 = 60 * Math.pow(133, b / SPEC_BARS), f1 = 60 * Math.pow(133, (b + 1) / SPEC_BARS);
+          const i0 = Math.floor(f0 / hz * bins.length), i1 = Math.max(i0 + 1, Math.ceil(f1 / hz * bins.length));
+          let m = 0;
+          for (let i = i0; i < i1 && i < bins.length; i++) m = Math.max(m, bins[i]);
+          // Music is quieter the higher it goes, so the top bars are lifted a
+          // little to keep them moving.
+          v = Math.pow(Math.min(1, m / 255 * (1 + 0.5 * b / SPEC_BARS)), 1.6);
+        }
+        peaks[b] = Math.max(v, peaks[b] - 0.012);
+        const x = b * (bw + gap);
+        const bh = Math.max(1.5, v * h);
+        ctx.fillStyle = paletteAt(tints, b / (SPEC_BARS * 2) - t / 1000);
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(x, h - bh, bw, bh);
+        if (peaks[b] > 0.04) {
+          ctx.globalAlpha = 0.75;
+          ctx.fillRect(x, h - peaks[b] * h - 1.5, bw, 1.5);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // The header logo's hop, for a chain, a row sweep or a new level.
+    logoBurst() {
+      this.logoBurstAt = performance.now();
     }
 
     // The side cards -- stats on the left, the controls guide on the right -- or
@@ -6778,6 +6899,7 @@ registerProcessor('odd-sid', OddSid);
         // picture that has none -- a new level is the beat instead.
         if (type === 'levelup' && this.backdropAll && !this.audio.songAudible()) this.stepTheme();
         if (type === 'levelup' && this.isPlaying) this.showBanner('bannerLevel', 'LEVEL ' + this.engine.level);
+        if (type === 'levelup') this.logoBurst();
         // A sweep runSweep has already shown and sounded: not again. A bomb in
         // the same pass makes it boomKind 2, which still sounds.
         const swept = !!this.sweepPrePopped;
@@ -6802,6 +6924,7 @@ registerProcessor('odd-sid', OddSid);
       };
       this.engine.onChain = (step) => {
         if (this.isPlaying) this.showBanner('bannerChain', 'CHAIN ' + step);
+        this.logoBurst();
       };
       this.audio.onSongLoop = (id, loops) => {
         if (!this.isPlaying || !this.backdropAll || loops < SONG_PLAYS) return;
@@ -6874,6 +6997,7 @@ registerProcessor('odd-sid', OddSid);
     // balls already popped are hidden until then and are not popped twice.
     runSweep() {
       const e = this.engine, y = BOARD_BOUNDS.MAX_Y;
+      this.logoBurst();
       const xs = [];
       for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
         if (e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap > 0) xs.push(x);
@@ -7000,6 +7124,7 @@ registerProcessor('odd-sid', OddSid);
     drawSweep(pops) {
       const row = pops.filter(m => m.y === BOARD_BOUNDS.MAX_Y);
       if (row.length === 0) return;
+      this.logoBurst();
       let lo = row[0].x, hi = row[0].x;
       for (const m of row) { lo = Math.min(lo, m.x); hi = Math.max(hi, m.x); }
       const src = this.sweepFrom;
