@@ -803,6 +803,11 @@
     return (y < BP.SPLIT && x < y + BP.UPPER) || (y >= BP.SPLIT && x > y - BP.LOWER);
   }
 
+  // The title's letters in the six ball colours, by ball value 1-6 (sapphire,
+  // ruby, emerald, gold, amethyst, magenta): brighter cuts of the balls' own,
+  // which are dark until lit.
+  const TITLE_COLOURS = ['#2ea0ff', '#ff3b52', '#22d35f', '#ffc21a', '#a64dff', '#ff2fc0'];
+
   // Whether the sweep should start at the left end of the bottom row (lo..hi),
   // being the end nearer the charged ball at src. Compared where the cells are
   // on the board: a row's x numbering is offset by half a cell per row, so
@@ -6562,7 +6567,56 @@ registerProcessor('odd-sid', OddSid);
       window.addEventListener('resize', () => { if (this.attractActive) this.positionAttractHint(); });
       window.addEventListener('resize', () => this.updateHudLayout());
       this.updateHudLayout();
+      this.startTitleLogo();
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.updateHudLayout());
+    }
+
+    // ODDBALLZ on the title card and in the header, moving as the C64 build's logo does (screens.s
+    // logo_step): four ways of moving, 250 frames each -- a wave running along
+    // the word, each letter hopping in turn, all eight bobbing together, odd and
+    // even letters see-sawing -- and the ball colours flowing along the word, a
+    // letter taking its left neighbour's colour every 8 frames. Counted in the
+    // C64's frames (50 a second) but drawn every frame, so it moves smoothly
+    // where the C64's steps a whole pixel. It moves even where the system asks
+    // for reduced motion: it is a gentle bob, the user wants it, and Windows
+    // with its animation effects off asks for that (the user, 17 Oct 2026, on
+    // Edge: "just the colors").
+    startTitleLogo() {
+      const groups = Array.from(document.querySelectorAll('.title-letters'))
+        .map(g => Array.from(g.children));
+      if (!groups.length) return;
+      const START = [5, 6, 1, 2, 3, 4, 5, 6];        // the C64's T_ODDIDX: ball values
+      const LINE = 0.045;                            // em for one C64 sprite line
+      const t0 = performance.now();
+      let lastStep = -1;
+      const frame = (now) => {
+        requestAnimationFrame(frame);
+        const t = (now - t0) / 20;
+        const step = Math.floor(t / 8) % 6;
+        const recolour = step !== lastStep;
+        lastStep = step;
+        const mode = Math.floor(t / 250) % 4;
+        const wave = (k) => 4 * Math.sin(k * 2 * Math.PI / 32);   // LSIN
+        // A logo under a hidden screen (the title card in a game) is skipped.
+        for (const letters of groups) {
+          if (letters[0].closest('.hidden')) continue;
+          if (recolour || !letters[0].style.color) {
+            letters.forEach((el, i) => {
+              el.style.color = TITLE_COLOURS[(((START[i] - 1 - step) % 6) + 6) % 6];
+            });
+          }
+          letters.forEach((el, i) => {
+          let y;                                     // C64 lines, down positive
+          if (mode === 0) y = wave(4 * i + t);                       // a wave
+          else if (mode === 1) {                                     // a hop each
+            y = (Math.floor(t / 8) % 8 === i) ? -6 * Math.sin(Math.PI * (t % 8) / 8) : 0;
+          } else if (mode === 2) y = wave(t / 2);                    // all, slower
+          else y = (i % 2 ? -1 : 1) * wave(t);                       // see-saw
+          el.style.transform = 'translateY(' + (y * LINE).toFixed(3) + 'em)';
+          });
+        }
+      };
+      requestAnimationFrame(frame);
     }
 
     // The side cards -- stats on the left, the controls guide on the right -- or

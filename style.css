@@ -623,6 +623,35 @@ input:checked + .slider::before {
   font-weight: 800;
 }
 
+/* The title card's ODDBALLZ: a letter apiece, each moved and coloured by
+   OddballzApp.startTitleLogo, as the C64 build's logo is. The colour change is
+   eased over one of its steps rather than snapped. */
+.title-letters span {
+  display: inline-block;
+  color: #2ea0ff;
+  text-shadow: 0 0 14px currentColor, 0 2px 0 rgba(0, 0, 0, 0.35);
+  transition: color 0.16s linear;
+  will-change: transform;
+}
+
+/* In the header the logo's white-to-cyan gradient fill would hide the letters'
+   own colours, and, clipped to where each letter rests, it showed through as a
+   sliver beside a letter that had moved. Each letter is painted in its colour
+   instead, and the gradient goes. */
+.logo-text {
+  background: none;
+  -webkit-background-clip: border-box;
+}
+
+.logo-text .title-letters {
+  -webkit-text-fill-color: currentColor;
+}
+
+.logo-text .title-letters span {
+  -webkit-text-fill-color: currentColor;
+  text-shadow: 0 0 10px currentColor;
+}
+
 .modal-desc {
   color: var(--text-muted);
   line-height: 1.5;

@@ -32,12 +32,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2.1.12">
+  <link rel="stylesheet" href="./style.css?v=2.1.17">
   <!-- What the update bar says this release brings, shown to anyone running an
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
+  <meta name="release-notes" content="The ODDBALLZ logo dances on the title screen and in the header|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -84,7 +84,7 @@
     <!-- Header Bar -->
     <header class="game-header glass-card">
       <div class="brand">
-        <h1 class="logo-text">ODDBALLZ <span class="badge-hd">HD</span></h1>
+        <h1 class="logo-text" aria-label="Oddballz HD"><span class="title-letters" aria-hidden="true"><span>O</span><span>D</span><span>D</span><span>B</span><span>A</span><span>L</span><span>L</span><span>Z</span></span> <span class="badge-hd" aria-hidden="true">HD</span></h1>
       </div>
 
       <!-- Mode Selector Tabs -->
@@ -148,10 +148,7 @@
     <!-- Start Overlay Modal -->
     <div id="overlayStart" class="overlay-modal flex-center">
       <div class="modal-card glass-card text-center">
-        <h2 class="modal-title">ODDBALLZ <span class="badge-hd">HD</span></h2>
-        <p class="modal-desc">
-          Experience the classic 1994 hex game engine transformed with real-time 3D sphere physics, metallic shaders, dynamic particle explosions, and Web Audio synthesis!
-        </p>
+        <h2 class="modal-title title-logo" aria-label="Oddballz HD"><span class="title-letters" aria-hidden="true"><span>O</span><span>D</span><span>D</span><span>B</span><span>A</span><span>L</span><span>L</span><span>Z</span></span> <span class="badge-hd" aria-hidden="true">HD</span></h2>
 
         <div class="mode-summary">
           <div id="modeCardColorMatch" class="mode-info mode-card-selectable active" role="button" tabindex="0">
@@ -304,6 +301,9 @@
           <p>
             The matching, support and gravity rules are the original's, untouched. Around them: selectable board sizes, a game timer, high scores kept separately per mode and board, reworked levelling and scoring, and a number of long-standing bugs fixed. The presentation is rebuilt throughout &mdash; real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, Web Audio synthesis, smooth continuous motion in place of the original's step-by-step movement, and pieces that flip in place rather than pivoting end over end about a single ball.
           </p>
+          <p>
+            Also in Oddballz HD: jokers, bombs, stones and row clearers among the balls, seven original songs, six animated space backgrounds drawn live, a next piece preview and a ghost preview.
+          </p>
           <div style="background: rgba(255, 255, 255, 0.05); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.85rem; text-align: center; color: var(--accent-gold); font-weight: 600;">
             Code and graphics/design copyright &copy; <span style="white-space: nowrap;">Brian Semotiuk</span> and <span style="white-space: nowrap;">Fred Kohler</span>.
           </div>
@@ -386,7 +386,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=2.1.9"></script>
+  <script src="./oddballz-app.js?v=2.1.12"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what
