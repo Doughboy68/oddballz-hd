@@ -803,6 +803,18 @@
     return (y < BP.SPLIT && x < y + BP.UPPER) || (y >= BP.SPLIT && x > y - BP.LOWER);
   }
 
+  // Whether the sweep should start at the left end of the bottom row (lo..hi),
+  // being the end nearer the charged ball at src. Compared where the cells are
+  // on the board: a row's x numbering is offset by half a cell per row, so
+  // comparing x itself put a ball just right of centre nearer the left and the
+  // sweep nearly always started from the left (the user, 17 Oct 2026).
+  function sweepFromLeft(src, lo, hi) {
+    if (!src) return true;
+    const y = BOARD_BOUNDS.MAX_Y;
+    const sx = gridToWorld(src.x, src.y).x;
+    return Math.abs(sx - gridToWorld(lo, y).x) <= Math.abs(gridToWorld(hi, y).x - sx);
+  }
+
   function gridToWorld(x, y, zOffset = 0) {
     const cx = x - CENTER_X;
     const cy = y - CENTER_Y;
@@ -1805,8 +1817,13 @@
 
       this.boomKind = 0;           // 0 a stone alone, 1 a sweep, 2 a bomb
 
-      if (this.rcFire) {
-        this.rcFire = 0;
+      // rcFire counts the sweeps owed: one for each charged ball that went, so
+      // two row clearers in one match clear two rows, three clear three (the
+      // user, 17 Oct 2026; the original fires one however many go). One a pass,
+      // each after the board has settled from the last, so the second clears
+      // the row that fell into place behind the first.
+      if (this.rcFire > 0) {
+        this.rcFire--;
         this.boomKind = 1;
         for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
           const v = at(x, BOARD_BOUNDS.MAX_Y);
@@ -1861,8 +1878,8 @@
       const list = Array.from(mark.values());
       if (this.onPopBalls) this.onPopBalls(list);
       for (const m of list) {
-        // A charged ball caught in a blast arms the sweep just as a match does.
-        if (isCharged(this.ballMap[m.x][m.y].bzMap)) this.rcFire = 1;
+        // A charged ball caught in a blast arms a sweep just as a match does.
+        if (isCharged(this.ballMap[m.x][m.y].bzMap)) this.rcFire++;
         this.ballMap[m.x][m.y].bzMap = 0;
       }
       if (this.onPlaySound) this.onPlaySound(this.boomKind ? 'boom' : 'thud');
@@ -1966,7 +1983,7 @@
           // on the next resolve pass rather than here: the match has to finish and
           // the board settle first, or the sweep would clear balls still falling
           // into the bottom row.
-          if (isCharged(this.ballMap[m.x][m.y].bzMap)) this.rcFire = 1;
+          if (isCharged(this.ballMap[m.x][m.y].bzMap)) this.rcFire++;
           this.ballMap[m.x][m.y].bzMap = 0;
         }
         if (this.onPlaySound) this.onPlaySound('pop');
@@ -2085,7 +2102,9 @@
         if (r.chain >= 2 && this.onChain) this.onChain(r.chain);
       }
       const noneDropped = this.checkGaps();
-      return index > 0 || hasClearedRows || blasted > 0 || !noneDropped;
+      // A sweep still owed keeps the resolve going, even past a pass that
+      // changed nothing.
+      return index > 0 || hasClearedRows || blasted > 0 || !noneDropped || this.rcFire > 0;
     }
 
     // What follows a landing once its resolve is done: score and level, then
@@ -4708,7 +4727,7 @@ registerProcessor('odd-sid', OddSid);
     spawnSweep(fromPos, toPos, color, dur = 0.38) {
       const dx = (toPos.x - fromPos.x) / dur;
       const dy = (toPos.y - fromPos.y) / dur;
-      const make = (count, size, col, decay, spreadV) => {
+      const make = (count, size, col, decay, spreadV, hold) => {
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(count * 3);
         const velocities = [];
@@ -4729,9 +4748,11 @@ registerProcessor('odd-sid', OddSid);
         });
         const cloud = new THREE.Points(geometry, material);
         this.scene.add(cloud);
-        this.particles.push({ mesh: cloud, velocities, life: 1.0, decay: decay, noGravity: true });
+        this.particles.push({ mesh: cloud, velocities, life: 1.0, decay: decay, noGravity: true, hold: hold });
       };
-      make(1, 2.2, new THREE.Color(0xffffff), 1 / dur, 0);
+      // The head lives exactly the run; held at full brightness until its last
+      // stretch, or it dims steadily across the row and seems to fade out early.
+      make(1, 2.2, new THREE.Color(0xffffff), 1 / dur, 0, true);
       make(70, 0.6, color, 1.1, 1.2);
     }
 
@@ -4871,7 +4892,7 @@ registerProcessor('odd-sid', OddSid);
           this.particles.splice(i, 1);
           continue;
         }
-        p.mesh.material.opacity = Math.max(0, p.life);
+        p.mesh.material.opacity = p.hold ? Math.min(1, p.life * 12) : Math.max(0, p.life);
         const positions = p.mesh.geometry.attributes.position.array;
         for (let j = 0; j < positions.length / 3; j++) {
           positions[j * 3] += p.velocities[j * 3] * dt;
@@ -6708,14 +6729,19 @@ registerProcessor('odd-sid', OddSid);
         const swept = !!this.sweepPrePopped;
         if (type === 'boom' && this.sweepArmed && !swept) this.drawSweep(this.lastPops || []);
         if (type === 'boom' && swept && this.engine.boomKind === 1) {
-          this.sweepArmed = this.engine.rcFire === 1;
+          this.sweepArmed = this.engine.rcFire > 0;
           this.lastPops = null;
           return;
         }
-        this.sweepArmed = this.engine.rcFire === 1;
+        this.sweepArmed = this.engine.rcFire > 0;
+        // Where each owed sweep starts: the charged balls that armed them, in
+        // turn (runSweep takes them off the front).
         if (this.sweepArmed) {
-          const c = (this.lastPops || []).find(m => isCharged(m.color));
-          if (c) this.sweepFrom = c;
+          const cs = (this.lastPops || []).filter(m => isCharged(m.color));
+          this.sweepQueue = (this.sweepQueue || []).concat(cs);
+          if (cs.length) this.sweepFrom = this.sweepQueue[0];
+        } else {
+          this.sweepQueue = [];
         }
         this.lastPops = null;
         this.audio.playSound(type, type === 'boom' ? this.engine.boomKind : param);
@@ -6799,10 +6825,12 @@ registerProcessor('odd-sid', OddSid);
         if (e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap > 0) xs.push(x);
       }
       this.sweepDone = true;
+      // This sweep's own charged ball, when several are owed; the next waits.
+      if (this.sweepQueue && this.sweepQueue.length) this.sweepFrom = this.sweepQueue.shift();
       if (!xs.length) return;                        // an empty row: just the pass
       const lo = xs[0], hi = xs[xs.length - 1];
       const src = this.sweepFrom;
-      const fromLeft = !src || (src.x - lo) <= (hi - src.x);
+      const fromLeft = sweepFromLeft(src, lo, hi);
       const value = src ? src.color : 17;
       // Where it starts: where the charged ball was, else above the row's middle.
       const from = src ? gridToWorld(src.x, src.y, SPHERE_RADIUS)
@@ -6823,11 +6851,26 @@ registerProcessor('odd-sid', OddSid);
     }
 
     // The charged ball on its way to the corner, a frame at a time: easing in, as
-    // a thing that falls does, sparks streaming behind. At the corner it becomes
-    // the row run: the comet, a pop for each ball as it passes, and the whoosh.
+    // a thing that falls does, sparks streaming behind. At the corner it starts
+    // the row run -- the comet, a pop for each ball as it passes, the whoosh --
+    // and rolls the row itself, whole to the far end, where it bursts. It used to
+    // leave at the corner, and the comet's head fading across the row read as
+    // the ball fading out before it got there (the user, 17 Oct 2026).
     updateSweepOrb(now) {
       const o = this.sweepOrb;
       if (!o) return;
+      if (o.rowStart) {
+        const f = Math.min(1, (now - o.rowStart) / SWEEP_MS);
+        o.mesh.position.set(o.corner.x + (o.far.x - o.corner.x) * f,
+                            o.corner.y + (o.far.y - o.corner.y) * f, o.corner.z);
+        o.mesh.rotation.z += 0.25;
+        if (Math.random() < 0.6) this.particles.spawnTrailParticle(o.mesh.position, o.value);
+        if (f < 1) return;
+        this.renderer.ballsGroup.remove(o.mesh);
+        this.particles.spawnPopExplosion(o.far, o.value);
+        this.sweepOrb = null;
+        return;
+      }
       const k = Math.min(1, (now - o.t0) / SWEEP_ORB_MS);
       const ease = k * k;
       const z = o.from.z + SPHERE_RADIUS * (1 - ease);
@@ -6837,8 +6880,7 @@ registerProcessor('odd-sid', OddSid);
       if (Math.random() < 0.8) this.particles.spawnTrailParticle(o.mesh.position, o.value);
       if (k < 1) return;
 
-      this.renderer.ballsGroup.remove(o.mesh);
-      this.sweepOrb = null;
+      o.rowStart = now;
       const e = this.engine, y = BOARD_BOUNDS.MAX_Y;
       this.particles.spawnPopExplosion(o.corner, o.value);
       this.particles.spawnSweep(o.corner, o.far, this.particles.colourFor(o.value), SWEEP_MS / 1000);
@@ -6907,7 +6949,7 @@ registerProcessor('odd-sid', OddSid);
       let lo = row[0].x, hi = row[0].x;
       for (const m of row) { lo = Math.min(lo, m.x); hi = Math.max(hi, m.x); }
       const src = this.sweepFrom;
-      const fromLeft = !src || (src.x - lo) <= (hi - src.x);
+      const fromLeft = sweepFromLeft(src, lo, hi);
       const a = gridToWorld(fromLeft ? lo : hi, BOARD_BOUNDS.MAX_Y, SPHERE_RADIUS);
       const b = gridToWorld(fromLeft ? hi : lo, BOARD_BOUNDS.MAX_Y, SPHERE_RADIUS);
       this.particles.spawnSweep(a, b, this.particles.colourFor(src ? src.color : 1));
