@@ -1306,6 +1306,90 @@ input:checked + .slider::before {
   }
 }
 
+/* body.hud-compact: a window too short for the full side cards to clear the
+   buttons below the board (OddballzApp.updateHudLayout decides). The same cards,
+   shorter: tighter spacing and NEXT beside its label. 280 is the stats card's
+   natural height this way; the guide matches it, as at full size. */
+body.hud-compact {
+  --side-panel-h: 280px;
+}
+
+body.hud-compact .stats-panel {
+  gap: 0.2rem;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+body.hud-compact .stat-next {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+body.hud-compact .stat-next .stat-label {
+  flex-direction: column;
+  gap: 0;
+}
+
+body.hud-compact .next-canvas {
+  width: 66px;
+  height: 60px;
+}
+
+/* body.hud-strip: a window too narrow for the side cards to clear the board,
+   or too short even for the compact ones. The stats go to a strip under the
+   header, as on the phone, and the controls guide goes -- the buttons below the
+   board do the same jobs, and the phone has no guide either. The header may
+   wrap, as on the phone, rather than run off the right edge. */
+body.hud-strip .game-header {
+  flex-wrap: wrap;
+}
+
+body.hud-strip #uiOverlay {
+  justify-content: flex-start;
+  gap: 0.4rem;
+}
+
+body.hud-strip .keybinds-panel {
+  display: none;
+}
+
+body.hud-strip .stats-panel {
+  position: relative;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  min-width: unset;
+  min-height: 0;
+  flex-direction: row;
+  justify-content: space-around;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+}
+
+body.hud-strip .stat-card {
+  align-items: center;
+  text-align: center;
+}
+
+body.hud-strip .stat-next {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+body.hud-strip .stat-next .stat-label {
+  flex-direction: column;
+  gap: 0;
+}
+
+body.hud-strip .next-canvas {
+  width: 66px;
+  height: 60px;
+}
+
 /* The next background, on the board itself for anyone without a keyboard's B.
    Absolutely placed in the canvas container, so it takes no part in the layout. */
 .bg-cycle-btn {

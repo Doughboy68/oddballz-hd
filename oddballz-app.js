@@ -6539,6 +6539,68 @@ registerProcessor('odd-sid', OddSid);
         window.addEventListener(type, activity, { capture: true, passive: true });
       }
       window.addEventListener('resize', () => { if (this.attractActive) this.positionAttractHint(); });
+      window.addEventListener('resize', () => this.updateHudLayout());
+      this.updateHudLayout();
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.updateHudLayout());
+    }
+
+    // The side cards -- stats on the left, the controls guide on the right -- or
+    // the phone's strip of stats under the header. The cards float over the
+    // board, which is fine while the board sits between them; in a tall, narrow
+    // window the board fills the width and they cover it, and the header wraps
+    // down over their tops (the user, 17 Oct 2026, resizing a desktop window).
+    // In a short one they reach down over the buttons instead.
+    //
+    // So each layout is tried in turn and the first that fits is kept: the full
+    // cards; body.hud-compact, the same cards made shorter; body.hud-strip. A
+    // layout fits when no board tile is under a card, the cards clear the header
+    // and the buttons, and the header is not overflowing. The camera ignores the
+    // HUD, so none of this feeds back on itself. Phones (600px and under) have
+    // the strip from CSS already.
+    updateHudLayout() {
+      const body = document.body;
+      body.classList.remove('hud-strip', 'hud-compact');
+      if (window.innerWidth <= 600) return;
+      const R = this.renderer;
+      if (!R || !R.boardGroup || !R.boardGroup.children.length) return;
+
+      R.camera.updateMatrixWorld();
+      R.boardGroup.updateMatrixWorld(true);
+      const rect = R.renderer.domElement.getBoundingClientRect();
+      const pts = [];
+      const v = new THREE.Vector3();
+      let x0 = Infinity, x1 = -Infinity;
+      for (const m of R.boardGroup.children) {
+        m.getWorldPosition(v);
+        v.project(R.camera);
+        const p = { x: rect.left + (v.x + 1) / 2 * rect.width, y: rect.top + (1 - v.y) / 2 * rect.height };
+        pts.push(p);
+        if (p.x < x0) x0 = p.x;
+        if (p.x > x1) x1 = p.x;
+      }
+      // Half a tile either way, so a tile's edge counts, not just its centre.
+      const pad = (x1 - x0) / Math.max(1, BOARD_BOUNDS.MAX_X - BOARD_BOUNDS.MIN_X) / 2;
+      const header = document.querySelector('.game-header');
+      const controls = document.getElementById('bottomControlsBar');
+
+      const fits = () => {
+        if (header && header.scrollWidth > header.clientWidth + 1) return false;
+        const headerBottom = header ? header.getBoundingClientRect().bottom : 0;
+        const controlsTop = controls ? controls.getBoundingClientRect().top : Infinity;
+        const cards = ['.stats-panel', '.keybinds-panel']
+          .map(sel => document.querySelector(sel))
+          .filter(el => el && getComputedStyle(el).display !== 'none' &&
+                        getComputedStyle(el).position === 'absolute')
+          .map(el => el.getBoundingClientRect());
+        return cards.every(c => c.top >= headerBottom - 1 && c.bottom <= controlsTop - 6 &&
+          !pts.some(p => p.x + pad > c.left && p.x - pad < c.right &&
+                         p.y + pad > c.top && p.y - pad < c.bottom));
+      };
+      if (fits()) return;
+      body.classList.add('hud-compact');
+      if (fits()) return;
+      body.classList.remove('hud-compact');
+      body.classList.add('hud-strip');
     }
 
     // Offers a newer deploy, the way the timesheet app does: a bar saying what is
