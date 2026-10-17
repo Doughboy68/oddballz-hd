@@ -266,18 +266,20 @@
   // Backgrounds), and every current browser can.
   const BACKDROPS = [
     { label: 'Cosmic Stellar Nebula',    song: 'nebula',     procedural: 'nebula',
-      tints: ['#c46bff', '#ff6bd5', '#7b74ff', '#3fd6d0'] },
+      platform: '#c46bff', tints: ['#c46bff', '#ff6bd5', '#7b74ff', '#3fd6d0'] },
     { label: 'Cyber Conduit Spaceframe', song: 'cyber',      procedural: 'conduit',
-      tints: ['#3fe4ff', '#5c86ff', '#8fd8ff', '#2fb8e8'] },
+      platform: '#3fe4ff', tints: ['#3fe4ff', '#5c86ff', '#8fd8ff', '#2fb8e8'] },
     { label: 'Quantum Hyperspace Warp',  song: 'hyperspace', procedural: 'warp',
-      tints: ['#3ab0ff', '#a07bff', '#5ae0ff', '#dfe6ff'] },
+      platform: '#3ab0ff', tints: ['#3ab0ff', '#a07bff', '#5ae0ff', '#dfe6ff'] },
     { label: 'Alien Bio-Reactor Core',   song: 'mothership', procedural: 'lattice',
-      tints: ['#2fd88f', '#55ffc0', '#b8ff6b', '#3fd6d0'] },
+      platform: '#2fd88f', tints: ['#2fd88f', '#55ffc0', '#b8ff6b', '#3fd6d0'] },
     { label: 'Deep Space Citadel',       song: 'citadel',    procedural: 'citadel',
-      tints: ['#ff5a7e', '#9a7bd8', '#8fb0d8', '#ff8fb0'] },
+      platform: '#ff5a7e', tints: ['#ff5a7e', '#9a7bd8', '#8fb0d8', '#ff8fb0'] },
     { label: 'Orbital Solar Array',      song: 'solar',      procedural: 'solar',
-      tints: ['#fff3c8', '#ffc24d', '#ff7a2a', '#e8454f'] }
+      platform: '#ff7a2a', tints: ['#fff3c8', '#ffc24d', '#ff7a2a', '#e8454f'] }
   ];
+  // platform: the board's colour on that background (setPlatformTint), its most
+  // saturated accent -- Solar's first tint is near white, so its orange.
   // tints: the header logo's colours on that background, bright cuts of the
   // colours its shader draws in -- the nebula's violet, pink, indigo and teal,
   // the conduits' cyans and blue, the warp's blues and violet, the reactor's
@@ -813,6 +815,21 @@
     if (x < BP.MIN_X || x > BP.MAX_X || y < 0 || y > BP.MAX_Y) return false;
     return (y < BP.SPLIT && x < y + BP.UPPER) || (y >= BP.SPLIT && x > y - BP.LOWER);
   }
+
+  // The platform's colour follows the background (ThreeRenderer.setPlatformTint,
+  // from setBackdrop): each background's accent -- BACKDROPS platform -- in the
+  // tiles' emissive glow and, part way (PLATFORM_TINT_MIX), in their base colour.
+  // The board is metallic, so the base tint colours its reflections as well; the
+  // glow alone barely showed through the base blue. Material only, not a light,
+  // so the balls are untouched: a coloured light cannot be aimed at the board
+  // alone in r128, and one swung gold 57 units towards green. The glow is scaled
+  // down for the light hues (PLATFORM_TINT_GLOW / luminance) so the board stays
+  // about as dark as it was and the darkest balls keep their contrast. With no
+  // background, the board's own navy.
+  const PLATFORM_TINT_MIX = 0.42;
+  const PLATFORM_TINT_GLOW = 0.2;
+  const BOARD_GLOW = [0x0a1622, 0.5];
+  const BOARD_BASE = 0x1e2c44;
 
   // The title's letters in the six ball colours, by ball value 1-6 (sapphire,
   // ruby, emerald, gold, amethyst, magenta): brighter cuts of the balls' own,
@@ -5278,6 +5295,41 @@ registerProcessor('odd-sid', OddSid);
       }
     }
 
+    // The platform's colour for a background's accent hex (null: the board's own
+    // navy), eased into over about a second; instant before the board is drawn.
+    setPlatformTint(hex, instant) {
+      let colour, k;
+      const base = new THREE.Color(BOARD_BASE);
+      if (hex === null || hex === undefined) {
+        colour = new THREE.Color(BOARD_GLOW[0]);
+        k = BOARD_GLOW[1];
+      } else {
+        colour = new THREE.Color(hex);
+        // Light hues (cyan, green, orange) toned down in proportion, glow and
+        // base both, so every background's board is about as dark as the navy.
+        const lum = 0.2126 * colour.r + 0.7152 * colour.g + 0.0722 * colour.b;
+        const tame = Math.min(1, 0.3 / Math.max(lum, 0.01));
+        k = PLATFORM_TINT_GLOW * Math.max(0.35, tame);
+        base.lerp(colour.clone().multiplyScalar(0.32 * Math.max(0.5, tame)), PLATFORM_TINT_MIX);
+      }
+      this.tintTarget = { colour, k, base };
+      if (this.hexMat && instant) {
+        this.hexMat.emissive.copy(colour);
+        this.hexMat.color.copy(base);
+        this.hexMat.emissiveIntensity = k;
+      }
+    }
+
+    // A frame of the platform's colour, easing towards its target.
+    updatePlatformTint(dt) {
+      const t = this.tintTarget;
+      if (!t || !this.hexMat) return;
+      const a = 1 - Math.exp(-dt * 2.5);
+      this.hexMat.emissive.lerp(t.colour, a);
+      this.hexMat.color.lerp(t.base, a);
+      this.hexMat.emissiveIntensity += (t.k - this.hexMat.emissiveIntensity) * a;
+    }
+
     // Top face of a board tile. The tiles are placed at z = -0.25 and extruded by
     // depth + bevelThickness, both of which scale with the preset, so this has to
     // be computed rather than written down as a number.
@@ -5454,6 +5506,11 @@ registerProcessor('odd-sid', OddSid);
       // also swings gold about 57 units of green. Tried and measured; the balls
       // must keep the corrected palette.
       this.hexMat = new THREE.MeshStandardMaterial({ color: 0x1e2c44, roughness: 0.35, metalness: 0.55, emissive: 0x0a1622, emissiveIntensity: 0.5 });
+      if (this.tintTarget) {
+        this.hexMat.emissive.copy(this.tintTarget.colour);
+        this.hexMat.color.copy(this.tintTarget.base);
+        this.hexMat.emissiveIntensity = this.tintTarget.k;
+      }
       // No wireframe at all. The original board had no per-cell outline -- the cells
       // read from the dark gaps between the hexes and the bevel catching the light.
       // The cyan LineSegments that drew one were also the source of the jagged cyan
@@ -6071,6 +6128,7 @@ registerProcessor('odd-sid', OddSid);
     }
 
     render(dt = 0.016) {
+      this.updatePlatformTint(dt);
       this._flightTime = (this._flightTime || 0) + dt;
 
       // === MAGIC-CARPET FLIGHT HOVER BOBBING FOR PLAYFIELD ===
@@ -6455,8 +6513,10 @@ registerProcessor('odd-sid', OddSid);
       if (i === null || i === undefined || !BACKDROPS[i]) {
         this.scene.background = this.plainBackground || (this.plainBackground = new THREE.Color(0x0a0c16));
         this.setProcedural(null);
+        this.setPlatformTint(null);
         return;
       }
+      this.setPlatformTint(BACKDROPS[i].platform);
       const kind = BACKDROPS[i].procedural;
       this.setProcedural(kind);
       this.backdropKey = 'proc:' + kind;

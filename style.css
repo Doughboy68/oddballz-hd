@@ -1799,12 +1799,22 @@ body.hud-strip.guide-on .keybinds-panel { display: none; }
 
 /* A phone's header is narrow: the icons a little smaller. */
 @media (max-width: 600px) {
-  .board-icons { gap: 0.25rem; }
+  .board-icons { gap: 0.3rem; }
+
+  /* Big enough to tap (the user, 17 Oct 2026: 28px was hard to press). */
+  .board-icon {
+    width: 2.15rem;
+    height: 2.15rem;
+    font-size: 0.95rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .board-icons { gap: 0.22rem; }
 
   .board-icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    font-size: 0.8rem;
+    width: 2rem;
+    height: 2rem;
   }
 }
 
