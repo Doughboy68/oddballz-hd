@@ -1351,3 +1351,39 @@ body.in-game .bg-cycle-btn { display: block; }
   color: var(--text-muted);
   text-align: center;
 }
+
+/* The game cannot start its graphics (WebGL, or a background shader). Covers
+   everything; there is no fallback to run instead. */
+.graphics-error {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2rem;
+  background: #05060c;
+  color: #e6ebf5;
+}
+
+.graphics-error-card {
+  max-width: 28rem;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.graphics-error-card h2 {
+  color: #67e8f9;
+  margin: 0 0 0.8rem;
+}
+
+.graphics-error-card p {
+  margin: 0.4rem 0;
+}
+
+.graphics-error-detail {
+  margin-top: 1rem !important;
+  font-size: 0.75rem;
+  color: #7c869c;
+  font-family: 'JetBrains Mono', monospace;
+}

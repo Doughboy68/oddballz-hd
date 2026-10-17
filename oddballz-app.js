@@ -247,51 +247,29 @@
     return DIFF_NORMAL;
   }
 
-  // The background pictures, each paired with the song it plays under. The first
-  // four are the C64 build's four themes in its order; the last two are new to HD,
-  // and so are their songs. Files are 1920x1080 JPEGs in backgrounds/, cover-cropped
-  // to the screen -- on a portrait phone that leaves only the middle quarter of
-  // the width, so nothing a picture needs can sit near its sides.
-  const BACKDROPS = [
-    { file: 'cosmic_stellar_nebula',    label: 'Nebula',      song: 'nebula',      procedural: 'nebula',
-      glow: { threshold: 0.28, strength: 0.6, twinkle: true } },  // the glow is the fallback's
-    { file: 'cyber_conduit_spaceframe', label: 'Cyber',       song: 'cyber',
-      procedural: 'conduit' },                                    // drawn live: PROC_SHADERS
-    { file: 'quantum_hyperspace_warp',  label: 'Hyperspace',  song: 'hyperspace',
-      procedural: 'warp' },                                       // drawn live: PROC_SHADERS
-    { file: 'alien_bio-reactor_core',   label: 'Mothership',  song: 'mothership',
-      procedural: 'lattice' },                                    // drawn live: PROC_SHADERS
-    { file: 'deep_space_citadel',       label: 'Citadel',     song: 'citadel',     procedural: 'citadel',
-      glow: { threshold: 0.42, strength: 2.0 } },                 // the glow is the fallback's
-    { file: 'orbital_solar_array',      label: 'Solar Array', song: 'solar',       procedural: 'solar',
-      glow: { threshold: 0.6, strength: 0.18 } }                  // the glow is the fallback's
-  ];
-  // ALL, the default, plays each picture in turn, as the C64 build's does; any
-  // other choice holds that one picture for the whole game.
-  // procedural: drawn live by a shader instead of a picture (PROC_SHADERS), its
-  // lines made by the game and moving. Hyperspace first -- its picture's streaks
-  // were drawn in pieces with gaps between, which read as broken once they were
-  // lit -- then, at the user's asking, Cyber's conduits and Mothership's lattice,
-  // slowly drifting, and then the other three, the pictures as reference. The
-  // file stays as the fallback where a shader cannot run, glow and all.
+  // The backgrounds, each paired with the song it plays under, each drawn live by
+  // a shader (PROC_SHADERS). The first four are the C64 build's four themes in its
+  // order; the last two are new to HD, and so are their songs.
   //
-  // glow: the picture's bright parts -- neon lines, markers, stars -- are lifted
-  // into a layer the renderer animates (ThreeRenderer.setGlow). Per picture,
-  // because the threshold that finds the lines in one finds the haze in another:
-  // measured, 0.42 lifts 2-3% of Cyber, Mothership and Citadel -- their lines --
-  // but 18% of Solar Array, whose sun is one large bright gradient; at 0.6 that
-  // is its hot core alone. strength is set so the lit parts brighten without
-  // blowing out: measured over a cycle, the share of lit pixels clipping to white
-  // at the peak stays near or under 10% (Solar's sun was 62% at 0.3, 20% at 0.15). radial
-  // sends the sweep outward from the centre rather than across, which is what
-  // Hyperspace's streaks are already doing.
+  // They began as pictures -- 1920x1080 JPEGs, still in backgrounds/ as reference
+  // -- and were redrawn as shaders one by one, at the user's asking: Hyperspace
+  // first, whose picture's streaks were drawn in broken pieces, then Cyber and
+  // Mothership, then the rest. Drawn live, a background's lines are the game's own,
+  // clean at any size and always moving, and its composition fits the screen
+  // rather than being cropped out of 16:9. There is no picture fallback: a device
+  // that cannot run the shaders gets an error screen (ThreeRenderer.precompile-
+  // Backgrounds), and every current browser can.
+  const BACKDROPS = [
+    { label: 'Nebula',      song: 'nebula',     procedural: 'nebula' },
+    { label: 'Cyber',       song: 'cyber',      procedural: 'conduit' },
+    { label: 'Hyperspace',  song: 'hyperspace', procedural: 'warp' },
+    { label: 'Mothership',  song: 'mothership', procedural: 'lattice' },
+    { label: 'Citadel',     song: 'citadel',    procedural: 'citadel' },
+    { label: 'Solar Array', song: 'solar',      procedural: 'solar' }
+  ];
+  // ALL, the default, plays each background in turn, as the C64 build's does; any
+  // other choice holds that one for the whole game.
   const BACKDROP_ALL = -1;
-  // Bump when a picture is replaced under the same name. The JPEGs carry no ?v=
-  // of their own, so without this a browser that has the old one keeps it --
-  // the same trap as the JS and CSS links in index.html.
-  const BACKDROP_REV = 3;
-  // ?noglow on the address: the pictures without their animated glow, to compare.
-  const NO_GLOW = new URLSearchParams(location.search).has('noglow');
   const BACKDROP_KEY = 'oddballz_hd_backdrop';
   function storedBackdrop() {
     try {
@@ -341,13 +319,10 @@
   // How much darker the falling piece is than the settled balls. The piece used to
   // share their materials, so it could only be as bright as they are.
   const ACTIVE_BALL_DIM = 0.85;
-  // How much of each background picture is blacked out before it is drawn: 0 is
-  // the picture as painted, 1 is the plain backdrop.
-  const BACKDROP_DIM = 0.45;
   // The live backgrounds (BACKDROPS procedural): each a fragment shader drawn
   // full screen behind everything, its brightness matched to the dimmed pictures
-  // so it sits back behind the board as they do, and the plain colour shown
-  // under it for the moment before its first frame.
+  // it replaced so it sits back behind the board as they did, and the plain
+  // colour under it.
   const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9, nebula: 0.9, citadel: 0.9, solar: 0.9 };
   const PROC_BASE = { warp: 0x020308, conduit: 0x060b16, lattice: 0x03100b,
                       nebula: 0x0b0a1e, citadel: 0x080a18, solar: 0x030203 };
@@ -4981,6 +4956,7 @@ registerProcessor('odd-sid', OddSid);
       this.build3DStarfield();
 
       this.staticBallMeshes = new Map();
+      this.precompileBackgrounds();
       window.addEventListener('resize', () => this.onWindowResize());
     }
 
@@ -6141,7 +6117,6 @@ registerProcessor('odd-sid', OddSid);
 
       // The bomb's spark flickers: two sines out of step, so it never settles into
       // a visible beat, and it warms towards yellow as it flares.
-      if (this.bgGlow && this.bgGlow.visible) this.bgGlow.material.uniforms.uTime.value = this._flightTime;
       if (this.bgProc && this.bgProc.visible) {
         const pu = this.bgProc.material.uniforms;
         pu.uTime.value = this._flightTime;
@@ -6384,216 +6359,32 @@ registerProcessor('odd-sid', OddSid);
 
     onWindowResize() {
       this.updateCameraFraming();
-      // Turned between portrait and landscape: the other cut of the picture.
-      if (this.backdropIndex !== null && this.backdropIndex !== undefined &&
-          this.viewIsPortrait() !== this.backdropPortrait) this.setBackdrop(this.backdropIndex);
-      else this.fitBackdrop();
     }
 
-    // Show background picture i (an index into BACKDROPS), or the plain colour for
-    // null. Loaded on first use and kept, so stepping through them later costs
-    // nothing; a picture that fails to load leaves the plain colour in place.
-    //
-    // A portrait screen takes the picture's portrait cut, <file>_portrait.jpg,
-    // where there is one. The pictures are landscape compositions, most of them a
-    // frame round an empty middle, and a portrait phone's cover-crop keeps only
-    // the middle third of the width -- the frame is exactly what it loses. With no
-    // portrait cut, the landscape picture is cropped as before.
-    //
-    // It goes in as scene.background, so it is drawn first and everything else --
-    // the flying stars included -- passes in front of it. Dimmed on the way in:
-    // the board and balls are lit for a near-black surround, and a full-strength
-    // picture behind them competes with the balls for the eye.
+    // Show background i (an index into BACKDROPS), or the plain colour for null.
+    // Every background is a live shader, compiled at start (precompileBackgrounds),
+    // so this is only a matter of which material the quad wears.
     setBackdrop(i) {
       this.backdropIndex = i;
       if (i === null || i === undefined || !BACKDROPS[i]) {
         this.scene.background = this.plainBackground || (this.plainBackground = new THREE.Color(0x0a0c16));
-        this.setGlow(null);
         this.setProcedural(null);
         return;
       }
-      if (!this.plainBackground) this.plainBackground = this.scene.background;
       const kind = BACKDROPS[i].procedural;
-      if (kind && this.setProcedural(kind)) {
-        this.backdropKey = 'proc:' + kind;
-        this.scene.background = new THREE.Color(PROC_BASE[kind]);
-        this.setGlow(null);
-        return;
-      }
-      this.setProcedural(null);
-      this.backdropTextures = this.backdropTextures || {};
-      this.noPortraitCut = this.noPortraitCut || {};
-      this.backdropPortrait = this.viewIsPortrait();
-      const portrait = this.backdropPortrait && !this.noPortraitCut[i];
-      const key = portrait ? i + 'p' : String(i);
-      this.backdropKey = key;
-      const have = this.backdropTextures[key];
-      if (have) { this.scene.background = have; this.applyGlow(have); this.fitBackdrop(); return; }
-      this.setGlow(null);
-      if (have === null) return;          // still loading
-      this.backdropTextures[key] = null;
-      const img = new Image();
-      img.onload = () => {
-        const cvs = document.createElement('canvas');
-        cvs.width = img.naturalWidth;
-        cvs.height = img.naturalHeight;
-        const ctx = cvs.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        ctx.fillStyle = 'rgba(0, 0, 0, ' + BACKDROP_DIM + ')';
-        ctx.fillRect(0, 0, cvs.width, cvs.height);
-        const tex = new THREE.CanvasTexture(cvs);
-        const gc = BACKDROPS[i].glow;
-        // The glow layer is built from the image when the picture is shown, not
-        // kept: at full resolution each is ~11 MB of video memory (applyGlow).
-        tex.userData = { aspect: cvs.width / cvs.height, glowSrc: gc ? img : null, glowCfg: gc };
-        this.backdropTextures[key] = tex;
-        // Only if it is still the one wanted: a quick step past it while it loaded
-        // must not snap back to it.
-        if (this.backdropKey === key) { this.scene.background = tex; this.applyGlow(tex); this.fitBackdrop(); }
-      };
-      img.onerror = () => {
-        delete this.backdropTextures[key];
-        // No portrait cut of this one: remember, and fall back to the landscape.
-        if (portrait) {
-          this.noPortraitCut[i] = true;
-          if (this.backdropKey === key) this.setBackdrop(i);
-        }
-      };
-      img.src = './backgrounds/' + BACKDROPS[i].file + (portrait ? '_portrait' : '') + '.jpg?v=' + BACKDROP_REV;
-    }
-
-    viewIsPortrait() {
-      const el = this.renderer.domElement;
-      return (el.clientWidth || 1) < (el.clientHeight || 1);
-    }
-
-    // Cover-crop: fill the screen and trim whichever way the picture overhangs,
-    // centred. A background texture is otherwise stretched to the viewport, which
-    // on a portrait phone squeezes a 16:9 picture to a third of its width.
-    fitBackdrop() {
-      const tex = this.scene.background;
-      if (!tex || !tex.isTexture) return;
-      const el = this.renderer.domElement;
-      const view = (el.clientWidth || 1) / (el.clientHeight || 1);
-      const pic = tex.userData.aspect || 16 / 9;
-      if (view < pic) {
-        tex.repeat.set(view / pic, 1);
-        tex.offset.set((1 - view / pic) / 2, 0);
-      } else {
-        tex.repeat.set(1, pic / view);
-        tex.offset.set(0, (1 - pic / view) / 2);
-      }
-      // The glow is cropped exactly as the picture under it.
-      if (this.bgGlow && this.bgGlow.visible) {
-        this.bgGlow.material.uniforms.uRepeat.value.copy(tex.repeat);
-        this.bgGlow.material.uniforms.uOffset.value.copy(tex.offset);
-      }
-    }
-
-    // The glow layer: the picture's bright parts, found by brightness and kept in
-    // their own colours, measured from the undimmed image against the picture's
-    // own threshold (BACKDROPS glow) -- and then softened, so what it adds is a
-    // haze of light around each line rather than a second, sharp copy of it.
-    //
-    // Soft because a sharp copy breaks thin lines into dashes. A line a pixel
-    // wide, drawn at the half size most screens show these pictures at, wavers
-    // in brightness as it crosses the pixel grid; under the dimmed picture that
-    // goes unnoticed, but a bright sharp glow on top turns every waver into a
-    // dash. Hyperspace's streaks read as broken lines from the day the glow went
-    // in, and each sharper version made it worse. A blurred glow has no fine
-    // detail to waver, the picture keeps its own crisp line, and the layer can
-    // be half size, since enlarging something soft cannot bead it.
-    //
-    //   1. which pixels belong: judged by the brightest in the 3x3 around each,
-    //      at full size, so every pixel of an anti-aliased line goes in rather
-    //      than every other one; each keeps its own colour
-    //   2. shrunk to half size by averaging
-    //   3. blurred, a box of radius 2 twice -- near enough a gaussian
-    glowMask(img, threshold) {
-      const FW = img.naturalWidth, FH = img.naturalHeight;
-      const src = document.createElement('canvas');
-      src.width = FW; src.height = FH;
-      const sctx = src.getContext('2d');
-      sctx.drawImage(img, 0, 0);
-      const d = sctx.getImageData(0, 0, FW, FH).data;
-
-      // 1. membership by neighbourhood (max across, then down)
-      const L = new Float32Array(FW * FH);
-      for (let i = 0, j = 0; j < L.length; i += 4, j++) {
-        L[j] = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
-      }
-      const R = new Float32Array(FW * FH);
-      for (let y = 0; y < FH; y++) {
-        const r0 = y * FW;
-        for (let x = 0; x < FW; x++) {
-          let m = L[r0 + x];
-          if (x > 0 && L[r0 + x - 1] > m) m = L[r0 + x - 1];
-          if (x < FW - 1 && L[r0 + x + 1] > m) m = L[r0 + x + 1];
-          R[r0 + x] = m;
-        }
-      }
-      const lo = threshold, span = 1 - lo;
-
-      // 2. into half size, averaging the four, with membership applied
-      const W = Math.floor(FW / 2), H = Math.floor(FH / 2);
-      const ch = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)];
-      for (let y = 0; y < FH; y++) {
-        for (let x = 0; x < FW; x++) {
-          const j = y * FW + x;
-          let m = R[j];
-          if (y > 0 && R[j - FW] > m) m = R[j - FW];
-          if (y < FH - 1 && R[j + FW] > m) m = R[j + FW];
-          if (m <= lo) continue;
-          const k = Math.min(1, (m - lo) / span) * 0.25;
-          const h = (y >> 1) * W + (x >> 1), i = j * 4;
-          if ((y >> 1) >= H || (x >> 1) >= W) continue;
-          ch[0][h] += d[i] * k; ch[1][h] += d[i + 1] * k; ch[2][h] += d[i + 2] * k;
-        }
-      }
-
-      // 3. soften: box radius 2, across then down, twice
-      const box = (a, tmp) => {
-        const n = 5;
-        for (let y = 0; y < H; y++) {
-          const r0 = y * W;
-          let acc = a[r0] * 3 + a[r0 + 1] + a[r0 + 2];
-          for (let x = 0; x < W; x++) {
-            tmp[r0 + x] = acc / n;
-            acc += a[r0 + Math.min(W - 1, x + 3)] - a[r0 + Math.max(0, x - 2)];
-          }
-        }
-        for (let x = 0; x < W; x++) {
-          let acc = tmp[x] * 3 + tmp[W + x] + tmp[2 * W + x];
-          for (let y = 0; y < H; y++) {
-            a[y * W + x] = acc / n;
-            acc += tmp[Math.min(H - 1, y + 3) * W + x] - tmp[Math.max(0, y - 2) * W + x];
-          }
-        }
-      };
-      const tmp = new Float32Array(W * H);
-      for (const c of ch) { box(c, tmp); box(c, tmp); }
-
-      const cvs = document.createElement('canvas');
-      cvs.width = W; cvs.height = H;
-      const ctx = cvs.getContext('2d');
-      const im = ctx.createImageData(W, H), o = im.data;
-      for (let h = 0; h < W * H; h++) {
-        o[h * 4] = ch[0][h]; o[h * 4 + 1] = ch[1][h]; o[h * 4 + 2] = ch[2][h]; o[h * 4 + 3] = 255;
-      }
-      ctx.putImageData(im, 0, 0);
-      return new THREE.CanvasTexture(cvs);    // mipmapped, as the picture is
+      this.setProcedural(kind);
+      this.backdropKey = 'proc:' + kind;
+      this.scene.background = new THREE.Color(PROC_BASE[kind]);
     }
 
     // A live background (BACKDROPS procedural): one full-screen quad, drawn
     // first and behind everything at the far plane, wearing the shader for the
     // kind asked for (PROC_SHADERS). Materials are made once a kind and kept, so
-    // stepping back to one is instant. null hides it. Returns false where the
-    // shader will not compile, and the picture is used instead.
+    // stepping back to one is instant. null hides it.
     setProcedural(kind) {
-      if (!kind) { if (this.bgProc) this.bgProc.visible = false; return false; }
+      if (!kind) { if (this.bgProc) this.bgProc.visible = false; return; }
       this.procMats = this.procMats || {};
       let mat = this.procMats[kind];
-      if (mat === false) return false;
       if (!mat) {
         mat = new THREE.ShaderMaterial({
           uniforms: {
@@ -6622,111 +6413,32 @@ registerProcessor('odd-sid', OddSid);
       }
       this.bgProc.material = mat;
       this.bgProc.visible = true;
-      return true;
     }
 
-    // The glow for a background texture: built for it now, and the last one's
-    // freed, so only the picture on screen holds a layer.
-    applyGlow(tex) {
-      const cfg = tex.userData.glowCfg;
-      // ?noglow on the address shows the pictures still, to compare.
-      if (NO_GLOW) { this.setGlow(null); return; }
-      if (!cfg || !tex.userData.glowSrc) { this.setGlow(null); return; }
-      if (this.glowFor === tex && this.bgGlow && this.bgGlow.visible) return;
-      const mask = this.glowMask(tex.userData.glowSrc, cfg.threshold);
-      this.setGlow(mask, cfg);
-      this.glowFor = tex;
+    // Compile every background's shader now, and check each actually linked. The
+    // game has no picture fallback, so a background that cannot draw means the
+    // game cannot run: throws, and the app shows the error screen instead of
+    // starting. Done at start rather than on first use for the same reason it
+    // helps anyway -- the first switch to a background used to stall while its
+    // shader compiled. ?failgl on the address throws here on purpose, to see the
+    // error screen.
+    precompileBackgrounds() {
+      if (new URLSearchParams(location.search).has('failgl')) throw new Error('?failgl: the error screen on request');
+      const gl = this.renderer.getContext();
+      for (const kind of Object.keys(PROC_SHADERS)) {
+        this.setProcedural(kind);
+        this.renderer.compile(this.scene, this.camera);
+        // r128 keeps the compiled program as currentProgram (later versions as
+        // program); looking only for the latter found nothing and failed them all.
+        const props = this.renderer.properties.get(this.procMats[kind]);
+        const prog = props.currentProgram || props.program;
+        if (!prog || !gl.getProgramParameter(prog.program, gl.LINK_STATUS)) {
+          throw new Error('The ' + kind + ' background shader did not compile.');
+        }
+      }
+      this.setProcedural(null);
     }
 
-    // Show a glow layer over the background, or none. One full-screen quad, made
-    // on first use, drawn behind everything else: its depth is the far plane, so
-    // the board and the balls cover it, and it adds light where the picture's
-    // own lines are.
-    //
-    // What it does with them, all slow so it stays background:
-    //   breathe  the lines brighten and fade together, a 5 s cycle
-    //   sweep    a soft band of light crosses the picture on a diagonal every
-    //            7 s, lighting each line as it passes -- current along a conduit
-    //   halo     a few taps around each point, so the light spills off the line
-    //   twinkle  on a picture whose points are stars (BACKDROPS glow twinkle),
-    //            they flicker on their own phases; nowhere else, since along a
-    //            line the same flicker reads as dashes
-    setGlow(mask, cfg) {
-      // The layer being replaced is freed: they are built per showing.
-      const old = this.bgGlow && this.bgGlow.material.uniforms.tGlow.value;
-      if (old && old !== mask) old.dispose();
-      if (!mask) {
-        if (this.bgGlow) { this.bgGlow.visible = false; this.bgGlow.material.uniforms.tGlow.value = null; }
-        this.glowFor = null;
-        return;
-      }
-      if (!this.bgGlow) {
-        const mat = new THREE.ShaderMaterial({
-          uniforms: {
-            tGlow: { value: null },
-            uRepeat: { value: new THREE.Vector2(1, 1) },
-            uOffset: { value: new THREE.Vector2(0, 0) },
-            uTexel: { value: new THREE.Vector2(1 / 960, 1 / 540) },
-            uTime: { value: 0 },
-            uStrength: { value: 0.5 },
-            uRadial: { value: 0 },
-            uTwinkle: { value: 0 }
-          },
-          vertexShader: `
-            varying vec2 vUv;
-            void main() {
-              vUv = uv;
-              gl_Position = vec4(position.xy, 0.9999, 1.0);   // full screen, a hair inside the far plane
-            }`,
-          fragmentShader: `
-            uniform sampler2D tGlow;
-            uniform vec2 uRepeat, uOffset, uTexel;
-            uniform float uTime, uStrength, uRadial, uTwinkle;
-            varying vec2 vUv;
-            void main() {
-              vec2 uv = uOffset + vUv * uRepeat;
-              vec3 core = texture2D(tGlow, uv).rgb;
-              vec3 halo = vec3(0.0);
-              for (int k = 0; k < 8; k++) {
-                float a = float(k) * 0.785398;
-                halo += texture2D(tGlow, uv + vec2(cos(a), sin(a)) * uTexel * 4.0).rgb;
-              }
-              halo *= 0.125;
-              float breathe = 0.5 + 0.5 * sin(uTime * 1.2566);
-              // Across on a diagonal, or outward from the centre for a picture
-              // whose lines already radiate from it.
-              float x = uRadial > 0.5 ? length((uv - 0.5) * vec2(1.7778, 1.0)) : uv.x + uv.y * 0.45;
-              float pos = fract(uTime / 7.0) * 2.0 - 0.4;
-              float bd = (x - pos) / 0.07;
-              float band = exp(-bd * bd);              // squared by hand: pow() is undefined for a negative base
-              // The twinkle is set per small square of the picture, so along a
-              // line neighbouring squares would flicker out of step and break it
-              // into dashes. Only a picture whose bright points are stars has it.
-              float n = fract(sin(dot(floor(uv * vec2(320.0, 180.0)), vec2(12.9898, 78.233))) * 43758.5453);
-              float tw = 0.5 + 0.5 * sin(uTime * (1.5 + 3.0 * n) + n * 6.2832);
-              vec3 c = core * (0.35 + 0.35 * breathe + 1.1 * band + 0.25 * tw * uTwinkle)
-                     + halo * (0.45 * breathe + 1.4 * band);
-              gl_FragColor = vec4(c * uStrength, 1.0);
-            }`,
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          depthTest: true,
-          fog: false
-        });
-        this.bgGlow = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
-        this.bgGlow.frustumCulled = false;
-        this.bgGlow.renderOrder = -1;
-        this.scene.add(this.bgGlow);
-      }
-      const u = this.bgGlow.material.uniforms;
-      u.tGlow.value = mask;
-      u.uTexel.value.set(1 / mask.image.width, 1 / mask.image.height);
-      u.uStrength.value = (cfg && cfg.strength) || 0.5;
-      u.uRadial.value = cfg && cfg.radial ? 1 : 0;
-      u.uTwinkle.value = cfg && cfg.twinkle ? 1 : 0;
-      this.bgGlow.visible = true;
-    }
   }
 
   // --- 6. APPLICATION CONTROLLER ---
@@ -7012,6 +6724,18 @@ registerProcessor('odd-sid', OddSid);
       this.audio.setSong(BACKDROPS[next].song, true);
     }
 
+    // Start or stop the music to match the sound settings and where the player is:
+    // playing when sound and music are both on, unless a game is paused (resuming
+    // starts it); on the title that means the title's song, whatever the last game
+    // left. The M key and the Audio Options switches all come through here.
+    syncMusicPlayback() {
+      if (this.audio.enabled && this.audio.musicEnabled && (!this.isPlaying || !this.isPaused || this.wasPausedByModal)) {
+        if (this.isPlaying) this.audio.startBGM(); else this.playTitleSong();
+      } else {
+        this.audio.stopBGM();
+      }
+    }
+
     // The title's song, wherever the title is showing and sound can start.
     playTitleSong() {
       if (this.isPlaying) return;
@@ -7054,6 +6778,10 @@ registerProcessor('odd-sid', OddSid);
 
         if (code === 'KeyM' || key === 'm' || key === 'M') {
           this.audio.setMasterEnabled(!this.audio.enabled);
+          // As the Audio Options switch does: muting stops the music, and
+          // unmuting has to start it again -- setMasterEnabled only restores the
+          // levels, so M used to bring the effects back and leave the music off.
+          this.syncMusicPlayback();
           this.syncAudioUI();
           this.saveAudioSettings();
           e.preventDefault(); return;
@@ -7202,12 +6930,7 @@ registerProcessor('odd-sid', OddSid);
       if (toggleMaster) {
         toggleMaster.addEventListener('change', (e) => {
           this.audio.setMasterEnabled(e.target.checked);
-          if (this.audio.enabled && this.audio.musicEnabled && (!this.isPlaying || !this.isPaused || this.wasPausedByModal)) {
-            // On the title that means the title's song, whatever the last game left.
-            if (this.isPlaying) this.audio.startBGM(); else this.playTitleSong();
-          } else {
-            this.audio.stopBGM();
-          }
+          this.syncMusicPlayback();
           this.saveAudioSettings();
         });
       }
@@ -7216,12 +6939,7 @@ registerProcessor('odd-sid', OddSid);
       if (toggleMusic) {
         toggleMusic.addEventListener('change', (e) => {
           this.audio.setMusicEnabled(e.target.checked);
-          if (this.audio.enabled && this.audio.musicEnabled && (!this.isPlaying || !this.isPaused || this.wasPausedByModal)) {
-            // On the title that means the title's song, whatever the last game left.
-            if (this.isPlaying) this.audio.startBGM(); else this.playTitleSong();
-          } else {
-            this.audio.stopBGM();
-          }
+          this.syncMusicPlayback();
           this.saveAudioSettings();
         });
       }
@@ -9109,10 +8827,33 @@ registerProcessor('odd-sid', OddSid);
     if (h > 0) document.documentElement.style.setProperty('--controls-h', h + 'px');
   }
 
+  // The game cannot run: no WebGL, or a background shader that will not compile.
+  // There is no fallback, so it says so plainly rather than starting half-drawn.
+  function showGraphicsError(err) {
+    const box = document.createElement('div');
+    box.id = 'graphicsError';
+    box.className = 'graphics-error';
+    box.innerHTML =
+      '<div class="graphics-error-card">' +
+      '<h2>Oddballz HD can\u2019t start</h2>' +
+      '<p>This browser couldn\u2019t start the 3D graphics the game needs (WebGL).</p>' +
+      '<p>Try updating your browser, or turning on hardware acceleration in its settings.</p>' +
+      '<p class="graphics-error-detail"></p>' +
+      '</div>';
+    box.querySelector('.graphics-error-detail').textContent = String((err && err.message) || err || '');
+    document.body.appendChild(box);
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     const width = storedBoardWidth();
     setBoardWidth(width);
-    window.oddApp = new OddballzApp();
+    try {
+      window.oddApp = new OddballzApp();
+    } catch (err) {
+      console.error(err);
+      showGraphicsError(err);
+      return;
+    }
 
     if (new URLSearchParams(location.search).has('palette')) {
       const app = window.oddApp;
