@@ -6674,6 +6674,7 @@ registerProcessor('odd-sid', OddSid);
       }
       window.addEventListener('resize', () => { if (this.attractActive) this.positionAttractHint(); });
       window.addEventListener('resize', () => this.updateHudLayout());
+      window.addEventListener('resize', () => { if (this.isPaused) this.positionPausedLabel(); });
       this.updateHudLayout();
       this.startTitleLogo();
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.updateHudLayout());
@@ -6823,6 +6824,32 @@ registerProcessor('odd-sid', OddSid);
         }
       }
       ctx.globalAlpha = 1;
+    }
+
+    // PAUSED in the middle of the board as drawn: the centre of the tiles'
+    // projected extent, in the canvas container the label sits in. A fixed share
+    // of the screen put it well above the board (the user, 17 Oct 2026).
+    positionPausedLabel() {
+      const label = document.getElementById('pausedLabel');
+      const R = this.renderer;
+      if (!label || !R || !R.boardGroup || !R.boardGroup.children.length) return;
+      R.camera.updateMatrixWorld();
+      R.boardGroup.updateMatrixWorld(true);
+      const rect = R.renderer.domElement.getBoundingClientRect();
+      const host = label.offsetParent ? label.offsetParent.getBoundingClientRect() : rect;
+      const v = new THREE.Vector3();
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const m of R.boardGroup.children) {
+        m.getWorldPosition(v);
+        v.project(R.camera);
+        const x = rect.left + (v.x + 1) / 2 * rect.width, y = rect.top + (1 - v.y) / 2 * rect.height;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+      label.style.left = Math.round((x0 + x1) / 2 - host.left) + 'px';
+      label.style.top = Math.round((y0 + y1) / 2 - host.top) + 'px';
     }
 
     // The header logo's hop, for a chain, a row sweep or a new level.
@@ -7632,6 +7659,7 @@ registerProcessor('odd-sid', OddSid);
       const was = document.body.classList.contains('is-paused');
       document.body.classList.toggle('is-paused', paused);
       if (was !== paused) this.updateHudLayout();
+      if (paused) this.positionPausedLabel();
       // The pieces go while paused, so a pause cannot be used to plan the next
       // move at leisure (the user, 17 Oct 2026); the empty board stays.
       const R = this.renderer;
