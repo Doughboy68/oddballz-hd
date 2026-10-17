@@ -819,6 +819,9 @@
   // which are dark until lit.
   const TITLE_COLOURS = ['#2ea0ff', '#ff3b52', '#22d35f', '#ffc21a', '#a64dff', '#ff2fc0'];
 
+  // Whether the controls guide is showing (the ? icon on the board).
+  const GUIDE_KEY = 'oddballz_hd_guide';
+
   // The bars in the spectrum beside the header logo.
   const SPEC_BARS = 14;
 
@@ -6561,6 +6564,19 @@ registerProcessor('odd-sid', OddSid);
       this.initUpdateCheck();
       const bgBtn = document.getElementById('btnBgCycle');
       if (bgBtn) bgBtn.addEventListener('click', (ev) => { ev.preventDefault(); bgBtn.blur(); this.nextBackground(); });
+      const pauseBtn = document.getElementById('btnBoardPause');
+      if (pauseBtn) pauseBtn.addEventListener('click', (ev) => { ev.preventDefault(); pauseBtn.blur(); this.togglePause(); });
+      const endBtn = document.getElementById('btnBoardEnd');
+      if (endBtn) endBtn.addEventListener('click', (ev) => { ev.preventDefault(); endBtn.blur(); if (this.isPaused) this.armEndGame(); });
+      // The controls guide, off unless asked for; remembered.
+      try { if (localStorage.getItem(GUIDE_KEY) === '1') document.body.classList.add('guide-on'); } catch (e) {}
+      const guideBtn = document.getElementById('btnBoardGuide');
+      if (guideBtn) guideBtn.addEventListener('click', (ev) => {
+        ev.preventDefault(); guideBtn.blur();
+        const on = document.body.classList.toggle('guide-on');
+        try { localStorage.setItem(GUIDE_KEY, on ? '1' : '0'); } catch (e) {}
+        this.updateHudLayout();
+      });
       this.initEventListeners();
       this.initTouchControls();
       this.updateUI();
@@ -6639,14 +6655,21 @@ registerProcessor('odd-sid', OddSid);
         const mode = Math.floor(t / 250) % 4;
         const wave = (k) => 4 * Math.sin(k * 2 * Math.PI / 32);   // LSIN
         this.drawSpectrum(t);
+        const back = BACKDROPS[this.renderer.backdropIndex];
+        const tints = (back && back.tints) || ['#9fdcff'];
+        // The HUD's frame colours (style.css --hud-a, --hud-b) follow along.
+        if (this._hudBack !== this.renderer.backdropIndex) {
+          this._hudBack = this.renderer.backdropIndex;
+          const rs = document.documentElement.style;
+          rs.setProperty('--hud-a', tints[0]);
+          rs.setProperty('--hud-b', tints[1] || tints[0]);
+        }
         // A logo under a hidden screen (the title card in a game) is skipped.
         for (const letters of groups) {
           if (letters[0].closest('.hidden')) continue;
           if (headerLetters && letters[0] === headerLetters[0]) {
             const b = this.logoBurstAt ? (now - this.logoBurstAt) / 20 : Infinity;
             const bursting = b < BURST;
-            const back = BACKDROPS[this.renderer.backdropIndex];
-            const tints = (back && back.tints) || ['#9fdcff'];
             letters.forEach((el, i) => {
               const f = (b - 3 * i) / 12;             // each letter 3 frames after the last
               const y = (bursting && f > 0 && f < 1) ? -6 * Math.sin(Math.PI * f) : 0;
@@ -6658,7 +6681,14 @@ registerProcessor('odd-sid', OddSid);
             });
             continue;
           }
-          if (recolour || !letters[0].style.color) {
+          // PAUSED holds still and cycles through the background's colours,
+          // quicker than the header logo's drift, without the title's dance
+          // (the user, 17 Oct 2026). Only while it is showing.
+          if (letters[0].closest('.paused-label')) {
+            if (!letters[0].offsetParent) continue;
+            letters.forEach((el, i) => { el.style.color = paletteAt(tints, i / 8 - t / 150); });
+            continue;
+          } else if (recolour || !letters[0].style.color) {
             letters.forEach((el, i) => {
               el.style.color = TITLE_COLOURS[(((START[i] - 1 - step) % 6) + 6) % 6];
             });
@@ -6667,7 +6697,7 @@ registerProcessor('odd-sid', OddSid);
           let y;                                     // C64 lines, down positive
           if (mode === 0) y = wave(4 * i + t);                       // a wave
           else if (mode === 1) {                                     // a hop each
-            y = (Math.floor(t / 8) % 8 === i) ? -6 * Math.sin(Math.PI * (t % 8) / 8) : 0;
+            y = (Math.floor(t / 8) % letters.length === i) ? -6 * Math.sin(Math.PI * (t % 8) / 8) : 0;
           } else if (mode === 2) y = wave(t / 2);                    // all, slower
           else y = (i % 2 ? -1 : 1) * wave(t);                       // see-saw
           el.style.transform = 'translateY(' + (y * LINE).toFixed(3) + 'em)';
@@ -6740,31 +6770,31 @@ registerProcessor('odd-sid', OddSid);
       this.logoBurstAt = performance.now();
     }
 
-    // The side cards -- stats on the left, the controls guide on the right -- or
-    // the phone's strip of stats under the header. The cards float over the
-    // board, which is fine while the board sits between them; in a tall, narrow
-    // window the board fills the width and they cover it, and the header wraps
-    // down over their tops (the user, 17 Oct 2026, resizing a desktop window).
-    // In a short one they reach down over the buttons instead.
-    //
-    // So each layout is tried in turn and the first that fits is kept: the full
-    // cards; body.hud-compact, the same cards made shorter; body.hud-strip. A
-    // layout fits when no board tile is under a card, the cards clear the header
-    // and the buttons, and the header is not overflowing. The camera ignores the
-    // HUD, so none of this feeds back on itself. Phones (600px and under) have
-    // the strip from CSS already.
+    // The HUD is two bars across the top: the top bar (logo, spectrum, icons)
+    // and the stats bar under it, at every size (the user, 17 Oct 2026). It
+    // began as floating side cards, then cards or strips chosen to keep off the
+    // board; now the one choice left is the controls guide, which when asked for
+    // is a card at the right under the bars, shown only if it clears the board
+    // and the buttons (else body.guide-blocked). The camera ignores the HUD, so
+    // none of this feeds back on itself.
     updateHudLayout() {
-      const body = document.body;
-      body.classList.remove('hud-strip', 'hud-compact');
-      if (window.innerWidth <= 600) return;
+      const body = document.body, root = document.documentElement.style;
+      body.classList.remove('guide-blocked');
+      const statsBar = document.querySelector('.stats-panel');
+      const header = document.querySelector('.game-header');
+      const barsBottom = statsBar ? statsBar.getBoundingClientRect().bottom
+                                  : (header ? header.getBoundingClientRect().bottom : 0);
+      root.setProperty('--hud-top', Math.ceil(barsBottom + 8) + 'px');
+
+      const guide = document.querySelector('.keybinds-panel');
+      if (!guide || getComputedStyle(guide).display === 'none') return;
       const R = this.renderer;
       if (!R || !R.boardGroup || !R.boardGroup.children.length) return;
-
       R.camera.updateMatrixWorld();
       R.boardGroup.updateMatrixWorld(true);
       const rect = R.renderer.domElement.getBoundingClientRect();
-      const pts = [];
       const v = new THREE.Vector3();
+      const pts = [];
       let x0 = Infinity, x1 = -Infinity;
       for (const m of R.boardGroup.children) {
         m.getWorldPosition(v);
@@ -6776,27 +6806,12 @@ registerProcessor('odd-sid', OddSid);
       }
       // Half a tile either way, so a tile's edge counts, not just its centre.
       const pad = (x1 - x0) / Math.max(1, BOARD_BOUNDS.MAX_X - BOARD_BOUNDS.MIN_X) / 2;
-      const header = document.querySelector('.game-header');
       const controls = document.getElementById('bottomControlsBar');
-
-      const fits = () => {
-        if (header && header.scrollWidth > header.clientWidth + 1) return false;
-        const headerBottom = header ? header.getBoundingClientRect().bottom : 0;
-        const controlsTop = controls ? controls.getBoundingClientRect().top : Infinity;
-        const cards = ['.stats-panel', '.keybinds-panel']
-          .map(sel => document.querySelector(sel))
-          .filter(el => el && getComputedStyle(el).display !== 'none' &&
-                        getComputedStyle(el).position === 'absolute')
-          .map(el => el.getBoundingClientRect());
-        return cards.every(c => c.top >= headerBottom - 1 && c.bottom <= controlsTop - 6 &&
-          !pts.some(p => p.x + pad > c.left && p.x - pad < c.right &&
-                         p.y + pad > c.top && p.y - pad < c.bottom));
-      };
-      if (fits()) return;
-      body.classList.add('hud-compact');
-      if (fits()) return;
-      body.classList.remove('hud-compact');
-      body.classList.add('hud-strip');
+      const bottom = controls ? controls.getBoundingClientRect().top : window.innerHeight;
+      const c = guide.getBoundingClientRect();
+      const clear = c.bottom <= bottom - 6 &&
+        !pts.some(p => p.x + pad > c.left && p.x - pad < c.right && p.y + pad > c.top && p.y - pad < c.bottom);
+      if (!clear) body.classList.add('guide-blocked');
     }
 
     // Offers a newer deploy, the way the timesheet app does: a bar saying what is
@@ -7292,7 +7307,7 @@ registerProcessor('odd-sid', OddSid);
       // reachable only from the header, which is hidden behind starting a game --
       // so the one moment you would most want to turn the music down, before
       // playing, was the one moment you could not.
-      ['btnAudioSettings', 'btnStartAudio'].forEach(id => {
+      ['btnAudioSettings', 'btnStartAudio', 'btnBoardAudio'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.addEventListener('click', () => this.showAudioModal());
       });
@@ -7490,6 +7505,7 @@ registerProcessor('odd-sid', OddSid);
 
       this.isPlaying = true;
       this.isPaused = false;
+      this.showPausedState(false);
       this.moveTime = 0;
       this.accumulatedTime = 0;
       this.playTime = 0;
@@ -7517,6 +7533,9 @@ registerProcessor('odd-sid', OddSid);
 
       this.renderer.updateScene(this.engine);
       this.updateUI();
+      // The header is a line shorter in a game (no mode tabs), and the board may
+      // be another width: the HUD's layout is chosen again.
+      this.updateHudLayout();
       this.audio.startBGM();
     }
 
@@ -7528,22 +7547,49 @@ registerProcessor('odd-sid', OddSid);
       this.disarmEndGame();
       this.isPaused = !this.isPaused;
 
+      // No dialog: the board's pause icon turns to play (press it again to go
+      // on), the end-game icon shows beside it, and PAUSED sits on the board.
+      this.showPausedState(this.isPaused);
       if (this.isPaused) {
-        document.getElementById('overlayPause').classList.remove('hidden');
         this.audio.stopBGM();
       } else {
-        document.getElementById('overlayPause').classList.add('hidden');
         this.lastTime = performance.now();
         this.audio.startBGM();
+      }
+    }
+
+    showPausedState(paused) {
+      const was = document.body.classList.contains('is-paused');
+      document.body.classList.toggle('is-paused', paused);
+      if (was !== paused) this.updateHudLayout();
+      // The pieces go while paused, so a pause cannot be used to plan the next
+      // move at leisure (the user, 17 Oct 2026); the empty board stays.
+      const R = this.renderer;
+      if (R && R.ballsGroup) {
+        if (paused && R.ballsGroup.visible) {
+          this._ghostWasVisible = R.ghostGroup.visible;
+          R.ballsGroup.visible = R.activeGroup.visible = R.ghostGroup.visible = false;
+        } else if (!paused && !R.ballsGroup.visible) {
+          R.ballsGroup.visible = R.activeGroup.visible = true;
+          R.ghostGroup.visible = this._ghostWasVisible !== false;
+        }
+      }
+      const btn = document.getElementById('btnBoardPause');
+      if (btn) {
+        btn.textContent = paused ? '\u25B6\uFE0F' : '\u23F8\uFE0F';
+        btn.title = paused ? 'Resume (P)' : 'Pause (P)';
+        btn.setAttribute('aria-label', paused ? 'Resume' : 'Pause');
       }
     }
 
     returnToTitle() {
       setTimeout(() => this.showUpdateBar(), 0);
       document.body.classList.remove('in-game');
+      this.updateHudLayout();
       this.disarmEndGame();
       this.isPlaying = false;
       this.isPaused = false;
+      this.showPausedState(false);
       this.wasPausedByModal = false;
       this.wasPausedByFocusLoss = false;
       this.engine.endGame = true;
@@ -8792,6 +8838,7 @@ registerProcessor('odd-sid', OddSid);
       document.getElementById('overlayGameOver').classList.remove('hidden');
       this.showUpdateBar();
       document.body.classList.remove('in-game');
+      this.updateHudLayout();
       document.getElementById('btnPause').disabled = true;
     }
 
@@ -9128,6 +9175,8 @@ registerProcessor('odd-sid', OddSid);
         btn.classList.add('is-armed');
         btn.innerHTML = '⏹ PRESS AGAIN <kbd class="key-hint">E</kbd>';
       }
+      const icon = document.getElementById('btnBoardEnd');
+      if (icon) { icon.classList.add('is-armed'); icon.title = 'Press again to end the game'; }
       clearTimeout(this.endArmTimer);
       this.endArmTimer = setTimeout(() => this.disarmEndGame(), END_ARM_MS);
     }
@@ -9142,6 +9191,8 @@ registerProcessor('odd-sid', OddSid);
         btn.classList.remove('is-armed');
         btn.innerHTML = '⏹ END GAME <kbd class="key-hint">E</kbd>';
       }
+      const icon = document.getElementById('btnBoardEnd');
+      if (icon) { icon.classList.remove('is-armed'); icon.title = 'End game (E): press twice'; }
     }
 
     closeAboutModal() {
