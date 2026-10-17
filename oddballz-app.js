@@ -67,10 +67,13 @@
   // this long before the next -- long enough to see the pop before the next line
   // goes -- and never less than CHAIN_SETTLE_MS after the balls it knocked loose
   // come to rest, so each fall is seen to land before what it set up goes off.
-  const CHAIN_STEP_MS = 520;
-  const CHAIN_SETTLE_MS = 180;
-  // The row sweep's run along the bottom row, popping each ball as it passes.
-  const SWEEP_MS = 950;
+  const CHAIN_STEP_MS = 900;
+  const CHAIN_SETTLE_MS = 300;
+  // The row sweep: the charged ball's run down to the nearer bottom corner, then
+  // its run along the bottom row, popping each ball as it passes. 950 ms for the
+  // row alone was far too quick to follow (the user, 17 Oct 2026).
+  const SWEEP_ORB_MS = 750;
+  const SWEEP_MS = 1500;
   // How long the demo holds its Special Balls page.
   const SPECIALS_PAGE_MS = 9000;
   // The piece is NOT teleported into place: pieces are built at SPAWN_ROW, which
@@ -249,7 +252,9 @@
 
   // The backgrounds, each paired with the song it plays under, each drawn live by
   // a shader (PROC_SHADERS). The first four are the C64 build's four themes in its
-  // order; the last two are new to HD, and so are their songs.
+  // order -- there Deep Space Nebula, Cyber Conduit Spaceframe, Hyperspace
+  // Starfield and Alien Mothership Core; HD's names are the user's -- and the
+  // last two are new to HD, and so are their songs.
   //
   // They began as pictures -- 1920x1080 JPEGs, still in backgrounds/ as reference
   // -- and were redrawn as shaders one by one, at the user's asking: Hyperspace
@@ -260,12 +265,12 @@
   // that cannot run the shaders gets an error screen (ThreeRenderer.precompile-
   // Backgrounds), and every current browser can.
   const BACKDROPS = [
-    { label: 'Nebula',      song: 'nebula',     procedural: 'nebula' },
-    { label: 'Cyber',       song: 'cyber',      procedural: 'conduit' },
-    { label: 'Hyperspace',  song: 'hyperspace', procedural: 'warp' },
-    { label: 'Mothership',  song: 'mothership', procedural: 'lattice' },
-    { label: 'Citadel',     song: 'citadel',    procedural: 'citadel' },
-    { label: 'Solar Array', song: 'solar',      procedural: 'solar' }
+    { label: 'Cosmic Stellar Nebula',    song: 'nebula',     procedural: 'nebula' },
+    { label: 'Cyber Conduit Spaceframe', song: 'cyber',      procedural: 'conduit' },
+    { label: 'Quantum Hyperspace Warp',  song: 'hyperspace', procedural: 'warp' },
+    { label: 'Alien Bio-Reactor Core',   song: 'mothership', procedural: 'lattice' },
+    { label: 'Deep Space Citadel',       song: 'citadel',    procedural: 'citadel' },
+    { label: 'Orbital Solar Array',      song: 'solar',      procedural: 'solar' }
   ];
   // ALL, the default, plays each background in turn, as the C64 build's does; any
   // other choice holds that one for the whole game.
@@ -1191,8 +1196,7 @@
     // flipped the way it will arrive. The same arithmetic transform() applies,
     // without a board -- the piece spawns in the open staging rows, where the
     // transforms do not meet anything.
-    nextPreview() {
-      const d = this.nextDeal;
+    nextPreview(d = this.nextDeal) {
       if (!d) return null;
       let rel = [{ x: 0, y: 0 }];
       for (let i = 1; i <= 3; i++) {
@@ -6361,6 +6365,27 @@ registerProcessor('odd-sid', OddSid);
       this.updateCameraFraming();
     }
 
+    // The board's lower edge on the page, in CSS pixels: the last row of tiles,
+    // projected, plus half a row for the tiles' own edges. From the tiles' real
+    // positions, so it is right for every board preset and camera framing.
+    boardScreenBottom() {
+      if (!this.boardGroup || !this.boardGroup.children.length) return null;
+      this.camera.updateMatrixWorld();
+      this.boardGroup.updateMatrixWorld(true);
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      let y0 = Infinity, y1 = -Infinity;
+      const v = new THREE.Vector3();
+      for (const m of this.boardGroup.children) {
+        m.getWorldPosition(v);
+        v.project(this.camera);
+        const sy = (1 - v.y) / 2 * rect.height;
+        if (sy < y0) y0 = sy;
+        if (sy > y1) y1 = sy;
+      }
+      const rows = Math.max(1, BOARD_BOUNDS.MAX_Y - SPAWN_ROW);
+      return rect.top + y1 + (y1 - y0) / rows / 2;
+    }
+
     // Show background i (an index into BACKDROPS), or the plain colour for null.
     // Every background is a live shader, compiled at start (precompileBackgrounds),
     // so this is only a matter of which material the quad wears.
@@ -6497,6 +6522,23 @@ registerProcessor('odd-sid', OddSid);
       requestAnimationFrame((t) => this.gameLoop(t));
 
       this.scheduleAttractIdle();
+      // Any activity puts the demo off: the timer restarts from the last touch,
+      // click, key, scroll or mouse movement, so the demo only comes after a real
+      // idle stretch. It used to be set once, when the title appeared, and fired
+      // while the player was still working through the title card's options.
+      // Mouse movement is throttled to a restart every quarter second.
+      let lastActivity = 0;
+      const activity = (ev) => {
+        if (this.isPlaying || this.attractActive) return;
+        const now = performance.now();
+        if (ev.type === 'pointermove' && now - lastActivity < 250) return;
+        lastActivity = now;
+        this.scheduleAttractIdle();
+      };
+      for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) {
+        window.addEventListener(type, activity, { capture: true, passive: true });
+      }
+      window.addEventListener('resize', () => { if (this.attractActive) this.positionAttractHint(); });
     }
 
     // Offers a newer deploy, the way the timesheet app does: a bar saying what is
@@ -6658,6 +6700,21 @@ registerProcessor('odd-sid', OddSid);
       // pass when it reaches the far end.
       if (e.rcFire && !this.sweepDone) { this.runSweep(); return; }
       const more = e.resolveStep();
+      if (this.sweepPrePopped) {
+        // The sweep hid these balls as it passed; the pass has now taken them.
+        // Their meshes go here, before the scene is next built. The same pass
+        // lets the balls above fall into the row, and updateScene would otherwise
+        // find a hidden mesh still filed under each refilled cell and reuse it:
+        // an invisible ball blocking the row, and a fall that was never drawn.
+        // That was the bottom row left unusable after a sweep.
+        for (const key of this.sweepPrePopped) {
+          const m = this.renderer.staticBallMeshes.get(key);
+          if (m && !m.visible) {
+            this.renderer.ballsGroup.remove(m);
+            this.renderer.staticBallMeshes.delete(key);
+          }
+        }
+      }
       this.sweepDone = false;
       this.sweepPrePopped = null;
       this.resolveNextAt = now + (e.rs.cleared ? CHAIN_STEP_MS : 0);
@@ -6668,11 +6725,11 @@ registerProcessor('odd-sid', OddSid);
       }
     }
 
-    // The row sweep, played before its pass: a comet runs the bottom row from
-    // the end nearer the charged ball that set it off, and each ball pops as it
-    // passes, so the sweep reads as something crossing the row rather than the
-    // row simply going. The pass itself follows at the far end; the balls the
-    // comet has already popped are hidden until then and are not popped twice.
+    // The row sweep, played before its pass. As the C64 build's does, the charged
+    // ball heads for the nearer end of the bottom row -- here it flies down from
+    // where it was matched, trailing sparks -- and from that corner runs the row,
+    // each ball popping as it passes. The pass itself follows at the far end; the
+    // balls already popped are hidden until then and are not popped twice.
     runSweep() {
       const e = this.engine, y = BOARD_BOUNDS.MAX_Y;
       const xs = [];
@@ -6684,35 +6741,71 @@ registerProcessor('odd-sid', OddSid);
       const lo = xs[0], hi = xs[xs.length - 1];
       const src = this.sweepFrom;
       const fromLeft = !src || (src.x - lo) <= (hi - src.x);
-      const a = gridToWorld(fromLeft ? lo : hi, y, SPHERE_RADIUS);
-      const b = gridToWorld(fromLeft ? hi : lo, y, SPHERE_RADIUS);
-      this.particles.spawnSweep(a, b, this.particles.colourFor(src ? src.color : 1), SWEEP_MS / 1000);
-      this.audio.playSound('boom', 1);
-      this.sweepPrePopped = new Set();
+      const value = src ? src.color : 17;
+      // Where it starts: where the charged ball was, else above the row's middle.
+      const from = src ? gridToWorld(src.x, src.y, SPHERE_RADIUS)
+                       : gridToWorld(Math.round((lo + hi) / 2), y - 4, SPHERE_RADIUS);
+      const corner = gridToWorld(fromLeft ? lo : hi, y, SPHERE_RADIUS);
+      const far = gridToWorld(fromLeft ? hi : lo, y, SPHERE_RADIUS);
+      const orb = new THREE.Mesh(this.renderer.sphereGeo, this.renderer.ballMaterials[0]);
+      this.renderer.dressBall(orb, value, this.renderer.ballMaterials);
+      orb.scale.setScalar(1.15);
+      orb.position.set(from.x, from.y, from.z + SPHERE_RADIUS);
+      this.renderer.ballsGroup.add(orb);
       this.sweepAnim = true;
-      const span = Math.max(1, hi - lo);
-      for (const x of xs) {
-        const k = (fromLeft ? x - lo : hi - x) / span;
+      this.sweepPrePopped = new Set();
+      this.sweepOrb = {
+        mesh: orb, value, from, corner, far, xs, lo, hi, fromLeft,
+        t0: performance.now()
+      };
+    }
+
+    // The charged ball on its way to the corner, a frame at a time: easing in, as
+    // a thing that falls does, sparks streaming behind. At the corner it becomes
+    // the row run: the comet, a pop for each ball as it passes, and the whoosh.
+    updateSweepOrb(now) {
+      const o = this.sweepOrb;
+      if (!o) return;
+      const k = Math.min(1, (now - o.t0) / SWEEP_ORB_MS);
+      const ease = k * k;
+      const z = o.from.z + SPHERE_RADIUS * (1 - ease);
+      o.mesh.position.set(o.from.x + (o.corner.x - o.from.x) * ease,
+                          o.from.y + (o.corner.y - o.from.y) * ease, z);
+      o.mesh.rotation.z += 0.25;
+      if (Math.random() < 0.8) this.particles.spawnTrailParticle(o.mesh.position, o.value);
+      if (k < 1) return;
+
+      this.renderer.ballsGroup.remove(o.mesh);
+      this.sweepOrb = null;
+      const e = this.engine, y = BOARD_BOUNDS.MAX_Y;
+      this.particles.spawnPopExplosion(o.corner, o.value);
+      this.particles.spawnSweep(o.corner, o.far, this.particles.colourFor(o.value), SWEEP_MS / 1000);
+      this.audio.playSound('boom', 1);
+      const span = Math.max(1, o.hi - o.lo);
+      for (const x of o.xs) {
+        const f = (o.fromLeft ? x - o.lo : o.hi - x) / span;
         setTimeout(() => {
           const key = x + '_' + y;
           const mesh = this.renderer.staticBallMeshes.get(key);
           if (mesh) mesh.visible = false;
           this.particles.spawnPopExplosion(gridToWorld(x, y, SPHERE_RADIUS), e.ballMap[x][y].bzMap || 1);
           if (this.sweepPrePopped) this.sweepPrePopped.add(key);
-        }, k * SWEEP_MS * 0.9);
+        }, f * SWEEP_MS * 0.92);
       }
-      setTimeout(() => { this.sweepAnim = false; }, SWEEP_MS + 60);
+      setTimeout(() => { this.sweepAnim = false; }, SWEEP_MS + 80);
     }
 
     // B, and the background button on the board for anyone without a keyboard:
-    // the next background and its song. In a game the one it lands on is then
-    // held, as the C64 build's B does; on the title it is the Background button.
+    // the next background and its song. It steps and nothing more -- under ALL the
+    // backgrounds go on changing with their songs after it; only a choice made on
+    // the title card holds one (the user, 17 Oct 2026: B used to hold whatever it
+    // landed on, so a game never cycled again). On the title it is the
+    // Background button.
     nextBackground() {
       if (!this.isPlaying) {
         const btn = document.getElementById('btnBackdrop');
         if (btn) btn.click();
       } else if (!this.isPaused) {
-        this.backdropAll = false;
         this.stepTheme();
       }
     }
@@ -7259,6 +7352,7 @@ registerProcessor('odd-sid', OddSid);
       if (cap) cap.style.visibility = 'hidden';   // no placeholder flash
       const ov = document.getElementById('overlayAttract');
       if (ov) ov.classList.remove('hidden');
+      this.positionAttractHint();
 
       this.runAttractSequence();
     }
@@ -7356,6 +7450,22 @@ registerProcessor('odd-sid', OddSid);
       const parent = cap.offsetParent ? cap.offsetParent.getBoundingClientRect() : rect;
       cap.style.transform = 'translate(' + Math.round(absX - parent.left) + 'px, ' +
                             Math.round(absY - parent.top) + 'px) translate(-50%, 0)';
+    }
+
+    // The demo's "tap to play", just under the board. It sat at the foot of the
+    // overlay, above the controls, which on a phone left it a long way below the
+    // board with nothing between (the user, 17 Oct 2026). Placed from the board's
+    // real lower edge whenever the demo starts or the window changes size.
+    positionAttractHint() {
+      const hint = document.querySelector('.attract-hint');
+      const bottom = this.renderer.boardScreenBottom();
+      if (!hint || bottom === null || !hint.offsetParent) return;
+      const parent = hint.offsetParent.getBoundingClientRect();
+      hint.style.position = 'absolute';
+      hint.style.left = '50%';
+      hint.style.transform = 'translateX(-50%)';
+      hint.style.whiteSpace = 'nowrap';
+      hint.style.top = Math.round(bottom - parent.top + 14) + 'px';
     }
 
     // Burst + remove balls, exactly like a real match clear.
@@ -8226,6 +8336,7 @@ registerProcessor('odd-sid', OddSid);
         // way in it never hesitates.
         // A landing being played out pass by pass holds everything, like the
         // hold after it.
+        if (this.sweepOrb) this.updateSweepOrb(performance.now());
         if (this.engine.resolving) this.stepResolve(currentTime);
         const pausing = this.engine.resolving || (this.spawnHoldUntil !== undefined &&
           (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls()));
@@ -8448,15 +8559,36 @@ registerProcessor('odd-sid', OddSid);
       // Board positions, through gridToWorld so the shape is the board's; y flips
       // because the canvas counts down. In units of one ball spacing.
       const o = gridToWorld(0, 0);
-      const pts = cells.map(c => {
+      const flat = (list) => list.map(c => {
         const p = gridToWorld(c.x, c.y);
         return { x: (p.x - o.x) / HEX_SPACING_X, y: -(p.y - o.y) / HEX_SPACING_X, v: c.v };
       });
-      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-      for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
-      const k = Math.min(w / (x1 - x0 + 1.1), h / (y1 - y0 + 1.1), h * 0.55);
+      const extent = (list) => {
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (const p of list) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+        return { x0, x1, y0, y1 };
+      };
+      // One scale for every piece: the widest and the tallest any shape can be,
+      // in any turn or flip. Fitting each piece to itself made a long piece's
+      // balls smaller than a compact one's, so NEXT changed size piece to piece.
+      if (!this._nextSpan) {
+        let sx = 0, sy = 0;
+        for (let c = 0; c < this.engine.ballShapes.length; c++) {
+          for (let rot = 0; rot < 6; rot++) {
+            for (const flip of [false, true]) {
+              const b = extent(flat(this.engine.nextPreview({ config: c, rotCount: rot, flip, image: [1, 1, 1, 1] })));
+              sx = Math.max(sx, b.x1 - b.x0);
+              sy = Math.max(sy, b.y1 - b.y0);
+            }
+          }
+        }
+        this._nextSpan = { x: sx, y: sy };
+      }
+      const pts = flat(cells);
+      const { x0, x1, y0, y1 } = extent(pts);
+      const k = Math.min(w / (this._nextSpan.x + 1), h / (this._nextSpan.y + 1));
       const cx = w / 2 - (x0 + x1) / 2 * k, cy = h / 2 - (y0 + y1) / 2 * k;
-      const r = k * 0.46;
+      const r = k * 0.48;
       const mats = this.renderer.ballMaterials;
       const css = (c) => '#' + c.getHexString();
 

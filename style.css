@@ -209,15 +209,16 @@ body, html {
    it silently stops matching instead of breaking visibly. It was 201px for four
    stat cards; adding a TIME card took the stats panel to 244px while the guide sat
    at its floor of 201, and the pair went 43px out of step. Then NEXT took the
-   stats panel to 308px against the guide's 245, the same trap again. 310 now
-   clears the taller of the two, so both settle on exactly that.
+   stats panel to 308px against the guide's 245, the same trap again, and a
+   bigger NEXT and its arrow took it to 359. 360 now clears the taller of the
+   two, so both settle on exactly that.
 
    Measure both and update this if a stat card or a control row is ever added --
-   the natural heights are 308px for five stat cards and NEXT, and about 200px
+   the natural heights are 359px for five stat cards and NEXT, and about 200px
    for the guide with its B row. */
 :root {
   --side-panel-w: 160px;
-  --side-panel-h: 310px;
+  --side-panel-h: 360px;
 }
 
 .stats-panel {
@@ -1167,18 +1168,35 @@ input:checked + .slider::before {
 }
 
 
-/* NEXT: the coming piece, in the stats card. Sized to sit inside the card's own
-   line height on the phone strip, so the strip does not grow and push the board. */
+/* NEXT: the coming piece, in the stats card. Its shape is the space the widest
+   and tallest pieces need, about 1.1 : 1, so every piece's balls draw the same
+   size (drawNext). */
 .next-canvas {
   display: block;
-  width: 64px;
-  height: 40px;
+  width: 88px;
+  height: 80px;
 }
 
+/* On the phone strip the label goes beside the piece rather than above it, so
+   the piece can be as tall as possible. The strip grows by about 20px; it sits
+   over the board's canvas and the camera framing ignores it, so the board does
+   not move -- that gap above the board was empty. */
 @media (max-width: 600px) {
+  .stat-next {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .stat-next .stat-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
   .next-canvas {
-    width: 36px;
-    height: 18px;
+    width: 60px;
+    height: 54px;
   }
 }
 
@@ -1266,12 +1284,26 @@ input:checked + .slider::before {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* NEXT's arrow: which way the coming piece will fall. */
+/* NEXT's arrow: which way the coming piece will fall. One size everywhere,
+   in rem rather than em so the phone's smaller label does not shrink it. On
+   desktop it sits beside NEXT, centred on it; on the phone, under it. */
+.stat-next .stat-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .next-dir {
   color: var(--accent-cyan);
-  font-size: 1.15em;
+  font-size: 1.6rem;
   font-weight: 800;
-  margin-left: 0.15em;
+  line-height: 1;
+}
+
+@media (max-width: 600px) {
+  .stat-next .stat-label {
+    gap: 0;
+  }
 }
 
 /* The next background, on the board itself for anyone without a keyboard's B.
