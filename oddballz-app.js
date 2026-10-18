@@ -83,6 +83,11 @@
   // over PIECE_ZIP_HOP_MS while it falls (the user, 18 Oct 2026).
   const PIECE_ZIP_HOP = 1.0;
   const PIECE_ZIP_HOP_MS = 200;
+  // The colour shift (rotColors) in hop movement: each ball hops, colour and
+  // all, to the next place round the piece, by this many radii at least --
+  // higher where it must clear another on the way (the user, 18 Oct 2026).
+  const PIECE_CYCLE_HOP = 0.8;
+  const PIECE_CYCLE_MS = 230;
   // Then a beat with the board clear, before the next piece slides in.
   const PIECE_SPAWN_DELAY_MS = 400;
   // A landing's resolve, played out: after a pass that takes balls off, at least
@@ -5858,6 +5863,7 @@ registerProcessor('odd-sid', OddSid);
           st.arc = this.pieceTurn(st.from, target, live);
           st.mirror = st.arc === null ? this.pieceMirror(st.from, target, live) : null;
         }
+        st.plateau = false;
         st.ms = st.mirror ? PIECE_FLIP_MS : PIECE_TURN_MS;
         st.lift = st.arc === null && st.mirror === null ? this.pieceLifts(st.from, target, live) : [0, 0, 0, 0];
       }
@@ -5889,9 +5895,17 @@ registerProcessor('odd-sid', OddSid);
         } else {
           p.x = f.x + (t.x - f.x) * e; p.y = f.y + (t.y - f.y) * e;
         }
-        p.z = f.z * (1 - e) + st.lift[i] * Math.sin(Math.PI * e) + flipZ;
+        p.z = f.z * (1 - e) + st.lift[i] * this.liftProfile(e, st.plateau) + flipZ;
       }
       return st.shown;
+    }
+
+    // How high a lifted ball is through its move, 0 to 1: a plain arch, or for
+    // the colour shift one that is up an eighth of the way in and holds there,
+    // as the colour that wraps round meets the others head on as it sets off.
+    liftProfile(e, plateau) {
+      const s = Math.sin(Math.PI * e);
+      return plateau ? Math.min(1, s / Math.sin(Math.PI * 0.12)) : s;
     }
 
     // A step left or right (pieceStep, from the engine's moveOBall): the drawn
@@ -5907,6 +5921,29 @@ registerProcessor('odd-sid', OddSid);
       sl.o0 = cur.o + dx;
       sl.z0 = cur.z;
       sl.t0 = now;
+    }
+
+    // The colour shift, drawn as the balls hopping round. The engine has moved
+    // each colour back one place (image[i] takes image[i + 1]); so each ball,
+    // now wearing its new colour, starts from where that colour was drawn and
+    // hops home -- the same picture at the start, the colours travelling.
+    pieceColourCycle(engine) {
+      const st = this.pieceShape;
+      if (!st || st.ballCount !== engine.ballCount) return;
+      const live = [0, 1, 2, 3].filter(i => engine.oddballz.image[i] > 0);
+      if (live.length < 2) return;
+      st.from = st.shown.map((p, i) => {
+        const q = st.shown[(i + 1) % 4];
+        return { x: q.x, y: q.y, z: q.z };
+      });
+      st.to = st.to.map(p => ({ x: p.x, y: p.y }));
+      st.t0 = performance.now();
+      st.arc = null;
+      st.mirror = null;
+      st.ms = PIECE_CYCLE_MS;
+      st.plateau = true;
+      const clear = this.pieceLifts(st.from, st.to, live, true);
+      st.lift = clear.map(h => h + PIECE_CYCLE_HOP * SPHERE_RADIUS);
     }
 
     // A hard drop setting off (from the engine's zip): a hop as it goes.
@@ -5995,19 +6032,21 @@ registerProcessor('odd-sid', OddSid);
     // that no two pass through each other. Each pair's paths are checked along
     // the way, and where they come closer than a ball's width the later ball is
     // raised over the earlier by enough to clear it.
-    pieceLifts(from, to, live) {
+    pieceLifts(from, to, live, plateau) {
       const D = 2 * SPHERE_RADIUS * 1.04, cap = 2.2 * SPHERE_RADIUS;
+      const prof = (e) => this.liftProfile(e, plateau);
+      const capped = plateau ? 2.6 * SPHERE_RADIUS : cap;
       const need = {};
       for (let a = 0; a < live.length; a++) for (let b = a + 1; b < live.length; b++) {
         const i = live[a], j = live[b];
         let n = 0;
-        for (let e = 0.05; e < 0.96; e += 0.05) {
+        for (let e = 0.02; e < 0.99; e += 0.02) {
           const dx = (from[i].x + (to[i].x - from[i].x) * e) - (from[j].x + (to[j].x - from[j].x) * e);
           const dy = (from[i].y + (to[i].y - from[i].y) * e) - (from[j].y + (to[j].y - from[j].y) * e);
           const gap2 = D * D - dx * dx - dy * dy;
-          if (gap2 > 0) n = Math.max(n, Math.sqrt(gap2) / Math.sin(Math.PI * e));
+          if (gap2 > 0) n = Math.max(n, Math.sqrt(gap2) / prof(e));
         }
-        if (n > 0) need[i + '_' + j] = Math.min(cap, n);
+        if (n > 0) need[i + '_' + j] = Math.min(capped, n);
       }
       // Each ball in turn at the lowest height that clears every earlier one it
       // crosses: no lift, or just over one of them.
@@ -7377,6 +7416,17 @@ registerProcessor('odd-sid', OddSid);
         const result = engineMove(dir);
         const dx = this.engine.targetFloatX - before;
         if (before !== undefined && dx) this.renderer.pieceStep(dx, this.engine.ballCount);
+        return result;
+      };
+      // And of each colour shift, drawn in hop movement as the balls hopping
+      // round (ThreeRenderer.pieceColourCycle).
+      const engineRotColors = this.engine.rotColors.bind(this.engine);
+      this.engine.rotColors = () => {
+        const before = this.engine.oddballz ? this.engine.oddballz.image.join() : '';
+        const result = engineRotColors();
+        if (storedMotion() === 'hop' && this.engine.oddballz && this.engine.oddballz.image.join() !== before) {
+          this.renderer.pieceColourCycle(this.engine);
+        }
         return result;
       };
       // And of each hard drop, which hops as it sets off (ThreeRenderer.pieceHop).
