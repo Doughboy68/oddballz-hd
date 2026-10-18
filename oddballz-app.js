@@ -861,6 +861,9 @@
   // How long the mouse rests before its pointer hides (Ambient Mode, fullscreen play).
   const CURSOR_IDLE_MS = 2500;
 
+  // The title logo's float: one rise and fall, in the C64's 50ths of a second.
+  const TITLE_FLOAT_FRAMES = 300;
+
   // Ambient Mode with no music sounding: how long each background lasts.
   const AMBIENT_SILENT_MS = 75000;
 
@@ -2354,7 +2357,7 @@
    * Format: see cyber.js.
    */
   SONGS.push({
-    id: 'title',
+    id: 'title-classic',      // the title's song until 17 Oct 2026; 'title' is drift, below
     title: 'Title Screen',
     speed: 6,
     rowsPerBeat: 4,
@@ -2444,6 +2447,109 @@
       },
     },
     order: ['Intro', 'A', 'B', 'A2'],
+    loopTo: 'A',
+  });
+
+  /* drift - the title's song since 17 Oct 2026 (the user: the bouncing tune
+   * "sounds too upbeat" for the space themes). Setting out on a mission
+   * through the backgrounds' places: "a bit hopeful but gloomy". New to HD, in
+   * the songs' own format. D Dorian, 83 BPM -- minor, with the raised sixth's
+   * lift in the G major chord: Dm9 G(add9) Bbmaj7 Csus2.
+   *
+   * The intro is distant pings like a sonar over a pad swelling in and a low
+   * drone, no time kept. Then the engines: a soft pulse of eighths in the bass
+   * and a quiet kick on each bar's first beat, under a lead that reaches up
+   * from D. The B lifts through Bb C Am Dm and Bb C F, high, and hangs on a
+   * suspended A that pulls back down into D minor -- the hope always returning
+   * to the gloom.
+   *
+   * Written first in D minor at 75 BPM, no pulse ("kinda dark"), then in F
+   * major (lighter, but not the mission the user meant). */
+  SONGS.push({
+    id: 'title',
+    title: 'Drift',
+    speed: 9,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass
+
+    instruments: {
+      dsig:   { adsr: [5, 10, 9, 10], wave: [['T', 0]], vib: [24, 0.18, 8], glide: 0.5 },
+      dsig2:  { adsr: [4, 10, 9, 10], wave: [['S', 12], ['T', 0]], vib: [20, 0.2, 8], glide: 0.5 },
+      dping:  { adsr: [0, 10, 0, 10], wave: [['T', 0]] },
+      ddrone: { adsr: [8, 11, 11, 11], wave: [['T', 0]] },
+      dpulse: { adsr: [0, 7, 3, 6], wave: [['T', 0]] },
+      dpad:   { adsr: [9, 11, 10, 12], wave: [['P', 0]], pulse: [0x600, 0x08, 0x400, 0x900], arpSpeed: 6,
+                filter: { mode: 'LP', res: 8, cutoff: [0x200, 0x03, 0x180, 0x500], bounce: true } },
+      dkick:  { adsr: [0, 6, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['T', '=C3'], ['T', '=G2'], ['T', '=D2'], ['T', '=A1'], ['T', '=F1']] },
+    },
+    drums: { K: 'dkick' },
+
+    patterns: {
+      // the pings: far apart, high, each left to ring out
+      pings:
+        'A5:dping . . . | . . . . | . . . . | . . . . ' +
+        '. . . . | . . . . | D6 . . . | . . . . ' +
+        '. . . . | . . B5 . | . . . . | . . . . ' +
+        'A5 . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Dm G Bb C | Dm G Bb C): reaching up from D
+      leadA:
+        'D5 . . . | . . . . | A5 . . . | . . . . ' +
+        'B5 . . . | . . . . | . . A5 . | . . G5 . ' +
+        'F5 . . . | . . . . | . . . . | D5 . . . ' +
+        'E5 . . . | . . . . | . . . . | ^ . . . ' +
+        'D5 . . . | . . . . | A5 . . . | . . D6 . ' +
+        'B5 . . . | . . . . | . . D6 . | . . . . ' +
+        'C6 . . . | . . Bb5 . | . . A5 . | . . F5 . ' +
+        'G5 . . . | . . . . | E5 . . . | ^ . . .',
+      // lead B (Bb C Am Dm | Bb C F Asus4): the lift, high, then the pull home
+      leadB:
+        'F5 . . . | . . . . | . . . . | D6 . . . ' +
+        'E6 . . . | . . . . | . . D6 . | . . C6 . ' +
+        'C6 . . . | . . . . | . . . . | A5 . . . ' +
+        'D6 . . . | . . . . | . . . . | ^ . . . ' +
+        'D6 . . . | . . . . | . . F6 . | . . . . ' +
+        'E6 . . . | . . . . | . . G6 . | . . . . ' +
+        'F6 . . . | . . E6 . | . . C6 . | . . A5 . ' +
+        'D6 . . . | . . . . | . . . . | ^ . . .',
+
+      // the drone, for the intro: a whole bar on each root
+      drone: 'C2:ddrone . . . | . . . . | . . . . | . . . .',
+      // the engines: eighths on the root, a quiet kick on the bar's first beat
+      pulse: 'K . C2:dpulse . | C2 . C2 . | C2 . C2 . | C2 . C2 .',
+
+      // the pad, a chord held for the bar, written on C
+      padMin9: 'C3~037e:dpad . . . | . . . . | . . . . | . . . .',
+      padMaj9: 'C3~047e:dpad . . . | . . . . | . . . . | . . . .',
+      padMaj7: 'C3~047b:dpad . . . | . . . . | . . . . | . . . .',
+      padMaj:  'C3~047:dpad . . . | . . . . | . . . . | . . . .',
+      padSus2: 'C3~027:dpad . . . | . . . . | . . . . | . . . .',
+      padMin7: 'C3~037a:dpad . . . | . . . . | . . . . | . . . .',
+      padSus4: 'C3~057:dpad . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['pings'],
+        v2: ['drone+2', 'drone-5', 'drone-2', 'drone'],
+        v3: ['padMin9+2', 'padMaj9-5', 'padMaj7-2', 'padSus2'],
+      },
+      A: {
+        v1: ['leadA@dsig'],
+        v2: ['pulse+2', 'pulse-5', 'pulse-2', 'pulse', 'pulse+2', 'pulse-5', 'pulse-2', 'pulse'],
+        v3: ['padMin9+2', 'padMaj9-5', 'padMaj7-2', 'padSus2',
+             'padMin9+2', 'padMaj9-5', 'padMaj7-2', 'padMaj'],
+      },
+      B: {
+        v1: ['leadB@dsig2'],
+        v2: ['pulse-2', 'pulse', 'pulse-3', 'pulse+2', 'pulse-2', 'pulse', 'pulse+5', 'pulse-3'],
+        v3: ['padMaj7-2', 'padMaj', 'padMin7-3', 'padMin9+2',
+             'padMaj7-2', 'padMaj', 'padMaj7+5', 'padSus4-3'],
+      },
+    },
+    order: ['Intro', 'A', 'B'],
     loopTo: 'A',
   });
 
@@ -6821,19 +6927,18 @@ registerProcessor('odd-sid', OddSid);
             if (!letters[0].offsetParent) continue;
             letters.forEach((el, i) => { el.style.color = paletteAt(tints, i / 8 - t / 150); });
             continue;
-          } else if (recolour || !letters[0].style.color) {
-            letters.forEach((el, i) => {
-              el.style.color = TITLE_COLOURS[(((START[i] - 1 - step) % 6) + 6) % 6];
-            });
           }
+          // The title card's logo floats, weightless: each letter rising and
+          // sinking on a slow swell, a little behind the one before, in the
+          // background's colours drifting along the word. It danced as the C64
+          // logo does, hopping in the ball colours, until the title's song
+          // became Drift and the dance no longer suited it (the user, 17 Oct
+          // 2026). The C64 motions (wave, START, step) are kept above for the
+          // header's hop.
           letters.forEach((el, i) => {
-          let y;                                     // C64 lines, down positive
-          if (mode === 0) y = wave(4 * i + t);                       // a wave
-          else if (mode === 1) {                                     // a hop each
-            y = (Math.floor(t / 8) % letters.length === i) ? -6 * Math.sin(Math.PI * (t % 8) / 8) : 0;
-          } else if (mode === 2) y = wave(t / 2);                    // all, slower
-          else y = (i % 2 ? -1 : 1) * wave(t);                       // see-saw
-          el.style.transform = 'translateY(' + (y * LINE).toFixed(3) + 'em)';
+            const y = 3.2 * Math.sin(2 * Math.PI * (t / TITLE_FLOAT_FRAMES) - i * 0.55);
+            el.style.transform = 'translateY(' + (y * LINE).toFixed(3) + 'em)';
+            el.style.color = paletteAt(tints, i / 14 - t / 1500);
           });
         }
       };
