@@ -2311,3 +2311,32 @@ body.end-armed .paused-hint .hint-armed {
 
 .start-fade.on { opacity: 1; transition: none; }
 .start-fade.out { opacity: 0; transition: opacity 1.5s ease-out; }
+
+/* "Tap for sound", above the controls on the title until the music can play
+   (OddballzApp.updateSoundHint). */
+.sound-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--controls-h, 11rem) + 0.9rem);
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--hud-a) 55%, transparent);
+  background: rgba(6, 9, 20, 0.82);
+  color: #e9f0fa;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--hud-a) 35%, transparent);
+  animation: sound-hint-pulse 1.6s ease-in-out infinite alternate;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes sound-hint-pulse {
+  from { opacity: 1; }
+  to   { opacity: 0.55; }
+}

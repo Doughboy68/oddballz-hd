@@ -6864,12 +6864,18 @@ registerProcessor('odd-sid', OddSid);
           watching = true;
           ctx.addEventListener('statechange', () => { if (ctx.state !== 'running') arm(); });
         }
-        if (ctx.state === 'running') { disarm(); startMusic(); return; }
+        if (ctx.state === 'running') { disarm(); startMusic(); this.updateSoundHint(); return; }
         ctx.resume().then(() => {
           if (ctx.state === 'running') { disarm(); startMusic(); }
+          this.updateSoundHint();
         }).catch(() => {});
       };
       arm();
+      // The "Tap for sound" hint: checked now, and each second after -- cheap,
+      // and it follows every way the state can change (the sound switches, a
+      // game, Ambient Mode, iOS suspending the audio).
+      this.updateSoundHint();
+      setInterval(() => this.updateSoundHint(), 1000);
       this.renderer.updateScene(this.engine);
       requestAnimationFrame((t) => this.gameLoop(t));
 
@@ -8014,6 +8020,18 @@ registerProcessor('odd-sid', OddSid);
       this.updateUI();
 
       this.scheduleAttractIdle();
+    }
+
+    // "Tap for sound" on the title while the music cannot yet play: no audio
+    // running (a browser starts none before a first tap) though sound and music
+    // are both on. Not in a game or Ambient Mode.
+    updateSoundHint() {
+      const hint = document.getElementById('soundHint');
+      if (!hint) return;
+      const au = this.audio;
+      const waiting = !(au.ctx && au.ctx.state === 'running');
+      const show = waiting && au.enabled && au.musicEnabled && !this.isPlaying && !this.ambient;
+      hint.classList.toggle('hidden', !show);
     }
 
     // ===== Ambient Mode =====
