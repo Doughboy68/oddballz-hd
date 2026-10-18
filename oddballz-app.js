@@ -858,6 +858,24 @@
     }
   };
 
+  // iPhone: ask for the media playback audio session, which plays through the
+  // ringer's silent switch -- Web Audio otherwise follows it and is silent with
+  // the switch on. navigator.audioSession where Safari has it (16.4+); and a
+  // silent sound played once in a gesture, which moves older Safari to the
+  // playback session too.
+  let iosPrimed = false;
+  function primeIOSPlayback() {
+    if (iosPrimed) return;
+    iosPrimed = true;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    try {
+      const a = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
+      a.setAttribute('playsinline', '');
+      const r = a.play();
+      if (r && r.catch) r.catch(() => {});
+    } catch (e) {}
+  }
+
   // How long the mouse rests before its pointer hides (Ambient Mode, fullscreen play).
   const CURSOR_IDLE_MS = 2500;
 
@@ -6821,16 +6839,37 @@ registerProcessor('odd-sid', OddSid);
       this.updateUI();
 
       this.applyBackdropChoice();
-      // The title's song on the first touch or key, since a page may not start
-      // sound before one. Capture phase, so it runs before a key that starts a
-      // game -- which then simply switches to the game's song.
-      const firstGesture = () => {
-        window.removeEventListener('pointerdown', firstGesture, true);
-        window.removeEventListener('keydown', firstGesture, true);
-        this.playTitleSong();
+      // Sound starts on the first touch, click or key, since a page may not start
+      // it before one -- and keeps trying until it is actually running. It used
+      // to try once, on pointerdown, and give up: iPhone Safari does not count a
+      // touch's start as permission, only its end or a click, so the first try
+      // failed silently and the music never came on that first time (the user,
+      // 17 Oct 2026). Capture phase, so it runs before a key that starts a game.
+      // Re-armed whenever the audio is suspended again (iOS does on switching
+      // apps).
+      const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'];
+      const arm = () => GESTURES.forEach(t => window.addEventListener(t, unlock, true));
+      const disarm = () => GESTURES.forEach(t => window.removeEventListener(t, unlock, true));
+      const startMusic = () => {
+        if (this.isPlaying || this.ambient) this.syncMusicPlayback();
+        else if (!this.audio.bgmPlaying) this.playTitleSong();
       };
-      window.addEventListener('pointerdown', firstGesture, true);
-      window.addEventListener('keydown', firstGesture, true);
+      let watching = false;
+      const unlock = () => {
+        primeIOSPlayback();
+        this.audio.init();                            // creates, or resumes, inside the gesture
+        const ctx = this.audio.ctx;
+        if (!ctx) return;
+        if (!watching) {
+          watching = true;
+          ctx.addEventListener('statechange', () => { if (ctx.state !== 'running') arm(); });
+        }
+        if (ctx.state === 'running') { disarm(); startMusic(); return; }
+        ctx.resume().then(() => {
+          if (ctx.state === 'running') { disarm(); startMusic(); }
+        }).catch(() => {});
+      };
+      arm();
       this.renderer.updateScene(this.engine);
       requestAnimationFrame((t) => this.gameLoop(t));
 
