@@ -32,12 +32,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2.1.69">
+  <link rel="stylesheet" href="./style.css?v=2.1.70">
   <!-- What the update bar says this release brings, shown to anyone running an
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="Oddballz HD is now Quantum Oddballz, with its story under Story on the title. Every game travels through the sectors, from the starting sector you pick: its backgrounds are sectors, each named as you reach it, and game over is a field collapse|In Hop movement the colour shift hops the balls round to their new places|Pieces turn in an arc, flip like a card and hop as they move (Movement: Smooth on the title switches back to the glide)|Fixed falling balls that could show half one colour and half another|Softer ball colours that reflect the background around them, with a rim of its light (the original look is Ball colours: Classic on the title)|The end game icon works on one press|Game over shows on the board, with a gentle chime and then the title music|The demo always plays on the Nebula background|PAUSED sits centred on the board|Sound stops when you leave the game, on the title too|A Tap for sound hint until the music can play|Music starts on the first tap on iPhone, and plays with the silent switch on|A new game fades in from black|A new title theme, Drift, and a calmer floating title logo|Paused shows how to resume and how to end the game|Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
+  <meta name="release-notes" content="The special balls are now the Superposition, the Unstable Core (with a new look), the Charged Particle and Dead Matter|A new sector, the Ion Storm, with its own song|Each sector you reach fires a containment pulse that clears the top of the pile, about a third of the balls|Oddballz HD is now Quantum Oddballz, with its story under Story on the title. Every game travels through the sectors, from the starting sector you pick: its backgrounds are sectors, each named as you reach it, and game over is a field collapse|In Hop movement the colour shift hops the balls round to their new places|Pieces turn in an arc, flip like a card and hop as they move (Movement: Smooth on the title switches back to the glide)|Fixed falling balls that could show half one colour and half another|Softer ball colours that reflect the background around them, with a rim of its light (the original look is Ball colours: Classic on the title)|The end game icon works on one press|Game over shows on the board, with a gentle chime and then the title music|The demo always plays on the Nebula background|PAUSED sits centred on the board|Sound stops when you leave the game, on the title too|A Tap for sound hint until the music can play|Music starts on the first tap on iPhone, and plays with the silent switch on|A new game fades in from black|A new title theme, Drift, and a calmer floating title logo|Paused shows how to resume and how to end the game|Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -62,7 +62,7 @@
       <div id="bannerChain" class="board-banner banner-chain" aria-live="polite"></div>
       <div id="bannerLevel" class="board-banner banner-level" aria-live="polite"></div>
       <!-- The sector's name as a game reaches it: at the start, and at each change. -->
-      <div id="sectorFlash" class="sector-flash" aria-live="polite"><span class="sector-num"></span><span class="sector-name"></span></div>
+      <div id="sectorFlash" class="sector-flash" aria-live="polite"><span class="sector-num"></span><span class="sector-name"></span><span class="sector-pulse"></span></div>
       <!-- Game over, on the board as PAUSED is: the last board left in view, dimmed;
            the title, the score and what next, as a small HUD panel. -->
       <div id="gameOverDim" class="gameover-dim" aria-hidden="true"></div>
@@ -268,14 +268,14 @@
       <div class="attract-specials glass-card hidden" id="attractSpecials">
         <p class="sp-intro">From level 3, about one piece in twenty brings one.</p>
         <div class="sp-row"><canvas class="sp-ball" data-v="7"></canvas>
-          <div><b>JOKER</b><span>Matches any colour: it takes the colour of the line it sits in.</span></div></div>
+          <div><b>SUPERPOSITION</b><span>Every colour at once: it takes the colour of the line it sits in.</span></div></div>
         <div class="sp-row"><canvas class="sp-ball" data-v="8"></canvas>
-          <div><b>BOMB</b><span>Clears itself and the six balls around it, wherever it lands.</span></div></div>
+          <div><b>UNSTABLE CORE</b><span>Goes off where it lands, clearing itself and the six balls around it.</span></div></div>
         <div class="sp-row"><canvas class="sp-ball" data-v="18"></canvas>
-          <div><b>ROW SWEEP</b><span>Match the ball with the dark band and the bottom row is swept clear.</span></div></div>
+          <div><b>CHARGED PARTICLE</b><span>Match the ball with the dark band and it discharges, sweeping the bottom row clear.</span></div></div>
         <div class="sp-row"><canvas class="sp-ball" data-v="10"></canvas>
-          <div><b>STONE</b><span>Never matches. Dropped or falling, it crushes a ball; against a wall or the floor it crumbles. From level 6.</span></div></div>
-        <p class="sp-intro">In Row Build only bombs come.</p>
+          <div><b>DEAD MATTER</b><span>Never matches. Dropped or falling, it crushes a ball; against a wall or the floor it crumbles. From level 6.</span></div></div>
+        <p class="sp-intro">In Row Build only unstable cores come.</p>
       </div>
       <div class="attract-footer">
         <div class="attract-hint"><span class="kbd-only">Press <kbd>Enter</kbd> or </span>tap to play</div>
@@ -361,10 +361,10 @@
             Line them up &mdash; by colour, or in full rows across the grid &mdash; and they cancel out. Let them pile up and the field collapses, and with it the mission. What you leave behind is the count: how much you cleared, and how far you got.
           </p>
           <p>
-            Some particles are stranger than others. <strong>Jokers</strong> exist in superposition, every colour at once until they are matched. <strong>Charged particles</strong> discharge along the grid&rsquo;s bottom row. <strong>Unstable cores</strong> go off where they land, taking their neighbours with them. And <strong>dead matter</strong> never reacts to a match &mdash; only a core or a discharge clears it, and if it falls it crushes whatever it lands on.
+            Some particles are stranger than others. A <strong>superposition</strong> is every colour at once until it is matched. <strong>Charged particles</strong> discharge along the grid&rsquo;s bottom row. <strong>Unstable cores</strong> go off where they land, taking their neighbours with them. And <strong>dead matter</strong> never reacts to a match &mdash; only a core or a discharge clears it, and if it falls it crushes whatever it lands on.
           </p>
           <p>
-            Six sectors lie ahead: the Cosmic Stellar Nebula, the Cyber Conduit Spaceframe, the Quantum Hyperspace Warp, the Alien Bio-Reactor Core, the Deep Space Citadel and the Orbital Solar Array. There is no way home through any of them. Make every one count.
+            Seven sectors lie ahead: the Cosmic Stellar Nebula, the Cyber Conduit Spaceframe, the Quantum Hyperspace Warp, the Alien Bio-Reactor Core, the Deep Space Citadel, the Orbital Solar Array and the Ion Storm. There is no way home through any of them, but each one you reach fires a containment pulse that skims the top off the pile. Make every one count.
           </p>
         </div>
         <button id="btnStoryClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Close <kbd class="key-hint">Esc</kbd></button>
@@ -387,7 +387,7 @@
             The matching, support and gravity rules are the original's, untouched. Around them: selectable board sizes, a game timer, high scores kept separately per mode and board, reworked levelling and scoring, and a number of long-standing bugs fixed. The presentation is rebuilt throughout &mdash; real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, Web Audio synthesis, smooth continuous motion in place of the original's step-by-step movement, and pieces that flip in place rather than pivoting end over end about a single ball.
           </p>
           <p>
-            Also in Quantum Oddballz: jokers, bombs, stones and row clearers among the balls, seven original songs, six animated space sectors drawn live, a next piece preview and a ghost preview.
+            Also in Quantum Oddballz: superpositions, unstable cores, dead matter and charged particles among the balls, eight original songs, seven animated space sectors drawn live, a next piece preview and a ghost preview.
           </p>
           <div style="background: rgba(255, 255, 255, 0.05); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.85rem; text-align: center; color: var(--accent-gold); font-weight: 600;">
             Code and graphics/design copyright &copy; <span style="white-space: nowrap;">Brian Semotiuk</span> and <span style="white-space: nowrap;">Fred Kohler</span>.
@@ -471,7 +471,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=2.1.105"></script>
+  <script src="./oddballz-app.js?v=2.1.111"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what

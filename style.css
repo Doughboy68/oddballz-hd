@@ -2577,3 +2577,17 @@ body.is-gameover .gameover-panel { display: flex; animation: gameover-in 0.7s ea
   100% { opacity: 0; transform: translate(-50%, -0.5rem); }
 }
 
+/* Under the sector's name when the journey reached it on its own: the pulse it
+   charged (OddballzApp.stepTheme). Gold, the HUD's reward colour. */
+.sector-pulse {
+  margin-top: 0.15rem;
+  font-size: clamp(0.6rem, 1.9vw, 0.76rem);
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  padding-left: 0.3em;
+  text-transform: uppercase;
+  color: var(--accent-gold);
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+}
+
+.sector-pulse:empty { display: none; }

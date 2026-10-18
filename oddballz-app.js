@@ -305,7 +305,10 @@
     { label: 'Deep Space Citadel',       song: 'citadel',    procedural: 'citadel',
       platform: '#ff5a7e', tints: ['#ff5a7e', '#9a7bd8', '#8fb0d8', '#ff8fb0'] },
     { label: 'Orbital Solar Array',      song: 'solar',      procedural: 'solar',
-      platform: '#ff7a2a', tints: ['#fff3c8', '#ffc24d', '#ff7a2a', '#e8454f'] }
+      platform: '#ff7a2a', tints: ['#fff3c8', '#ffc24d', '#ff7a2a', '#e8454f'] },
+    // Last, so the starting sectors already saved keep their numbers.
+    { label: 'Ion Storm',                song: 'storm',      procedural: 'storm',
+      platform: '#9b7bff', tints: ['#b9a6ff', '#f0ecff', '#7a8cff', '#e07bff'] }
   ];
   // platform: the board's colour on that background (setPlatformTint), its most
   // saturated accent -- Solar's first tint is near white, so its orange.
@@ -372,9 +375,9 @@
   // full screen behind everything, its brightness matched to the dimmed pictures
   // it replaced so it sits back behind the board as they did, and the plain
   // colour under it.
-  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9, nebula: 0.9, citadel: 0.9, solar: 0.9 };
+  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9, nebula: 0.9, citadel: 0.9, solar: 0.9, storm: 0.9 };
   const PROC_BASE = { warp: 0x020308, conduit: 0x060b16, lattice: 0x03100b,
-                      nebula: 0x0b0a1e, citadel: 0x080a18, solar: 0x030203 };
+                      nebula: 0x0b0a1e, citadel: 0x080a18, solar: 0x030203, storm: 0x07051a };
 
   // Shared by all three: the uniforms, and the line helpers. Every line is drawn
   // by its distance from a segment in screen pixels, with a pixel of soft edge,
@@ -757,6 +760,59 @@
           float sp = sAt / acc;
           float pulse = bump(fract(sp - t * (0.04 + 0.015 * i) + hash(i * 7.0)), 8.0);
           c += mint * (lineCore(best, 2.0) * (0.7 + 1.0 * pulse) + lineHalo(best, m * 0.011) * (0.30 + 0.6 * pulse));
+        }
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Storm: the ion storm (the user, 18 Oct 2026). Violet cloud churning on
+    // warped noise, faster than the nebula's drift, a few stars in the thin
+    // places; and every few seconds, more often than not, a bolt forks down from
+    // the top to a random depth -- a jagged core and one branch, flickering as it
+    // fades -- with the cloud around it flaring.
+    storm: `
+      // a jagged line's offset across, in screen widths, at height y
+      float jag(float y, float seed) {
+        float x = 0.0, a = 0.06, f = 7.0;
+        for (int i = 0; i < 4; i++) {
+          float s = y * f + seed * 17.3 + float(i) * 5.1;
+          x += (mix(hash(floor(s)), hash(floor(s) + 1.0), fract(s)) - 0.5) * a;
+          a *= 0.5; f *= 2.3;
+        }
+        return x;
+      }
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime * 0.05;
+        vec2 q = frag / m * 1.3;
+        vec2 w = vec2(fbm(q * 0.8 + vec2(t, -t * 0.7)), fbm(q * 0.8 + vec2(-t * 0.9, t * 0.5) + 4.7));
+        float cl = fbm(q + w * 1.8 + vec2(t * 0.6, -t * 0.3));
+        float cl2 = fbm(q * 1.7 - w * 1.2 + vec2(2.0, t));
+        vec3 c = mix(vec3(0.030, 0.020, 0.075), vec3(0.060, 0.030, 0.110), vUv.y);
+        c += vec3(0.30, 0.10, 0.48) * smoothstep(0.40, 0.90, cl) * 0.55;
+        c += vec3(0.55, 0.20, 0.55) * smoothstep(0.55, 0.95, cl2) * 0.25;
+        c += starField(frag, m * 0.06, 0.20, uTime) * 0.5 * (1.0 - smoothstep(0.45, 0.75, cl));
+        // the bolt: a chance every 3.4 s, three in four taken
+        float period = 3.4;
+        float k = floor(uTime / period), lt = uTime - k * period;
+        float on = step(hash(k * 3.17), 0.75);
+        float x0 = 0.12 + 0.76 * hash(k * 1.91);
+        float yEnd = 0.25 + 0.35 * hash(k * 2.37);
+        float env = on * exp(-lt * 6.0) * (0.55 + 0.45 * step(0.5, fract(lt * 19.0)));
+        if (env > 0.002) {
+          float bx = (x0 + jag(vUv.y, k)) * uRes.x;
+          float d = abs(frag.x - bx);
+          float inBolt = smoothstep(yEnd - 0.03, yEnd + 0.02, vUv.y);
+          // the branch, forking off part way down and dying out below
+          float yb = mix(1.0, yEnd, 0.45);
+          float side = hash(k * 4.3) < 0.5 ? -1.0 : 1.0;
+          float bxb = bx + (yb - vUv.y) * uRes.y * 0.55 * side + jag(vUv.y * 1.7, k + 9.0) * uRes.x * 0.6;
+          float db = abs(frag.x - bxb);
+          float inBranch = step(vUv.y, yb) * smoothstep(yb - 0.22, yb - 0.08, vUv.y);
+          vec3 boltCol = vec3(0.85, 0.80, 1.0);
+          c += boltCol * (lineCore(d, 2.2) + lineHalo(d, m * 0.012) * 0.6) * inBolt * env;
+          c += boltCol * (lineCore(db, 1.4) + lineHalo(db, m * 0.008) * 0.5) * inBranch * inBolt * env * 0.8;
+          float near = exp(-d / (m * 0.35));
+          c += vec3(0.45, 0.30, 0.75) * (smoothstep(0.30, 0.85, cl) * 0.9 + 0.15) * near * env * 0.9;
         }
         gl_FragColor = vec4(c * uBright, uAlpha);
       }`
@@ -2365,6 +2421,17 @@
   // loop part twice more -- before ALL moves to the next picture and its song.
   // The C64 build's SONG_PLAYS.
   const SONG_PLAYS = 3;
+  // The containment pulse: each sector the journey reaches on its own (its song
+  // played out, not B) fires one once the board is still -- a sweep across each
+  // of the top this-many rows of the pile, in turn, taking every ball in them.
+  // So that a long game can go on: no one gets through that many levels without
+  // help (the user, 18 Oct 2026). The top, not the bottom: the balls climb the
+  // hexagon's slanted walls, so the bottom row is nearly empty in play -- three
+  // sweeps of it took 2 balls of 34 -- while the top is what ends a game.
+  // Six rows, as the peaks are narrow: measured on piles from play, the top three
+  // held 6-15% of the balls, the top six 28-44%, about a third.
+  const PULSE_ROWS = 6;
+  const PULSE_ROW_MS = 130;              // between one row's sweep and the next
   // The songs' level against the effects, applied after the synth. The lab's
   // output at the default music volume measured RMS 0.085-0.10, against 0.045 for
   // a match's pop and 0.016 for the procedural soundtrack: the songs would have
@@ -3339,6 +3406,111 @@
         v1: ['leadBreak-12@olead'],
         v2: ['obSoft', 'obSoft-4', 'obSoft-7', 'obFill-5'],
         v3: ['oHoldm@oswell', 'oHold-4@oswell', 'oHoldm-7@oswell', 'oHold-5@oswell'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* storm - Ion Storm (the user, 18 Oct 2026). E minor, 125 BPM: tense and
+   * driving where the other sectors drift. Kick and snare on the beat under a
+   * bass in sixteenths; the chords stutter as fast arpeggios in a 3-3-2
+   * rhythm; a lead over Em C D B whose B major keeps pulling back to E. B moves
+   * through A minor and climbs; the reprise takes the lead an octave up; the
+   * break thins to a held swell and a rising arpeggio. */
+  SONGS.push({
+    id: 'storm',
+    title: 'Ion Storm',
+    speed: 6,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      slead:  { adsr: [2, 8, 9, 6], wave: [['P', 0]], pulse: [0x700, 0x30, 0x300, 0xC00], vib: [14, 0.25, 8], glide: 0.4 },
+      slead2: { adsr: [2, 8, 9, 6], wave: [['P', 12], ['P', 0]], pulse: [0x600, 0x40, 0x300, 0xD00],
+                vib: [12, 0.3, 7], glide: 0.4 },
+      sbass:  { adsr: [0, 7, 5, 3], wave: [['P', 0]], pulse: [0x400, 0x30, 0x200, 0xB00] },
+      schord: { adsr: [0, 9, 5, 6], wave: [['P', 0]], pulse: [0x500, 0x20, 0x300, 0xB00], arpSpeed: 1,
+                filter: { mode: 'LP', res: 10, cutoff: [0x600, -0x08, 0x300, 0x7FF] } },
+      sswell: { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
+                filter: { mode: 'LP', res: 9, cutoff: [0x200, 0x0A, 0x200, 0x780] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+
+      // lead A (Em C D B | Em C D B)
+      leadA:
+        'E5 . . . | . . G5 . | B5 . . . | . . G5 . ' +
+        'C6 . . . | . . B5 . | G5 . . . | . . E5 . ' +
+        'F#5 . . . | . . A5 . | D6 . . . | . . A5 . ' +
+        'B5 . . . | . . . . | D#6 . . . | ^ . . . ' +
+        'E6 . . . | . . D6 . | B5 . . . | . . G5 . ' +
+        'G5 . . . | . . E5 . | C6 . . . | . . B5 . ' +
+        'A5 . . . | . . F#5 . | D5 . F#5 . | A5 . . . ' +
+        'B5 . . . | . . . . | F#5 . . . | ^ . . .',
+      // lead B (Am Em C B | Am C D B), gliding up at the end
+      leadB:
+        'A5 . . . | . . C6 . | E6 . . . | . . C6 . ' +
+        'B5 . . . | . . G5 . | E5 . . . | . . G5 . ' +
+        'G5 . . . | . . C6 . | E6 . . . | . . D6 . ' +
+        'D#6 . . . | . . . . | B5 . . . | ^ . . . ' +
+        'C6 . . . | . . A5 . | E5 . . . | . . A5 . ' +
+        'E6 . . . | . . . . | G6 . . . | . . E6 . ' +
+        'F#6 . . . | . . D6 . | A5 . . . | . . F#5 . ' +
+        'D#6 . . . | >B6 . . . | . . . . | ^ . . .',
+      // the break (Em C D B), each chord climbed
+      leadBreak:
+        'E5 . G5 . | B5 . E6 . | . . . . | . . . . ' +
+        'C5 . E5 . | G5 . C6 . | . . . . | . . . . ' +
+        'D5 . F#5 . | A5 . D6 . | . . . . | . . . . ' +
+        'B4 . D#5 . | F#5 . B5 . | D#6 . . . | ^ . . .',
+
+      // bass + drums on E: kick and snare on the beat, the bass in sixteenths
+      sbDrive: 'K . E2:sbass E2 | S . E2 E2 | K . E2 E2 | S . E3 E2',
+      sbSoft:  'E2:sbass . . . | . . E2 . | . . . . | E3 . . .',
+      sbFill:  'K . E2:sbass E2 | S . E2 E2 | K S K S | S S S S',
+
+      // chords on E4: fast arpeggios struck 3-3-2, or held under the break
+      sStabm: 'E4~037 . . E4~037 | . . E4~037 . | E4~037 . . E4~037 | . . E4~037 .',
+      sStab:  'E4~047 . . E4~047 | . . E4~047 . | E4~047 . . E4~047 | . . E4~047 .',
+      sHoldm: 'E4~037 . . . | . . . . | . . . . | . . . .',
+      sHold:  'E4~047 . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['sbSoft', 'sbSoft-4', 'sbSoft-2', 'sbFill-5'],
+        v3: ['sHoldm@sswell', 'sHold-4@sswell', 'sHold-2@sswell', 'sHold-5@sswell'],
+      },
+      A: {
+        v1: ['leadA-12@slead'],
+        v2: ['sbDrive', 'sbDrive-4', 'sbDrive-2', 'sbDrive-5', 'sbDrive', 'sbDrive-4', 'sbDrive-2', 'sbFill-5'],
+        v3: ['sStabm@schord', 'sStab-4@schord', 'sStab-2@schord', 'sStab-5@schord',
+             'sStabm@schord', 'sStab-4@schord', 'sStab-2@schord', 'sStab-5@schord'],
+      },
+      B: {
+        v1: ['leadB-12@slead'],
+        v2: ['sbDrive+5', 'sbDrive', 'sbDrive-4', 'sbDrive-5', 'sbDrive+5', 'sbDrive-4', 'sbDrive-2', 'sbFill-5'],
+        v3: ['sStabm+5@schord', 'sStabm@schord', 'sStab-4@schord', 'sStab-5@schord',
+             'sStabm+5@schord', 'sStab-4@schord', 'sStab-2@schord', 'sStab-5@schord'],
+      },
+      A2: {
+        v1: ['leadA@slead2'],
+        v2: ['sbDrive', 'sbDrive-4', 'sbDrive-2', 'sbDrive-5', 'sbDrive', 'sbDrive-4', 'sbDrive-2', 'sbFill-5'],
+        v3: ['sStabm@schord', 'sStab-4@schord', 'sStab-2@schord', 'sStab-5@schord',
+             'sStabm@schord', 'sStab-4@schord', 'sStab-2@schord', 'sStab-5@schord'],
+      },
+      Break: {
+        v1: ['leadBreak-12@slead'],
+        v2: ['sbSoft', 'sbSoft-4', 'sbSoft-2', 'sbFill-5'],
+        v3: ['sHoldm@sswell', 'sHold-4@sswell', 'sHold-2@sswell', 'sHold-5@sswell'],
       },
     },
     order: ['Intro', 'A', 'B', 'A2', 'Break'],
@@ -4897,7 +5069,7 @@ registerProcessor('odd-sid', OddSid);
         ...BALL_COLOURS.map(h => new THREE.Color(h).lerp(new THREE.Color(0xffffff), 0.22)),
         // In ballSlot order after the six: joker, bomb, stone.
         new THREE.Color(0xf2eeff),
-        new THREE.Color(0xff8a1e),
+        new THREE.Color(0xb07bff),
         new THREE.Color(0x9c9a96)
       ];
     }
@@ -4962,14 +5134,17 @@ registerProcessor('odd-sid', OddSid);
     // bigger, hotter and in layers -- a yellow core, an orange body thrown wide,
     // and slow dark embers left hanging after it -- so it reads as a blast where
     // the balls around it only pop.
+    // The Unstable Core going off: a white flash, then its energy thrown out in
+    // its two colours, cyan and magenta, and a slow violet haze. It was an orange
+    // fireball, for the bomb it used to be.
     spawnFireball(worldPos) {
       this.spawnShell(worldPos, new THREE.Color(0xffffff),
         { count: 24, size: 1.6, speed: 1.0, spread: 3.0, decay: 4.2 });
-      this.spawnShell(worldPos, new THREE.Color(0xffd27a),
+      this.spawnShell(worldPos, new THREE.Color(0x7ff0ff),
         { count: 50, size: 1.05, speed: 2.0, spread: 4.5, decay: 1.9 });
-      this.spawnShell(worldPos, new THREE.Color(0xff6a10),
+      this.spawnShell(worldPos, new THREE.Color(0xff5ad8),
         { count: 80, size: 0.8, speed: 3.4, spread: 6.8, decay: 0.95 });
-      this.spawnShell(worldPos, new THREE.Color(0x8a2a08),
+      this.spawnShell(worldPos, new THREE.Color(0x5a2a9a),
         { count: 30, size: 0.55, speed: 1.2, spread: 2.2, decay: 0.6 });
     }
 
@@ -5317,7 +5492,10 @@ registerProcessor('odd-sid', OddSid);
         // adds. Stone: matte and faceted, on its own rough geometry, so it reads
         // as rock rather than as a grey ball.
         { main: 0xc8c8d8, roughness: 0.12, metalness: 0.30, emissive: 0x2a2a30 }, // 7: Joker
-        { main: 0x30333a, roughness: 0.30, metalness: 0.65, emissive: 0x060708 }, // 8: Bomb
+        // The bomb is the Unstable Core since the rename (the user, 18 Oct 2026):
+        // a dark glass shell whose emissive is its core, driven in render()
+        // through cyan and magenta in irregular surges.
+        { main: 0x1a1430, roughness: 0.18, metalness: 0.45, emissive: 0x000000 }, // 8: Bomb (Unstable Core)
         { main: 0x4a4845, roughness: 0.95, metalness: 0.02, emissive: 0x0a0a09, flat: true } // 9: Stone
       ];
 
@@ -5443,27 +5621,38 @@ registerProcessor('odd-sid', OddSid);
       // the same reason -- it marks the ball without touching its colour, which is
       // what the ball plays as.
       this.slitGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.0, SPHERE_RADIUS * 0.13, 8, 40);
+      // The Unstable Core's rings: two thin bands of light orbiting it, tilted
+      // apart and turning (render()), so it reads as an atom coming apart rather
+      // than a coloured ball -- with a plain glow it passed for a magenta one.
+      this.coreRingGeo = new THREE.TorusGeometry(SPHERE_RADIUS * 1.25, SPHERE_RADIUS * 0.055, 8, 48);
+      this.coreRingMat = new THREE.MeshBasicMaterial({
+        color: 0x40e0ff, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false, clippingPlanes: clip
+      });
+
       this.slitMat = new THREE.MeshStandardMaterial({
         color: 0x08080c, roughness: 0.4, metalness: 0.2,
         clippingPlanes: clip, clipShadows: true
       });
 
-      // The bomb's spark: a soft orange glow on its shoulder, flickered in
-      // render(). One material for every bomb, so one write flickers them all.
+      // The Unstable Core's aura: a soft glow round the ball, centred on it so the
+      // ball itself hides the middle and the rest rings its edge, coloured and
+      // flickered with the core in render(). One material for every core, so one
+      // write drives them all. (It was an orange fuse spark on a gunmetal bomb.)
       const S = 64;
       const cvs = document.createElement('canvas');
       cvs.width = S; cvs.height = S;
       const ctx = cvs.getContext('2d');
       const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
       g.addColorStop(0, 'rgba(255,255,255,1)');
-      g.addColorStop(0.2, 'rgba(255,240,200,0.95)');
-      g.addColorStop(0.45, 'rgba(255,160,60,0.45)');
-      g.addColorStop(1, 'rgba(255,90,0,0)');
+      g.addColorStop(0.3, 'rgba(255,255,255,0.75)');
+      g.addColorStop(0.55, 'rgba(255,255,255,0.22)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, S, S);
       this.bombSparkMat = new THREE.SpriteMaterial({
         map: new THREE.CanvasTexture(cvs),
-        color: 0xff9a3a,
+        color: 0x40e0ff,
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -5508,10 +5697,20 @@ registerProcessor('odd-sid', OddSid);
         mesh.add(o);
         mesh.userData.markerObj = o;
       } else if (want === 'spark') {
-        const o = new THREE.Sprite(this.bombSparkMat);
-        // Up and towards the camera, so it sits on the visible shoulder.
-        o.position.set(SPHERE_RADIUS * 0.35, SPHERE_RADIUS * 0.6, SPHERE_RADIUS * 0.8);
-        o.scale.setScalar(SPHERE_RADIUS * 1.3);
+        const o = new THREE.Group();
+        const aura = new THREE.Sprite(this.bombSparkMat);
+        // Centred: the ball hides the middle of it, and the rest is an aura.
+        aura.scale.setScalar(SPHERE_RADIUS * 3.4);
+        o.add(aura);
+        const spin = new THREE.Group();
+        const r1 = new THREE.Mesh(this.coreRingGeo, this.coreRingMat);
+        const r2 = new THREE.Mesh(this.coreRingGeo, this.coreRingMat);
+        r1.rotation.set(1.15, 0.35, 0);
+        r2.rotation.set(-0.95, -0.6, 0.4);
+        spin.add(r1, r2);
+        spin.rotation.z = Math.random() * Math.PI * 2;
+        o.add(spin);
+        o.userData.coreSpin = spin;
         mesh.add(o);
         mesh.userData.markerObj = o;
       }
@@ -6090,6 +6289,30 @@ registerProcessor('odd-sid', OddSid);
       // spot -- two balls inside each other for the start of the fall, half one
       // colour and half the other (the user, 18 Oct 2026, caught on video).
       const handled = new Set();
+      // The engine moves loose balls one at a time, so two can pass through the
+      // same cell in turn -- the lower ball through it, then the one above. Played
+      // all at once at one speed, they reached it together and passed through
+      // each other: a ball half one colour and half the other, caught by a
+      // detector on the board (the user, 18 Oct 2026). So each fall, in the
+      // engine's order, waits until no earlier one is within a step of any cell
+      // on its way, and follows it through.
+      const stepSecs = HEX_SPACING_X / BALL_DROP_SPEED;
+      const held = new Map();                     // cell -> [from, to] in seconds
+      const nowMs = performance.now();
+      const fallDelay = (path) => {
+        const cells = path.map(p => p.x + '_' + p.y), n = cells.length;
+        const spans = (d) => cells.map((c, k) => [k === 0 ? -Infinity : d + (k - 1) * stepSecs,
+                                                   k === n - 1 ? Infinity : d + (k + 1) * stepSecs]);
+        let d = 0;
+        for (let tries = 0; tries < 400; tries++) {
+          const sp = spans(d);
+          const clash = sp.some((r, k) => (held.get(cells[k]) || []).some(o => r[0] < o[1] - 1e-6 && o[0] < r[1] - 1e-6));
+          if (!clash) break;
+          d += stepSecs / 4;
+        }
+        spans(d).forEach((r, k) => { if (!held.has(cells[k])) held.set(cells[k], []); held.get(cells[k]).push(r); });
+        return d;
+      };
       for (const [key, pathInfo] of droppingPathsMap) {
         const [x, y] = key.split('_').map(Number);
         const val = engine.checkInMap({ x: x, y: y }) ? engine.ballMap[x][y].bzMap : 0;
@@ -6099,6 +6322,7 @@ registerProcessor('odd-sid', OddSid);
         else mesh = newBallMesh(val);
         mesh.worldPath = pathInfo.path.map(p => gridToWorld(p.x, p.y, SPHERE_RADIUS));
         mesh.pathIndex = 1;
+        mesh.pathWaitUntil = nowMs + fallDelay(pathInfo.path) * 1000;
         mesh.position.set(mesh.worldPath[0].x, mesh.worldPath[0].y, mesh.worldPath[0].z);
         const end = mesh.worldPath[mesh.worldPath.length - 1];
         mesh.targetPos = new THREE.Vector3(end.x, end.y, end.z);
@@ -6788,8 +7012,6 @@ registerProcessor('odd-sid', OddSid);
       }
       if (this.ghostMaterials[SLOT_JOKER]) this.jokerColour(this.ghostMaterials[SLOT_JOKER].color, 1);
 
-      // The bomb's spark flickers: two sines out of step, so it never settles into
-      // a visible beat, and it warms towards yellow as it flares.
       if (this.bgProc && this.bgProc.visible) {
         const pu = this.bgProc.material.uniforms;
         pu.uTime.value = this._flightTime;
@@ -6803,10 +7025,33 @@ registerProcessor('odd-sid', OddSid);
       }
 
       if (this.bombSparkMat) {
+        // The Unstable Core: its colour swinging between cyan and magenta, its
+        // strength in surges with a fast flicker over them -- sines out of step,
+        // so it never settles into a beat. Aura, core glow, and the light and
+        // board glow under a falling one (glowColour) all take the same colour.
         const t = this._flightTime;
-        const fl = 0.5 + 0.5 * Math.sin(t * 23.0) * Math.sin(t * 7.3 + 1.1);
-        this.bombSparkMat.opacity = 0.65 + 0.35 * fl;
-        this.bombSparkMat.color.setRGB(1.0, 0.5 + 0.3 * fl, 0.15 + 0.15 * fl);
+        const swing = 0.5 + 0.5 * Math.sin(t * 2.3 + Math.sin(t * 5.1));
+        const surge = 0.5 + 0.5 * Math.sin(t * 9.0) * Math.sin(t * 3.7 + 1.3);
+        const flick = 0.78 + 0.22 * Math.sin(t * 41.0) * Math.sin(t * 17.3);
+        const c = this.bombSparkMat.color;
+        c.setRGB(0.25 + 0.75 * swing, 0.88 - 0.57 * swing, 1.0 - 0.15 * swing);
+        this.bombSparkMat.opacity = (0.35 + 0.45 * surge) * flick;
+        if (this.coreRingMat) {
+          this.coreRingMat.color.copy(c);
+          this.coreRingMat.opacity = (0.6 + 0.4 * surge) * flick;
+        }
+        // The shell stays dark glass with the core faint inside it; the rings and
+        // the aura carry the colour.
+        for (const m of [this.ballMaterials[SLOT_BOMB], this.activeBallMaterials && this.activeBallMaterials[SLOT_BOMB]]) {
+          if (!m) continue;
+          m.emissive.copy(c);
+          m.emissiveIntensity = (0.18 + 0.35 * surge) * flick;
+        }
+        // and the rings turn, each core's on its own
+        const spinOf = (mesh) => mesh.visible && mesh.userData.markerObj && mesh.userData.markerObj.userData.coreSpin;
+        const turn = (sp) => { sp.rotation.z += dt * 2.2; sp.rotation.x = 0.35 * Math.sin(t * 1.3 + sp.rotation.z); };
+        for (const mesh of this.ballsGroup.children) { const sp = spinOf(mesh); if (sp) turn(sp); }
+        for (const mesh of this.activeMeshes || []) { const sp = spinOf(mesh); if (sp) turn(sp); }
       }
 
       // === 3D SPACE FLIGHT MOTION ===
@@ -6923,6 +7168,7 @@ registerProcessor('odd-sid', OddSid);
         mesh.scale.set(s, s, s);
 
         if (mesh.isPathDropping && mesh.worldPath && mesh.worldPath.length > 1) {
+          if (mesh.pathWaitUntil && performance.now() < mesh.pathWaitUntil) continue;   // following one through
           const zipSpeed = BALL_DROP_SPEED;
           const targetWaypoint = mesh.worldPath[mesh.pathIndex];
           if (targetWaypoint) {
@@ -7927,7 +8173,7 @@ registerProcessor('odd-sid', OddSid);
         // Under ALL the picture moves on when its song has played SONG_PLAYS
         // times (onSongLoop, below). With no song sounding -- music off, or a
         // picture that has none -- a new level is the beat instead.
-        if (type === 'levelup' && this.backdropAll && !this.audio.songAudible()) this.stepTheme();
+        if (type === 'levelup' && this.backdropAll && !this.audio.songAudible()) this.stepTheme(true);
         if (type === 'levelup' && this.isPlaying) this.showBanner('bannerLevel', 'LEVEL ' + this.engine.level);
         if (type === 'levelup') this.logoBurst();
         // A sweep runSweep has already shown and sounded: not again. A bomb in
@@ -7964,7 +8210,7 @@ registerProcessor('odd-sid', OddSid);
         }
         if (!this.isPlaying || !this.backdropAll || loops < SONG_PLAYS) return;
         const cur = BACKDROPS[this.renderer.backdropIndex];
-        if (cur && cur.song === id) this.stepTheme();
+        if (cur && cur.song === id) this.stepTheme(true);
       };
       this.engine.onPopBalls = (matchList) => {
         this.lastPops = matchList;
@@ -8142,23 +8388,67 @@ registerProcessor('odd-sid', OddSid);
       }
     }
 
-    // The next picture and its song, from the top.
-    stepTheme() {
+    // The next picture and its song, from the top. Earned -- the journey moving
+    // on by itself, not B -- it charges a containment pulse (PULSE_ROWS), fired
+    // by the game loop once the board is still (firePulse).
+    stepTheme(earned) {
       const next = (this.renderer.backdropIndex + 1) % BACKDROPS.length;
       this.renderer.setBackdrop(next);
       this.audio.setSong(BACKDROPS[next].song, true);
-      if (this.isPlaying) this.showSectorFlash();
+      if (this.isPlaying && earned) this.pulsePending = true;
+      if (this.isPlaying) this.showSectorFlash(this.isPlaying && earned);
+    }
+
+    // The containment pulse (PULSE_ROWS): the top rows of the pile, found now,
+    // each swept in turn -- a streak across it in the sector's colour, every ball
+    // in it popped. Straight onto the board as demoPop does, the engine being
+    // still: the balls below the rows are held up from below, so nothing falls,
+    // and a falling piece only finds more room.
+    firePulse() {
+      const e = this.engine;
+      this.pulsePending = false;
+      const rows = [];
+      for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y && rows.length < PULSE_ROWS; y++) {
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+          if (e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap > 0) { rows.push(y); break; }
+        }
+      }
+      if (!rows.length) return;
+      this.showBanner('bannerChain', 'CONTAINMENT PULSE');
+      this.logoBurst();
+      this.audio.playSound('boom', 1);
+      const back = BACKDROPS[this.renderer.backdropIndex];
+      const colour = new THREE.Color(back ? back.tints[0] : '#9fdcff');
+      rows.forEach((y, i) => setTimeout(() => {
+        if (!this.isPlaying) return;
+        let lo = null, hi = null;
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+          if (!e.checkInMap({ x: x, y: y })) continue;
+          if (lo === null) lo = x;
+          hi = x;
+          const v = e.ballMap[x][y].bzMap;
+          if (v > 0) {
+            this.particles.spawnPopExplosion(gridToWorld(x, y, SPHERE_RADIUS), v);
+            e.ballMap[x][y].bzMap = 0;
+          }
+        }
+        if (lo !== null) {
+          this.particles.spawnSweep(gridToWorld(lo, y, SPHERE_RADIUS), gridToWorld(hi, y, SPHERE_RADIUS), colour, 0.3);
+        }
+        this.renderer.updateScene(e);
+      }, i * PULSE_ROW_MS));
     }
 
     // SECTOR n and its name over the board, as a game reaches it -- the
     // backgrounds as the stages of a journey (the user, 18 Oct 2026). Restarted
     // rather than queued, so a quick run of changes shows the latest.
-    showSectorFlash() {
+    showSectorFlash(pulse) {
       const el = document.getElementById('sectorFlash');
       const i = this.renderer.backdropIndex, back = BACKDROPS[i];
       if (!el || !back) return;
       el.querySelector('.sector-num').textContent = 'SECTOR ' + (i + 1);
       el.querySelector('.sector-name').textContent = back.label;
+      el.querySelector('.sector-pulse').textContent = pulse ? 'Containment pulse charged' : '';
       el.classList.remove('show');
       void el.offsetWidth;
       el.classList.add('show');
@@ -8658,6 +8948,7 @@ registerProcessor('odd-sid', OddSid);
       this.resolveNextAt = 0;
       this.sweepAnim = false;
       this.applyBackdropChoice();
+      this.pulsePending = false;
       // The first sector named once the fade from black has cleared.
       clearTimeout(this.sectorFlashTimer);
       this.sectorFlashTimer = setTimeout(() => { if (this.isPlaying) this.showSectorFlash(); }, 700);
@@ -9958,6 +10249,9 @@ registerProcessor('odd-sid', OddSid);
         // hold after it.
         if (this.sweepOrb) this.updateSweepOrb(performance.now());
         if (this.engine.resolving) this.stepResolve(currentTime);
+        if (this.pulsePending && !this.engine.resolving && !this.sweepOrb && !this.renderer.hasDroppingBalls()) {
+          this.firePulse();
+        }
         const pausing = this.engine.resolving || (this.spawnHoldUntil !== undefined &&
           (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls()));
 
@@ -10277,11 +10571,22 @@ registerProcessor('odd-sid', OddSid);
       ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
       ctx.restore();
       if (v === BOMB) {
-        const sg = ctx.createRadialGradient(x + r * 0.45, y - r * 0.6, 0, x + r * 0.45, y - r * 0.6, r * 0.6);
-        sg.addColorStop(0, 'rgba(255,240,200,1)');
-        sg.addColorStop(0.4, 'rgba(255,150,40,0.8)');
-        sg.addColorStop(1, 'rgba(255,90,0,0)');
-        ctx.fillStyle = sg; ctx.fillRect(x - r, y - r * 1.3, r * 2, r * 1.6);
+        // the Unstable Core: its core glowing through the shell and an aura round
+        // it, cyan to magenta -- swinging with jokerHue where the picture moves
+        const sw = jokerHue === null || jokerHue === undefined ? 0.5 : 0.5 + 0.5 * Math.sin(jokerHue * Math.PI * 2);
+        const col = (a) => 'rgba(' + Math.round(64 + 191 * sw) + ',' + Math.round(224 - 145 * sw) + ',' + Math.round(255 - 38 * sw) + ',' + a + ')';
+        const cg = ctx.createRadialGradient(x, y, 0, x, y, r * 0.9);
+        cg.addColorStop(0, col(0.55));
+        cg.addColorStop(1, col(0));
+        ctx.fillStyle = cg; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+        ctx.strokeStyle = col(0.95);
+        ctx.lineWidth = Math.max(1, r * 0.11);
+        const spin = (jokerHue || 0) * Math.PI * 2;
+        for (const tilt of [0.55, -0.75]) {
+          ctx.beginPath();
+          ctx.ellipse(x, y, r * 1.22, r * 0.42, tilt + spin, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
     }
 
