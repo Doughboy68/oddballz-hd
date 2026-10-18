@@ -2337,3 +2337,160 @@ body.end-armed .paused-hint .hint-armed {
   from { opacity: 1; }
   to   { opacity: 0.55; }
 }
+
+/* ===== Game over, on the playfield =====
+   As PAUSED: on the board itself rather than in a dialog (the user, 18 Oct
+   2026). The last board stays in view under a dim; the title cycles through
+   the background's colours; a small HUD-framed panel holds the score and the
+   buttons. Placed on the board's centre by positionGameOverPanel. */
+.gameover-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: radial-gradient(ellipse at center, rgba(3, 5, 12, 0.55), rgba(3, 5, 12, 0.8));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+
+.gameover-panel {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  text-align: center;
+}
+
+body.is-gameover .gameover-dim { opacity: 1; }
+body.is-gameover .gameover-panel { display: flex; animation: gameover-in 0.7s ease-out; }
+
+@keyframes gameover-in {
+  from { opacity: 0; transform: translate(-50%, -44%); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.gameover-title {
+  font-weight: 900;
+  font-size: clamp(2rem, 8vw, 3.4rem);
+  letter-spacing: 0.22em;
+  white-space: nowrap;
+}
+
+.gameover-title .title-letters span { text-shadow: 0 0 20px currentColor, 0 3px 0 rgba(0, 0, 0, 0.6); }
+.gameover-title .gap { width: 0.4em; }
+
+.gameover-score {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 15rem;
+  padding: 0.8rem 1.6rem 0.9rem;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px),
+    linear-gradient(160deg, rgba(10, 14, 30, 0.88), rgba(5, 7, 16, 0.78));
+  border: 1px solid color-mix(in srgb, var(--hud-a) 38%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--hud-a) 16%, transparent);
+}
+
+.gameover-score::before,
+.gameover-score::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.gameover-score::before { top: -1px; left: -1px; border-top: 2px solid var(--hud-a); border-left: 2px solid var(--hud-a); }
+.gameover-score::after { right: -1px; bottom: -1px; border-right: 2px solid var(--hud-b); border-bottom: 2px solid var(--hud-b); }
+
+.gameover-label,
+.gameover-stats {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--hud-a) 50%, #c9d3e3);
+}
+
+.gameover-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: clamp(2rem, 7vw, 2.8rem);
+  line-height: 1.1;
+  color: var(--accent-gold);
+  text-shadow: 0 0 14px rgba(245, 158, 11, 0.6);
+}
+
+.gameover-best {
+  display: none;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hud-b);
+  text-shadow: 0 0 10px var(--hud-b);
+}
+
+.gameover-score.best .gameover-best { display: block; }
+
+.gameover-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.go-btn {
+  min-height: 2.9rem;
+  padding: 0 1.2rem;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--hud-a) 40%, transparent);
+  background: rgba(8, 11, 24, 0.82);
+  color: #e6edf7;
+  font-family: var(--font-family);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.go-btn:hover,
+.go-btn:active { border-color: var(--hud-a); box-shadow: 0 0 14px color-mix(in srgb, var(--hud-a) 40%, transparent); }
+
+.go-btn.go-primary {
+  border: 1px solid var(--hud-a);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--hud-a) 85%, #000),
+    color-mix(in srgb, var(--hud-b) 85%, #000));
+  color: #05070f;
+  font-weight: 900;
+}
+
+.gameover-hint {
+  display: none;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(220, 230, 245, 0.7);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .gameover-hint { display: block; }
+}
+
+/* Letter spacing leaves a gap after the last letter, so a centred word sits
+   left of centre by half of it -- a quarter of a cell on the board (the user,
+   18 Oct 2026). The same gap before the first letter balances it. */
+.paused-label .title-letters { padding-left: 0.3em; }
+.gameover-title .title-letters { padding-left: 0.22em; }

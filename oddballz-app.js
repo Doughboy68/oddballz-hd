@@ -876,6 +876,10 @@
     } catch (e) {}
   }
 
+  // From game over to the title's song coming in under the game-over screen:
+  // the music's fade and the falling chime first.
+  const GAMEOVER_SONG_DELAY_MS = 3200;
+
   // How long the mouse rests before its pointer hides (Ambient Mode, fullscreen play).
   const CURSOR_IDLE_MS = 2500;
 
@@ -4042,6 +4046,21 @@ registerProcessor('odd-sid', OddSid);
       }
     }
 
+    // The music faded out over secs, then stopped, its level put back for the
+    // next song. stopBGM straight away is a cut.
+    fadeOutBGM(secs) {
+      if (!this.ctx || !this.musicGain || !this.bgmPlaying) { this.stopBGM(); return; }
+      const g = this.musicGain.gain, now = this.ctx.currentTime;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0.0001, now + secs);
+      clearTimeout(this.fadeTimer);
+      this.fadeTimer = setTimeout(() => {
+        this.stopBGM();
+        this.updateGains();
+      }, secs * 1000 + 60);
+    }
+
     updateGains() {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
@@ -4151,6 +4170,13 @@ registerProcessor('odd-sid', OddSid);
     }
 
     startBGM() {
+      // A fade still running (fadeOutBGM) gives way to the new music.
+      if (this.fadeTimer) {
+        clearTimeout(this.fadeTimer);
+        this.fadeTimer = null;
+        if (this.musicGain) this.musicGain.gain.cancelScheduledValues(this.ctx.currentTime);
+        this.updateGains();
+      }
       if (this.bgmPlaying || !this.enabled || !this.musicEnabled) return;
       this.init();
       if (!this.ctx) return;
@@ -4771,67 +4797,59 @@ registerProcessor('odd-sid', OddSid);
           break;
         }
         case 'gameover': {
-          this.stopBGM();
-          // Epic Deep Space Minor Cadence & Weeping Guitar Lead Echo
-          const dur = 1.80;
+          // The music fades rather than cutting, and under its last second a
+          // soft falling chime answers -- D minor, sine bells with long tails
+          // through a slow echo, over a low swell. It was saw chords and a
+          // distorted "weeping" lead on an abrupt stop, which jarred against the
+          // music it broke into (the user, 18 Oct 2026: "goes from nice music
+          // to abrupt noise").
+          this.fadeOutBGM(1.6);
+          const t0 = now + 0.5;
 
-          // 1. Descending Minor Cadence Chords (Em -> Cm -> Am -> Low E0 Sub)
-          const chordNotes = [329.63, 261.63, 220.00, 41.20]; // E4 -> C4 -> A3 -> E1
-          for (let i = 0; i < chordNotes.length; i++) {
-            const startTime = now + i * 0.35;
+          const echo = this.ctx.createDelay();
+          const echoBack = this.ctx.createGain();
+          const echoOut = this.ctx.createGain();
+          echo.delayTime.value = 0.42;
+          echoBack.gain.value = 0.38;
+          echoOut.gain.value = 0.55;
+          echo.connect(echoBack); echoBack.connect(echo);
+          echo.connect(echoOut); echoOut.connect(out);
+
+          // A5 F5 D5 A4: down the D minor chord, each a bell left to ring
+          const bells = [880.0, 698.46, 587.33, 440.0];
+          bells.forEach((f, i) => {
+            const st = t0 + i * 0.38;
             const osc = this.ctx.createOscillator();
-            const filter = this.ctx.createBiquadFilter();
-            const gain = this.ctx.createGain();
+            const shimmer = this.ctx.createOscillator();
+            const g = this.ctx.createGain();
+            const sg = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(f, st);
+            shimmer.type = 'sine';
+            shimmer.frequency.setValueAtTime(f * 2.01, st);     // a faint, slightly sharp octave
+            g.gain.setValueAtTime(0.0001, st);
+            g.gain.linearRampToValueAtTime(0.055, st + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, st + 2.2);
+            sg.gain.setValueAtTime(0.0001, st);
+            sg.gain.linearRampToValueAtTime(0.012, st + 0.02);
+            sg.gain.exponentialRampToValueAtTime(0.0001, st + 1.1);
+            osc.connect(g); shimmer.connect(sg);
+            g.connect(out); sg.connect(out);
+            g.connect(echo);
+            osc.start(st); osc.stop(st + 2.3);
+            shimmer.start(st); shimmer.stop(st + 1.2);
+          });
 
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(chordNotes[i], startTime);
-            osc.frequency.exponentialRampToValueAtTime(chordNotes[i] * 0.95, startTime + 0.9);
-
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(900, startTime);
-            filter.frequency.exponentialRampToValueAtTime(250, startTime + 0.9);
-
-            gain.gain.setValueAtTime(0.001, startTime);
-            gain.gain.linearRampToValueAtTime(0.07, startTime + 0.03);
-            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.9);
-
-            osc.connect(filter); filter.connect(gain); gain.connect(out);
-            osc.start(startTime); osc.stop(startTime + 0.9);
-          }
-
-          // 2. Weeping Space Lead Echo Tail
-          const leadOsc = this.ctx.createOscillator();
-          const leadDist = this.ctx.createWaveShaper();
-          const leadFilter = this.ctx.createBiquadFilter();
-          const leadGain = this.ctx.createGain();
-          const delayNode = this.ctx.createDelay();
-          const delayFeedback = this.ctx.createGain();
-
-          leadOsc.type = 'sawtooth';
-          leadOsc.frequency.setValueAtTime(659.25, now); // E5 weeping bend
-          leadOsc.frequency.exponentialRampToValueAtTime(523.25, now + 1.2); // Bend down to C5
-
-          leadDist.curve = this.distortionCurve;
-
-          leadFilter.type = 'lowpass';
-          leadFilter.frequency.setValueAtTime(1400, now);
-          leadFilter.frequency.exponentialRampToValueAtTime(400, now + dur);
-
-          leadGain.gain.setValueAtTime(0.001, now);
-          leadGain.gain.linearRampToValueAtTime(0.08, now + 0.05);
-          leadGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
-
-          delayNode.delayTime.value = 0.40;
-          delayFeedback.gain.value = 0.30;
-
-          leadOsc.connect(leadDist); leadDist.connect(leadFilter); leadFilter.connect(leadGain);
-          leadGain.connect(out);
-          leadGain.connect(delayNode);
-          delayNode.connect(delayFeedback);
-          delayFeedback.connect(delayNode);
-          delayFeedback.connect(out);
-
-          leadOsc.start(now); leadOsc.stop(now + dur);
+          // a low D swelling in under the bells and dying away
+          const low = this.ctx.createOscillator();
+          const lowG = this.ctx.createGain();
+          low.type = 'sine';
+          low.frequency.setValueAtTime(73.42, t0);
+          lowG.gain.setValueAtTime(0.0001, t0);
+          lowG.gain.linearRampToValueAtTime(0.07, t0 + 0.9);
+          lowG.gain.exponentialRampToValueAtTime(0.0001, t0 + 3.4);
+          low.connect(lowG); lowG.connect(out);
+          low.start(t0); low.stop(t0 + 3.5);
           break;
         }
       }
@@ -6969,7 +6987,7 @@ registerProcessor('odd-sid', OddSid);
           // PAUSED holds still and cycles through the background's colours,
           // quicker than the header logo's drift, without the title's dance
           // (the user, 17 Oct 2026). Only while it is showing.
-          if (letters[0].closest('.paused-label')) {
+          if (letters[0].closest('.paused-label') || letters[0].closest('.gameover-title')) {
             if (!letters[0].offsetParent) continue;
             letters.forEach((el, i) => { el.style.color = paletteAt(tints, i / 8 - t / 150); });
             continue;
@@ -7073,6 +7091,44 @@ registerProcessor('odd-sid', OddSid);
       }
       label.style.left = Math.round((x0 + x1) / 2 - host.left) + 'px';
       label.style.top = Math.round((y0 + y1) / 2 - host.top) + 'px';
+    }
+
+    // Game over on the board: the last board left in view, dimmed, and a panel
+    // with the score and what next -- play again, the title, the high scores.
+    showGameOverPanel(score, level, lines, best) {
+      document.getElementById('gameOverScore').textContent = score.toLocaleString();
+      document.getElementById('gameOverStats').textContent = 'Level ' + level + ' \u00b7 ' + lines + ' lines';
+      document.querySelector('.gameover-score').classList.toggle('best', !!best);
+      document.body.classList.add('is-gameover');
+      this.positionGameOverPanel();
+    }
+
+    positionGameOverPanel() {
+      const panel = document.getElementById('gameOverPanel');
+      const R = this.renderer;
+      if (!panel || !R || !R.boardGroup || !R.boardGroup.children.length) return;
+      R.camera.updateMatrixWorld();
+      R.boardGroup.updateMatrixWorld(true);
+      const rect = R.renderer.domElement.getBoundingClientRect();
+      const host = panel.offsetParent ? panel.offsetParent.getBoundingClientRect() : rect;
+      const v = new THREE.Vector3();
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const m of R.boardGroup.children) {
+        m.getWorldPosition(v);
+        v.project(R.camera);
+        const x = rect.left + (v.x + 1) / 2 * rect.width, y = rect.top + (1 - v.y) / 2 * rect.height;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+      panel.style.left = Math.round((x0 + x1) / 2 - host.left) + 'px';
+      panel.style.top = Math.round((y0 + y1) / 2 - host.top) + 'px';
+    }
+
+    hideGameOverPanel() {
+      clearTimeout(this.gameOverSongTimer);
+      document.body.classList.remove('is-gameover');
     }
 
     // The header logo's hop, for a chain, a row sweep or a new level.
@@ -7617,6 +7673,14 @@ registerProcessor('odd-sid', OddSid);
 
       bindStartBtn('btnOverlayStart');
       bindStartBtn('btnRestart');
+      bindStartBtn('btnGoAgain');
+      const goTitle = document.getElementById('btnGoTitle');
+      if (goTitle) goTitle.addEventListener('click', () => this.returnToTitle());
+      const goScores = document.getElementById('btnGoScores');
+      if (goScores) goScores.addEventListener('click', () => this.showHighScoresModal());
+      window.addEventListener('resize', () => {
+        if (document.body.classList.contains('is-gameover')) this.positionGameOverPanel();
+      });
       document.getElementById('btnPause').addEventListener('click', () => this.togglePause());
       document.getElementById('btnResume').addEventListener('click', () => this.togglePause());
       document.getElementById('btnPauseEnd').addEventListener('click', () => this.armEndGame());
@@ -7890,6 +7954,7 @@ registerProcessor('odd-sid', OddSid);
 
     startGame() {
       if (this.updateOffer) document.getElementById('updateBar').classList.add('hidden');
+      this.hideGameOverPanel();
       // The board and its background fade up out of black.
       const fade = document.getElementById('startFade');
       if (fade) {
@@ -8004,6 +8069,7 @@ registerProcessor('odd-sid', OddSid);
 
     returnToTitle() {
       setTimeout(() => this.showUpdateBar(), 0);
+      this.hideGameOverPanel();
       document.body.classList.remove('in-game');
       this.updateHudLayout();
       this.disarmEndGame();
@@ -8193,6 +8259,10 @@ registerProcessor('odd-sid', OddSid);
       this.engine.stagedResolve = false;
       this.engine.resolving = false;
       this.attractSavedMatcher = this.engine.matcher;   // restore the user's mode on exit
+      // Always on Cosmic Stellar Nebula, the first background, rather than
+      // whichever the last game left up (the user, 18 Oct 2026); the title's own
+      // choice comes back on the way out.
+      this.renderer.setBackdrop(0);
 
       // The lessons are authored against classic-board coordinates (row 11 x5-9,
       // the perpendicular line, the x15-16 gravity gap), and the demo only has to
@@ -8236,6 +8306,7 @@ registerProcessor('odd-sid', OddSid);
       delete this.engine.checkMatches;   // in case we exited mid-demo
 
       this.setLiveBoardWidth(this.attractSavedWidth || storedBoardWidth());
+      this.applyBackdropChoice();
 
       this.engine.endGame = true;
       if (this.attractSavedMatcher !== undefined) this.engine.matcher = this.attractSavedMatcher;
@@ -9372,9 +9443,22 @@ registerProcessor('odd-sid', OddSid);
     handleGameOver() {
       this.isPlaying = false;
       this.setModeTabsDisabled(false);
+      // A new best for this mode and board, judged before this score joins them.
+      const mode = this.engine.matcher ? 'Color Match' : 'Row Build';
+      const board = BOARD_SHORT[BOARD_WIDTH];
+      const prev = this.highScores.filter(h => h.mode === mode && h.board === board)
+        .reduce((m, h) => Math.max(m, h.score || 0), 0);
+      const best = this.engine.score > 0 && this.engine.score > prev;
       this.updateHighScores(this.engine.score, this.engine.level, this.engine.skill);
       document.getElementById('finalScore').textContent = this.engine.score;
-      document.getElementById('overlayGameOver').classList.remove('hidden');
+      // On the board, as PAUSED is, rather than a dialog (the user, 18 Oct 2026).
+      this.showGameOverPanel(this.engine.score, this.engine.level, this.engine.lines, best);
+      // Once the game's music has faded and the chime rung, the title's song
+      // comes in under the game-over screen (the user, 18 Oct 2026).
+      clearTimeout(this.gameOverSongTimer);
+      this.gameOverSongTimer = setTimeout(() => {
+        if (!this.isPlaying && document.body.classList.contains('is-gameover')) this.playTitleSong();
+      }, GAMEOVER_SONG_DELAY_MS);
       this.showUpdateBar();
       document.body.classList.remove('in-game');
       this.updateHudLayout();
