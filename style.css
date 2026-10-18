@@ -2292,3 +2292,7 @@ body.end-armed .paused-hint .hint-armed {
 @media (max-width: 400px) {
   .paused-hint { font-size: 0.66rem; letter-spacing: 0.06em; }
 }
+
+/* PAUSED and the line under it, both centred: the line is the wider, and the
+   word sat at its left edge (the user, 17 Oct 2026, on a phone). */
+.paused-label { text-align: center; }

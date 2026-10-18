@@ -2452,103 +2452,102 @@
 
   /* drift - the title's song since 17 Oct 2026 (the user: the bouncing tune
    * "sounds too upbeat" for the space themes). Setting out on a mission
-   * through the backgrounds' places: "a bit hopeful but gloomy". New to HD, in
-   * the songs' own format. D Dorian, 94 BPM -- minor, with the raised sixth's
-   * lift in the G major chord: Dm9 G(add9) Bbmaj7 Csus2.
+   * through the backgrounds' places: hopeful, with an edge of gloom. New to HD,
+   * in the songs' own format. D major at 107 BPM on the journey's turn of
+   * chords, Bm G D A -- it starts in the minor and keeps lifting into the major.
    *
    * The intro is distant pings like a sonar over a pad swelling in and a low
-   * drone, no time kept. Then the engines: a soft pulse of eighths in the bass
-   * and a quiet kick on each bar's first beat, under a lead that reaches up
-   * from D. The B lifts through Bb C Am Dm and Bb C F, high, and ends on a
-   * bright C that turns back into D minor -- the hope always returning to the
-   * gloom, but on a lift rather than a pull down.
+   * drone. Then a light half-time beat (a kick on one, a soft snare on three)
+   * under an engine pulse of eighths, held pads, and a lead with a hook; the B
+   * climbs high over G A F#m Bm | G A D A with the chords struck in a 3+3+2
+   * lilt, and comes round again.
    *
-   * Written first in D minor at 75 BPM, no pulse ("kinda dark"), then in F
-   * major (lighter, but not the mission the user meant), then as now at 83 BPM
-   * ending B on a suspended A, with a darker pad ("maybe a bit too dark
-   * still"): a notch quicker, the pad opened up, B ending bright. */
+   * Earlier versions, all slower and darker: D minor at 75 BPM with no beat
+   * ("kinda dark"); F major ("not the mission"); D Dorian at 83 then 94 BPM
+   * ("still ... a bit too dark/boring"). */
   SONGS.push({
     id: 'title',
     title: 'Drift',
-    speed: 8,
+    speed: 7,
     rowsPerBeat: 4,
     rowsPerBar: 16,
-    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass
+    fx: { voice: 2, hand: 'next' },       // the effects borrow the bass + drums
 
     instruments: {
-      dsig:   { adsr: [5, 10, 9, 10], wave: [['T', 0]], vib: [24, 0.18, 8], glide: 0.5 },
-      dsig2:  { adsr: [4, 10, 9, 10], wave: [['S', 12], ['T', 0]], vib: [20, 0.2, 8], glide: 0.5 },
+      dlead:  { adsr: [2, 9, 8, 7], wave: [['S', 12], ['S', 0]], vib: [16, 0.2, 8], glide: 0.4 },
+      dlead2: { adsr: [1, 9, 9, 7], wave: [['P', 12], ['S', 0]], pulse: [0x600, 0x20, 0x300, 0xC00],
+                vib: [14, 0.25, 8], glide: 0.4 },
       dping:  { adsr: [0, 10, 0, 10], wave: [['T', 0]] },
       ddrone: { adsr: [8, 11, 11, 11], wave: [['T', 0]] },
-      dpulse: { adsr: [0, 7, 3, 6], wave: [['T', 0]] },
-      dpad:   { adsr: [9, 11, 10, 12], wave: [['P', 0]], pulse: [0x600, 0x08, 0x400, 0x900], arpSpeed: 6,
-                filter: { mode: 'LP', res: 8, cutoff: [0x380, 0x03, 0x280, 0x700], bounce: true } },
-      dkick:  { adsr: [0, 6, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
-                wave: [['T', '=C3'], ['T', '=G2'], ['T', '=D2'], ['T', '=A1'], ['T', '=F1']] },
+      dpulse: { adsr: [0, 7, 4, 5], wave: [['P', 0], ['T', 0]], pulse: [0x500, 0x30, 0x300, 0x900] },
+      dpad:   { adsr: [7, 11, 10, 11], wave: [['P', 0]], pulse: [0x600, 0x10, 0x400, 0xA00], arpSpeed: 4,
+                filter: { mode: 'LP', res: 8, cutoff: [0x400, 0x04, 0x300, 0x780], bounce: true } },
+      dchord: { adsr: [0, 9, 4, 7], wave: [['P', 0]], pulse: [0x400, 0x30, 0x300, 0xC00], arpSpeed: 1,
+                filter: { mode: 'LP', res: 9, cutoff: [0x600, -0x10, 0x200, 0x7FF] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 6, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
     },
-    drums: { K: 'dkick' },
+    drums: { K: 'kick', S: 'snare' },
 
     patterns: {
       // the pings: far apart, high, each left to ring out
       pings:
-        'A5:dping . . . | . . . . | . . . . | . . . . ' +
-        '. . . . | . . . . | D6 . . . | . . . . ' +
-        '. . . . | . . B5 . | . . . . | . . . . ' +
-        'A5 . . . | . . . . | . . . . | . . . .',
+        'F#5:dping . . . | . . . . | . . . . | . . . . ' +
+        '. . . . | . . . . | B5 . . . | . . . . ' +
+        '. . . . | . . A5 . | . . . . | . . . . ' +
+        'D6 . . . | . . . . | . . C#6 . | . . . .',
 
-      // lead A (Dm G Bb C | Dm G Bb C): reaching up from D
+      // lead A (Bm G D A | Bm G D A): the hook
       leadA:
-        'D5 . . . | . . . . | A5 . . . | . . . . ' +
-        'B5 . . . | . . . . | . . A5 . | . . G5 . ' +
-        'F5 . . . | . . . . | . . . . | D5 . . . ' +
+        'F#5 . . . | . . D5 . | . . E5 . | F#5 . . . ' +
+        'G5 . . . | . . F#5 . | . . D5 . | . . . . ' +
+        'A5 . . . | . . . . | F#5 . . . | E5 . D5 . ' +
         'E5 . . . | . . . . | . . . . | ^ . . . ' +
-        'D5 . . . | . . . . | A5 . . . | . . D6 . ' +
-        'B5 . . . | . . . . | . . D6 . | . . . . ' +
-        'C6 . . . | . . Bb5 . | . . A5 . | . . F5 . ' +
-        'G5 . . . | . . . . | E5 . . . | ^ . . .',
-      // lead B (Bb C Am Dm | Bb C F Asus4): the lift, high, then the pull home
+        'F#5 . . . | . . D5 . | . . E5 . | F#5 . . . ' +
+        'B5 . . . | . . A5 . | . . G5 . | . . . . ' +
+        'A5 . . . | . . F#5 . | . . D5 . | . . E5 . ' +
+        'E5 . . . | . . C#5 . | . . . . | ^ . . .',
+      // lead B (G A F#m Bm | G A D A): the climb
       leadB:
-        'F5 . . . | . . . . | . . . . | D6 . . . ' +
-        'E6 . . . | . . . . | . . D6 . | . . C6 . ' +
-        'C6 . . . | . . . . | . . . . | A5 . . . ' +
-        'D6 . . . | . . . . | . . . . | ^ . . . ' +
-        'D6 . . . | . . . . | . . F6 . | . . . . ' +
-        'E6 . . . | . . . . | . . G6 . | . . . . ' +
-        'F6 . . . | . . E6 . | . . C6 . | . . A5 . ' +
-        'G5 . . . | . . . . | E6 . . . | ^ . . .',
+        'D6 . . . | . . . . | B5 . . . | . . . . ' +
+        'C#6 . . . | . . . . | A5 . . . | . . . . ' +
+        'A5 . . . | . . F#5 . | . . A5 . | . . C#6 . ' +
+        'B5 . . . | . . . . | . . . . | ^ . . . ' +
+        'D6 . . . | . . E6 . | . . D6 . | . . B5 . ' +
+        'C#6 . . . | . . . . | E6 . . . | . . . . ' +
+        'F#6 . . . | . . E6 . | . . D6 . | . . A5 . ' +
+        'E6 . . . | . . . . | C#6 . . . | ^ . . .',
 
       // the drone, for the intro: a whole bar on each root
       drone: 'C2:ddrone . . . | . . . . | . . . . | . . . .',
-      // the engines: eighths on the root, a quiet kick on the bar's first beat
-      pulse: 'K . C2:dpulse . | C2 . C2 . | C2 . C2 . | C2 . C2 .',
+      // the engines: eighths on the root, a kick on one and a snare on three
+      pulse: 'K . C2:dpulse . | C2 . C2 . | S . C2 . | C2 . C2 .',
+      pulseIn: 'C2:dpulse . C2 . | C2 . C2 . | C2 . C2 . | K . S S',
 
-      // the pad, a chord held for the bar, written on C
-      padMin9: 'C3~037e:dpad . . . | . . . . | . . . . | . . . .',
-      padMaj9: 'C3~047e:dpad . . . | . . . . | . . . . | . . . .',
-      padMaj7: 'C3~047b:dpad . . . | . . . . | . . . . | . . . .',
-      padMaj:  'C3~047:dpad . . . | . . . . | . . . . | . . . .',
-      padSus2: 'C3~027:dpad . . . | . . . . | . . . . | . . . .',
-      padMin7: 'C3~037a:dpad . . . | . . . . | . . . . | . . . .',
-      padSus4: 'C3~057:dpad . . . | . . . . | . . . . | . . . .',
+      // chords, written on C: held for the bar, or struck 3+3+2
+      padMaj: 'C3~047:dpad . . . | . . . . | . . . . | . . . .',
+      padMin: 'C3~037:dpad . . . | . . . . | . . . . | . . . .',
+      hitMaj: 'C3~047:dchord . . C3~047 | . . C3~047 . | C3~047 . . C3~047 | . . C3~047 .',
+      hitMin: 'C3~037:dchord . . C3~037 | . . C3~037 . | C3~037 . . C3~037 | . . C3~037 .',
     },
 
     sections: {
       Intro: {
         v1: ['pings'],
-        v2: ['drone+2', 'drone-5', 'drone-2', 'drone'],
-        v3: ['padMin9+2', 'padMaj9-5', 'padMaj7-2', 'padSus2'],
+        v2: ['drone-1', 'drone-5', 'drone+2', 'pulseIn-3'],
+        v3: ['padMin-1', 'padMaj-5', 'padMaj+2', 'padMaj-3'],
       },
       A: {
-        v1: ['leadA@dsig'],
-        v2: ['pulse+2', 'pulse-5', 'pulse-2', 'pulse', 'pulse+2', 'pulse-5', 'pulse-2', 'pulse'],
-        v3: ['padMin9+2', 'padMaj9-5', 'padMaj7-2', 'padSus2',
-             'padMin9+2', 'padMaj9-5', 'padMaj7-2', 'padMaj'],
+        v1: ['leadA@dlead'],
+        v2: ['pulse-1', 'pulse-5', 'pulse+2', 'pulse-3', 'pulse-1', 'pulse-5', 'pulse+2', 'pulse-3'],
+        v3: ['padMin-1', 'padMaj-5', 'padMaj+2', 'padMaj-3', 'padMin-1', 'padMaj-5', 'padMaj+2', 'padMaj-3'],
       },
       B: {
-        v1: ['leadB@dsig2'],
-        v2: ['pulse-2', 'pulse', 'pulse-3', 'pulse+2', 'pulse-2', 'pulse', 'pulse+5', 'pulse'],
-        v3: ['padMaj7-2', 'padMaj', 'padMin7-3', 'padMin9+2',
-             'padMaj7-2', 'padMaj', 'padMaj7+5', 'padMaj'],
+        v1: ['leadB@dlead2'],
+        v2: ['pulse-5', 'pulse-3', 'pulse+6', 'pulse-1', 'pulse-5', 'pulse-3', 'pulse+2', 'pulse-3'],
+        v3: ['hitMaj-5', 'hitMaj-3', 'hitMin+6', 'hitMin-1', 'hitMaj-5', 'hitMaj-3', 'hitMaj+2', 'hitMaj-3'],
       },
     },
     order: ['Intro', 'A', 'B'],
