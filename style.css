@@ -2253,3 +2253,42 @@ body:not(.in-game) .game-header .fs-btn { margin-left: auto; }
    play (updateIdleCursor). */
 body.cursor-idle,
 body.cursor-idle * { cursor: none !important; }
+
+/* Under PAUSED, what to press -- with the dialog gone nothing else said how to
+   end a game (the user, 17 Oct 2026). Keyboard or touch wording by device; once
+   the end-game icon has been pressed once, the line says to press it again. */
+.paused-hint {
+  display: block;
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(225, 233, 245, 0.85);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+}
+
+.paused-hint .kb { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .paused-hint .kb { display: inline; }
+  .paused-hint .touch { display: none; }
+}
+
+.paused-hint .hint-armed { display: none; }
+body.end-armed .paused-hint .hint-normal { display: none; }
+body.end-armed .paused-hint .hint-armed {
+  display: inline;
+  color: var(--accent-pink);
+  text-shadow: 0 0 12px rgba(244, 63, 94, 0.8);
+  animation: paused-hint-armed 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes paused-hint-armed {
+  from { opacity: 1; }
+  to   { opacity: 0.55; }
+}
+
+@media (max-width: 400px) {
+  .paused-hint { font-size: 0.66rem; letter-spacing: 0.06em; }
+}

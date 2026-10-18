@@ -9535,6 +9535,7 @@ registerProcessor('odd-sid', OddSid);
       }
       const icon = document.getElementById('btnBoardEnd');
       if (icon) { icon.classList.add('is-armed'); icon.title = 'Press again to end the game'; }
+      document.body.classList.add('end-armed');
       clearTimeout(this.endArmTimer);
       this.endArmTimer = setTimeout(() => this.disarmEndGame(), END_ARM_MS);
     }
@@ -9551,6 +9552,7 @@ registerProcessor('odd-sid', OddSid);
       }
       const icon = document.getElementById('btnBoardEnd');
       if (icon) { icon.classList.remove('is-armed'); icon.title = 'End game (E): press twice'; }
+      document.body.classList.remove('end-armed');
     }
 
     closeAboutModal() {
