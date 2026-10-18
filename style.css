@@ -2312,20 +2312,17 @@ body.end-armed .paused-hint .hint-armed {
 .start-fade.on { opacity: 1; transition: none; }
 .start-fade.out { opacity: 0; transition: opacity 1.5s ease-out; }
 
-/* "Tap for sound", above the controls on the title until the music can play
-   (OddballzApp.updateSoundHint). */
+/* "Tap for sound", at the top of the title card until the music can play
+   (OddballzApp.updateSoundHint). It sat above the controls at first, where on a
+   phone the card lay over it and a tap on it started a game (the user). */
 .sound-hint {
-  position: fixed;
-  left: 50%;
-  bottom: calc(var(--controls-h, 11rem) + 0.9rem);
-  transform: translateX(-50%);
-  z-index: 30;
-  padding: 0.45rem 1rem;
+  align-self: center;
+  padding: 0.4rem 1rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--hud-a) 55%, transparent);
-  background: rgba(6, 9, 20, 0.82);
+  background: rgba(6, 9, 20, 0.6);
   color: #e9f0fa;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
