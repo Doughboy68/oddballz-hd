@@ -2024,3 +2024,118 @@ body.guide-blocked .board-icon-guide { display: none !important; }
   #uiOverlay .stats-panel .stat-card { padding: 0 0.1rem; }
   #uiOverlay .stats-panel .stat-next .next-canvas { width: 38px; height: 35px; }
 }
+
+/* ===== The on-screen controls in the HUD's look =====
+   The same overhaul as the bars up top (the user, 17 Oct 2026): a dark plate
+   with faint scanlines, a thin edge and corner brackets in the background's
+   colours (--hud-a, --hud-b), small spaced labels, glowing glyphs; Colour in
+   the second accent, Hard Drop a solid bar in both. Sizes, padding and the
+   4x2 thumb grid are as they were, so the board does not move. */
+#bottomControlsBar {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px),
+    rgba(6, 8, 18, 0.95);
+  border-top: 1px solid color-mix(in srgb, var(--hud-a) 30%, transparent);
+}
+
+#bottomControlsBar .touch-cluster {
+  position: relative;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px),
+    linear-gradient(160deg, rgba(10, 14, 30, 0.84), rgba(5, 7, 16, 0.72));
+  border: 1px solid color-mix(in srgb, var(--hud-a) 32%, transparent);
+  border-radius: 4px;
+  box-shadow:
+    0 0 20px color-mix(in srgb, var(--hud-a) 12%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--hud-a) 6%, transparent);
+}
+
+#bottomControlsBar .touch-cluster::before,
+#bottomControlsBar .touch-cluster::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+#bottomControlsBar .touch-cluster::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--hud-a);
+  border-left: 2px solid var(--hud-a);
+}
+
+#bottomControlsBar .touch-cluster::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 2px solid var(--hud-b);
+  border-bottom: 2px solid var(--hud-b);
+}
+
+#bottomControlsBar .touch-btn {
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(20, 28, 52, 0.85), rgba(8, 11, 24, 0.9));
+  border: 1px solid color-mix(in srgb, var(--hud-a) 26%, transparent);
+  color: #e6edf7;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--hud-a) 18%, transparent);
+}
+
+#bottomControlsBar .touch-btn .btn-icon {
+  color: #f2f6fc;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--hud-a) 70%, transparent);
+}
+
+#bottomControlsBar .touch-btn .btn-label {
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--hud-a) 50%, #c9d3e3);
+}
+
+#bottomControlsBar .touch-btn:active {
+  background: color-mix(in srgb, var(--hud-a) 24%, rgba(8, 11, 24, 0.9));
+  border-color: var(--hud-a);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--hud-a) 45%, transparent);
+  transform: scale(0.95);
+}
+
+#bottomControlsBar .touch-btn.btn-f {
+  border-color: color-mix(in srgb, var(--hud-b) 55%, transparent);
+  color: #e6edf7;
+}
+
+#bottomControlsBar .touch-btn.btn-f .btn-icon {
+  color: var(--hud-b);
+  text-shadow: 0 0 12px var(--hud-b);
+}
+
+#bottomControlsBar .touch-btn.btn-f .btn-label { color: var(--hud-b); }
+
+#bottomControlsBar .touch-btn.btn-zip {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--hud-a) 85%, #000),
+    color-mix(in srgb, var(--hud-b) 85%, #000));
+  border: 1px solid var(--hud-a);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--hud-a) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+#bottomControlsBar .touch-btn.btn-zip .btn-icon,
+#bottomControlsBar .touch-btn.btn-zip .btn-label {
+  color: #05070f;
+  text-shadow: none;
+  font-weight: 900;
+}
+
+#bottomControlsBar .touch-btn.btn-zip:active {
+  filter: brightness(1.2);
+}
+
+/* The narrowest phones: the labels a touch tighter, so HARD DROP fits. */
+@media (max-width: 360px) {
+  #bottomControlsBar .touch-btn .btn-label {
+    font-size: 0.58rem;
+    letter-spacing: 0.04em;
+  }
+}

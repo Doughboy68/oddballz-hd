@@ -351,7 +351,7 @@
   // shimmered when scaled, and Hyperspace's were broken in the art.
   const PROC_HEADER = `
     uniform vec2 uRes;
-    uniform float uTime, uBright;
+    uniform float uTime, uBright, uAlpha;
     varying vec2 vUv;
     float hash(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
     float hash2(vec2 q) { return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
@@ -442,7 +442,7 @@
           c += vec3(0.75, 0.72, 0.95) * ring;
         }
         c += vec3(0.30, 0.25, 0.60) * exp(-pd * 0.9) * 0.18;      // its haze
-        gl_FragColor = vec4(c * uBright, 1.0);
+        gl_FragColor = vec4(c * uBright, uAlpha);
       }`,
 
     // Citadel: the deep space citadel. Slate side panels whose gold and blue
@@ -498,7 +498,7 @@
           float dash = step(0.5, fract(sr.y * length(b - a) / (m * 0.022) - t * 0.4));
           c += vec3(0.14, 0.52, 0.75) * lineCore(sr.x, 1.4) * dash * 0.75;
         }
-        gl_FragColor = vec4(c * uBright, 1.0);
+        gl_FragColor = vec4(c * uBright, uAlpha);
       }`,
 
     // Solar Array: the orbital solar array. Black space and stars; a great sun
@@ -555,7 +555,7 @@
           float slant = abs(lane - 0.5 - (frag.x - mast) / (ax1 - ax0) * 0.15);
           c += vec3(0.55, 0.58, 0.66) * (1.0 - smoothstep(0.02, 0.05, slant)) * 0.35;
         }
-        gl_FragColor = vec4(c * uBright, 1.0);
+        gl_FragColor = vec4(c * uBright, uAlpha);
       }`,
 
     // Hyperspace: streaks racing outward from a vanishing point behind the board,
@@ -598,7 +598,7 @@
         float ring = abs(fract(r * 3.0 - uTime * 0.06 + 0.5) - 0.5) / 3.0;
         c += vec3(0.10, 0.16, 0.30) * (1.0 - smoothstep(px, px * 2.5, ring)) * smoothstep(0.12, 0.45, r) * 0.6;
         c += vec3(0.55, 0.88, 1.0) * exp(-r * r * 500.0) + vec3(0.06, 0.20, 0.36) * exp(-r * r * 24.0) * 0.5;
-        gl_FragColor = vec4(c * uBright, 1.0);
+        gl_FragColor = vec4(c * uBright, uAlpha);
       }`,
 
     // Cyber: the conduit spaceframe. A navy frame with a faint grid, a lighter
@@ -662,7 +662,7 @@
         float band = 1.0 - smoothstep(m * 0.012, m * 0.012 + 1.5, edge);
         float stripe = smoothstep(0.45, 0.55, abs(fract((frag.x + frag.y) / (m * 0.03)) - 0.5) * 2.0);
         c = mix(c, mix(vec3(0.02, 0.02, 0.03), vec3(0.80, 0.58, 0.08), stripe), band * 0.85);
-        gl_FragColor = vec4(c * uBright, 1.0);
+        gl_FragColor = vec4(c * uBright, uAlpha);
       }`,
 
     // Mothership: the bio-reactor lattice. A deep green hex grid, faint, with
@@ -727,7 +727,7 @@
           float pulse = bump(fract(sp - t * (0.04 + 0.015 * i) + hash(i * 7.0)), 8.0);
           c += mint * (lineCore(best, 2.0) * (0.7 + 1.0 * pulse) + lineHalo(best, m * 0.011) * (0.30 + 0.6 * pulse));
         }
-        gl_FragColor = vec4(c * uBright, 1.0);
+        gl_FragColor = vec4(c * uBright, uAlpha);
       }`
   };
 
@@ -815,6 +815,10 @@
     if (x < BP.MIN_X || x > BP.MAX_X || y < 0 || y > BP.MAX_Y) return false;
     return (y < BP.SPLIT && x < y + BP.UPPER) || (y >= BP.SPLIT && x > y - BP.LOWER);
   }
+
+  // How long one background takes to fade into the next (ThreeRenderer
+  // updateBackgroundFade).
+  const BG_FADE_MS = 1400;
 
   // The platform's colour follows the background (ThreeRenderer.setPlatformTint,
   // from setBackdrop): each background's accent -- BACKDROPS platform -- in the
@@ -6244,6 +6248,12 @@ registerProcessor('odd-sid', OddSid);
         const pu = this.bgProc.material.uniforms;
         pu.uTime.value = this._flightTime;
         this.renderer.getDrawingBufferSize(pu.uRes.value);
+        if (this.bgPrev && this.bgPrev.visible) {
+          const qu = this.bgPrev.material.uniforms;
+          qu.uTime.value = this._flightTime;
+          this.renderer.getDrawingBufferSize(qu.uRes.value);
+        }
+        this.updateBackgroundFade();
       }
 
       if (this.bombSparkMat) {
@@ -6528,7 +6538,12 @@ registerProcessor('odd-sid', OddSid);
     // kind asked for (PROC_SHADERS). Materials are made once a kind and kept, so
     // stepping back to one is instant. null hides it.
     setProcedural(kind) {
-      if (!kind) { if (this.bgProc) this.bgProc.visible = false; return; }
+      if (!kind) {
+        if (this.bgProc) this.bgProc.visible = false;
+        if (this.bgPrev) this.bgPrev.visible = false;
+        this.bgFade = null;
+        return;
+      }
       this.procMats = this.procMats || {};
       let mat = this.procMats[kind];
       if (!mat) {
@@ -6536,7 +6551,8 @@ registerProcessor('odd-sid', OddSid);
           uniforms: {
             uRes: { value: new THREE.Vector2(1, 1) },
             uTime: { value: 0 },
-            uBright: { value: PROC_BRIGHTNESS[kind] || 0.85 }
+            uBright: { value: PROC_BRIGHTNESS[kind] || 0.85 },
+            uAlpha: { value: 1 }
           },
           vertexShader: `
             varying vec2 vUv;
@@ -6547,6 +6563,7 @@ registerProcessor('odd-sid', OddSid);
           fragmentShader: PROC_HEADER + PROC_SHADERS[kind],
           depthWrite: false,
           depthTest: true,
+          transparent: true,
           fog: false
         });
         this.procMats[kind] = mat;
@@ -6556,9 +6573,43 @@ registerProcessor('odd-sid', OddSid);
         this.bgProc.frustumCulled = false;
         this.bgProc.renderOrder = -2;
         this.scene.add(this.bgProc);
+        // The background being left, under the one arriving (renderOrder -3)
+        // while it fades in: a crossfade rather than a cut (the user, 17 Oct
+        // 2026). Both keep animating through it.
+        this.bgPrev = new THREE.Mesh(this.bgProc.geometry, mat);
+        this.bgPrev.frustumCulled = false;
+        this.bgPrev.renderOrder = -3;
+        this.bgPrev.visible = false;
+        this.scene.add(this.bgPrev);
+      }
+      const from = this.bgProc.visible ? this.bgProc.material : null;
+      if (from && from !== mat && !this.noBgFade) {
+        if (this.bgFade) this.bgFade.to.uniforms.uAlpha.value = 1;
+        from.uniforms.uAlpha.value = 1;
+        this.bgPrev.material = from;
+        this.bgPrev.visible = true;
+        mat.uniforms.uAlpha.value = 0;
+        this.bgFade = { to: mat, t0: performance.now() };
+      } else {
+        mat.uniforms.uAlpha.value = 1;
+        this.bgPrev.visible = false;
+        this.bgFade = null;
       }
       this.bgProc.material = mat;
       this.bgProc.visible = true;
+    }
+
+    // A frame of the crossfade between backgrounds: the new one over the old,
+    // eased in and out over BG_FADE_MS, then the old one put away.
+    updateBackgroundFade() {
+      const f = this.bgFade;
+      if (!f) return;
+      const k = Math.min(1, (performance.now() - f.t0) / BG_FADE_MS);
+      f.to.uniforms.uAlpha.value = k * k * (3 - 2 * k);
+      if (k >= 1) {
+        this.bgPrev.visible = false;
+        this.bgFade = null;
+      }
     }
 
     // Compile every background's shader now, and check each actually linked. The
