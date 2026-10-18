@@ -7808,12 +7808,19 @@ registerProcessor('odd-sid', OddSid);
       bindTouch('btnTouchF', () => this.engine.rotColors());
       bindTouch('btnTouchSpace', () => this.engine.zip());
 
-      // Auto-pause ONLY when browser tab is hidden (visibilitychange)
+      // Auto-pause ONLY when browser tab is hidden (visibilitychange). All sound
+      // stops with it, wherever the player is: the audio is suspended, so the
+      // title's song, Ambient Mode and the demo go quiet too, as a game always
+      // did by pausing -- they used to play on behind another app (the user,
+      // 17 Oct 2026). Back on the page, the audio resumes where it stopped; a
+      // game stays paused until resumed.
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
           if (this.isPlaying && !this.isPaused) {
             this.togglePause();
           }
+          const ctx = this.audio && this.audio.ctx;
+          if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {});
         } else {
           if (this.audio) {
             this.audio.init();
