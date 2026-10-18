@@ -32,12 +32,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2.1.58">
+  <link rel="stylesheet" href="./style.css?v=2.1.59">
   <!-- What the update bar says this release brings, shown to anyone running an
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
+  <meta name="release-notes" content="Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -413,7 +413,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=2.1.40"></script>
+  <script src="./oddballz-app.js?v=2.1.45"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what

@@ -2248,3 +2248,8 @@ body:not(.in-game) .game-header .fs-btn { margin-left: auto; }
 }
 
 .game-header .fs-btn.hidden { display: none; }
+
+/* The pointer, hidden after a little stillness in Ambient Mode and fullscreen
+   play (updateIdleCursor). */
+body.cursor-idle,
+body.cursor-idle * { cursor: none !important; }

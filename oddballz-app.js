@@ -858,6 +858,9 @@
     }
   };
 
+  // How long the mouse rests before its pointer hides (Ambient Mode, fullscreen play).
+  const CURSOR_IDLE_MS = 2500;
+
   // Ambient Mode with no music sounding: how long each background lasts.
   const AMBIENT_SILENT_MS = 75000;
 
@@ -7367,6 +7370,11 @@ registerProcessor('odd-sid', OddSid);
         // not. Any modal added later belongs here, and its close button gets the
         // matching Esc chip.
         if (code === 'Escape' || key === 'Escape') {
+          // Fullscreen first: there Esc is the browser's way out. In fullscreen it
+          // leaves fullscreen and nothing else, and so does a press arriving just
+          // after the browser has already left it.
+          if (fullscreen.active()) { fullscreen.exit(); e.preventDefault(); return; }
+          if (performance.now() - (this.fullscreenLeftAt || -1e9) < 500) { e.preventDefault(); return; }
           // An armed End Game button is the innermost thing on screen, so Escape
           // disarms it before it considers closing a modal or resuming.
           if (this.endArmed) { this.disarmEndGame(); e.preventDefault(); return; }
@@ -7381,7 +7389,8 @@ registerProcessor('odd-sid', OddSid);
             const el = document.getElementById(id);
             if (el && !el.classList.contains('hidden')) { close(); closed = true; break; }
           }
-          if (!closed && this.isPlaying) this.togglePause();   // pause, or resume
+          // Esc no longer pauses: P does (the user, 17 Oct 2026), so Esc is free to
+          // mean leaving -- a dialog, a half-pressed End Game, fullscreen.
           e.preventDefault(); return;
         }
 
@@ -7494,6 +7503,8 @@ registerProcessor('odd-sid', OddSid);
         };
         const sync = () => {
           const on = fullscreen.active();
+          if (!on) this.fullscreenLeftAt = performance.now();
+          if (this.updateIdleCursor) this.updateIdleCursor();
           fsBtn.innerHTML = corners(!on);
           fsBtn.title = on ? 'Back to window (Esc)' : 'Fullscreen (Esc or F11 to leave)';
           fsBtn.setAttribute('aria-label', on ? 'Back to window' : 'Fullscreen');
@@ -7507,6 +7518,20 @@ registerProcessor('odd-sid', OddSid);
         document.addEventListener('webkitfullscreenchange', sync);
         sync();
       }
+
+      // The pointer hides after a little stillness in Ambient Mode and in a game
+      // played fullscreen, and comes back the moment the mouse moves (the user,
+      // 17 Oct 2026).
+      let cursorTimer = null;
+      this.updateIdleCursor = () => {
+        document.body.classList.remove('cursor-idle');
+        clearTimeout(cursorTimer);
+        cursorTimer = setTimeout(() => {
+          if (this.ambient || (this.isPlaying && fullscreen.active())) document.body.classList.add('cursor-idle');
+        }, CURSOR_IDLE_MS);
+      };
+      window.addEventListener('mousemove', () => this.updateIdleCursor(), { passive: true });
+      window.addEventListener('mousedown', () => this.updateIdleCursor(), { passive: true });
 
       // Ambient Mode: the title's button in; a tap on the screen shows its two
       // icons (and the background's name) for a few seconds; the icons skip on
@@ -7760,6 +7785,7 @@ registerProcessor('odd-sid', OddSid);
       // The header is a line shorter in a game (no mode tabs), and the board may
       // be another width: the HUD's layout is chosen again.
       this.updateHudLayout();
+      if (this.updateIdleCursor) this.updateIdleCursor();
       this.audio.startBGM();
     }
 
@@ -7868,6 +7894,7 @@ registerProcessor('odd-sid', OddSid);
       this.audio.setSong(BACKDROPS[R.backdropIndex].song, true);
       if (this.audio.enabled && this.audio.musicEnabled) this.audio.startBGM();
       this.showAmbientName(true);
+      if (this.updateIdleCursor) this.updateIdleCursor();
       this.ambientSince = performance.now();
       clearInterval(this.ambientTimer);
       this.ambientTimer = setInterval(() => {
@@ -7936,6 +7963,7 @@ registerProcessor('odd-sid', OddSid);
       this.applyBackdropChoice();
       this.playTitleSong();
       this.updateHudLayout();
+      document.body.classList.remove('cursor-idle');
       this.scheduleAttractIdle();
     }
 
@@ -9629,14 +9657,22 @@ registerProcessor('odd-sid', OddSid);
     const box = document.createElement('div');
     box.id = 'graphicsError';
     box.className = 'graphics-error';
+    // The graphics advice only when it is the graphics that failed: any other
+    // error at start (a fault in the game's own code) once showed it too, and
+    // sent the player looking at their browser for nothing.
+    const msg = String((err && err.message) || err || '');
+    const graphics = /webgl|shader|context|failgl/i.test(msg) || !window.WebGLRenderingContext;
     box.innerHTML =
       '<div class="graphics-error-card">' +
-      '<h2>Oddballz HD can\u2019t start</h2>' +
-      '<p>This browser couldn\u2019t start the 3D graphics the game needs (WebGL).</p>' +
-      '<p>Try updating your browser, or turning on hardware acceleration in its settings.</p>' +
+      '<h2>Oddballz HD can’t start</h2>' +
+      (graphics
+        ? '<p>This browser couldn’t start the 3D graphics the game needs (WebGL).</p>' +
+          '<p>Try updating your browser, or turning on hardware acceleration in its settings.</p>'
+        : '<p>Something went wrong starting the game.</p>' +
+          '<p>Reloading the page usually fixes it.</p>') +
       '<p class="graphics-error-detail"></p>' +
       '</div>';
-    box.querySelector('.graphics-error-detail').textContent = String((err && err.message) || err || '');
+    box.querySelector('.graphics-error-detail').textContent = msg;
     document.body.appendChild(box);
   }
 
