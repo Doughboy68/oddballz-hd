@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Oddballz HD - Hex Puzzle Game Engine</title>
+  <title>Quantum Oddballz</title>
 
   <!-- Home screen icon. Without an apple-touch-icon, Safari's Add to Home Screen
        falls back to a screenshot or the first letter of the title, which is why it
@@ -16,7 +16,7 @@
        The label under the icon comes from apple-mobile-web-app-title, or the
        <title> is used and truncated to something like "Oddballz HD - Hex...". -->
   <link rel="apple-touch-icon" href="./apple-touch-icon.png">
-  <meta name="apple-mobile-web-app-title" content="Oddballz HD">
+  <meta name="apple-mobile-web-app-title" content="Quantum Oddballz">
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
   <meta name="theme-color" content="#0a1024">
 
@@ -32,12 +32,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2.1.66">
+  <link rel="stylesheet" href="./style.css?v=2.1.69">
   <!-- What the update bar says this release brings, shown to anyone running an
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="In Hop movement the colour shift hops the balls round to their new places|Pieces turn in an arc, flip like a card and hop as they move (Movement: Smooth on the title switches back to the glide)|Fixed falling balls that could show half one colour and half another|Softer ball colours that reflect the background around them, with a rim of its light (the original look is Ball colours: Classic on the title)|The end game icon works on one press|Game over shows on the board, with a gentle chime and then the title music|The demo always plays on the Nebula background|PAUSED sits centred on the board|Sound stops when you leave the game, on the title too|A Tap for sound hint until the music can play|Music starts on the first tap on iPhone, and plays with the silent switch on|A new game fades in from black|A new title theme, Drift, and a calmer floating title logo|Paused shows how to resume and how to end the game|Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
+  <meta name="release-notes" content="Oddballz HD is now Quantum Oddballz, with its story under Story on the title. Every game travels through the sectors, from the starting sector you pick: its backgrounds are sectors, each named as you reach it, and game over is a field collapse|In Hop movement the colour shift hops the balls round to their new places|Pieces turn in an arc, flip like a card and hop as they move (Movement: Smooth on the title switches back to the glide)|Fixed falling balls that could show half one colour and half another|Softer ball colours that reflect the background around them, with a rim of its light (the original look is Ball colours: Classic on the title)|The end game icon works on one press|Game over shows on the board, with a gentle chime and then the title music|The demo always plays on the Nebula background|PAUSED sits centred on the board|Sound stops when you leave the game, on the title too|A Tap for sound hint until the music can play|Music starts on the first tap on iPhone, and plays with the silent switch on|A new game fades in from black|A new title theme, Drift, and a calmer floating title logo|Paused shows how to resume and how to end the game|Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -61,11 +61,14 @@
       <div id="startFade" class="start-fade" aria-hidden="true"></div>
       <div id="bannerChain" class="board-banner banner-chain" aria-live="polite"></div>
       <div id="bannerLevel" class="board-banner banner-level" aria-live="polite"></div>
+      <!-- The sector's name as a game reaches it: at the start, and at each change. -->
+      <div id="sectorFlash" class="sector-flash" aria-live="polite"><span class="sector-num"></span><span class="sector-name"></span></div>
       <!-- Game over, on the board as PAUSED is: the last board left in view, dimmed;
            the title, the score and what next, as a small HUD panel. -->
       <div id="gameOverDim" class="gameover-dim" aria-hidden="true"></div>
-      <div id="gameOverPanel" class="gameover-panel" role="dialog" aria-label="Game over">
-        <div class="gameover-title"><span class="title-letters" aria-hidden="true"><span>G</span><span>A</span><span>M</span><span>E</span><span class="gap"> </span><span>O</span><span>V</span><span>E</span><span>R</span></span></div>
+      <div id="gameOverPanel" class="gameover-panel" role="dialog" aria-label="Field collapse">
+        <div id="gameOverSector" class="gameover-sector"></div>
+        <div class="gameover-title" aria-label="Field collapse"><span class="title-letters" aria-hidden="true"><span>F</span><span>I</span><span>E</span><span>L</span><span>D</span></span><span class="title-letters" aria-hidden="true"><span>C</span><span>O</span><span>L</span><span>L</span><span>A</span><span>P</span><span>S</span><span>E</span></span></div>
         <div class="gameover-score">
           <span class="gameover-label">Final score</span>
           <span id="gameOverScore" class="gameover-value">0</span>
@@ -102,7 +105,7 @@
        keyboard. The background's name shows as each one arrives. -->
   <div id="ambientLayer" class="ambient-layer hidden" aria-live="polite">
     <div id="ambientControls" class="ambient-controls">
-      <button id="btnAmbientNext" class="board-icon" type="button" title="Next background (B)" aria-label="Next background">⏭️</button>
+      <button id="btnAmbientNext" class="board-icon" type="button" title="Next sector (B)" aria-label="Next sector">⏭️</button>
       <button id="btnAmbientExit" class="board-icon" type="button" title="Back to the title (Esc)" aria-label="Back to the title">✖️</button>
     </div>
     <div class="ambient-caption">
@@ -116,7 +119,7 @@
     <!-- Header Bar -->
     <header class="game-header glass-card">
       <div class="brand">
-        <h1 class="logo-text" aria-label="Oddballz HD"><span class="title-letters" aria-hidden="true"><span>O</span><span>D</span><span>D</span><span>B</span><span>A</span><span>L</span><span>L</span><span>Z</span></span> <span class="badge-hd" aria-hidden="true">HD</span></h1>
+        <h1 class="logo-text" aria-label="Quantum Oddballz"><span class="logo-kicker" aria-hidden="true">QUANTUM</span><span class="title-letters" aria-hidden="true"><span>O</span><span>D</span><span>D</span><span>B</span><span>A</span><span>L</span><span>L</span><span>Z</span></span></h1>
         <canvas id="spectrumCanvas" class="spectrum-canvas" aria-hidden="true"></canvas>
       </div>
 
@@ -127,7 +130,7 @@
         <button id="btnBoardPause" class="board-icon" type="button" title="Pause (P)" aria-label="Pause">⏸️</button>
         <button id="btnBoardAudio" class="board-icon" type="button" title="Audio options" aria-label="Audio options">🔊</button>
         <button id="btnBoardGuide" class="board-icon board-icon-guide" type="button" title="Controls guide" aria-label="Show or hide the controls guide">❔</button>
-        <button id="btnBgCycle" class="board-icon" type="button" title="Next background (B)" aria-label="Next background">🌌</button>
+        <button id="btnBgCycle" class="board-icon" type="button" title="Next sector (B)" aria-label="Next sector">🌌</button>
       </div>
       <button id="btnFullscreen" class="board-icon fs-btn hidden" type="button" title="Fullscreen" aria-label="Fullscreen">⤢</button>
 
@@ -186,7 +189,7 @@
       <div class="key-row"><kbd>X</kbd> <kbd>Y</kbd> <span class="key-alt"><kbd>Q</kbd> <kbd>E</kbd></span> Flip</div>
       <div class="key-row"><kbd class="key-highlight">F</kbd> Cycle Color</div>
       <div class="key-row"><kbd class="key-space">Space</kbd> Hard Drop</div>
-      <div class="key-row"><kbd>B</kbd> Background</div>
+      <div class="key-row"><kbd>B</kbd> Sector</div>
     </div>
 
     <!-- Start Overlay Modal -->
@@ -196,7 +199,7 @@
              here brings the music, and the pill goes once it plays. Inside the
              card, so nothing is under it to start by mistake. -->
         <div id="soundHint" class="sound-hint hidden" role="button" aria-label="Tap for sound">&#128266; Tap for sound</div>
-        <h2 class="modal-title title-logo" aria-label="Oddballz HD"><span class="title-word"><span class="title-letters" aria-hidden="true"><span>O</span><span>D</span><span>D</span><span>B</span><span>A</span><span>L</span><span>L</span><span>Z</span></span><span class="badge-hd" aria-hidden="true">HD</span></span></h2>
+        <h2 class="modal-title title-logo" aria-label="Quantum Oddballz"><span class="title-kicker" aria-hidden="true">QUANTUM</span><span class="title-word"><span class="title-letters" aria-hidden="true"><span>O</span><span>D</span><span>D</span><span>B</span><span>A</span><span>L</span><span>L</span><span>Z</span></span></span></h2>
 
         <div class="mode-summary">
           <div id="modeCardColorMatch" class="mode-info mode-card-selectable active" role="button" tabindex="0">
@@ -218,7 +221,7 @@
         <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem; margin:0.9rem 0 0.2rem;">
           <button id="btnDensePlayfield" class="btn btn-secondary btn-sm">⬢ Board: 9 wide (classic)</button>
           <button id="btnDifficulty" class="btn btn-secondary btn-sm">🎚️ Difficulty: Normal</button>
-          <button id="btnBackdrop" class="btn btn-secondary btn-sm">🌌 Background: All</button>
+          <button id="btnBackdrop" class="btn btn-secondary btn-sm">🌌 Starting sector: Cosmic Stellar Nebula</button>
           <button id="btnBallStyle" class="btn btn-secondary btn-sm">🎨 Ball colours: Theme</button>
           <button id="btnMotion" class="btn btn-secondary btn-sm">🌀 Movement: Hop</button>
           <p style="font-size:0.75rem; opacity:0.7; margin:0; color: var(--text-muted); max-width:36ch;">
@@ -233,7 +236,8 @@
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
             <button id="btnStartHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
             <button id="btnStartAudio" class="btn btn-secondary btn-sm">🔊 Audio Options</button>
-            <button id="btnStartAmbient" class="btn btn-secondary btn-sm" title="The backgrounds and their songs, nothing else">🎵 Ambient Mode</button>
+            <button id="btnStartAmbient" class="btn btn-secondary btn-sm" title="The sectors and their songs, nothing else">🎵 Ambient Mode</button>
+            <button id="btnStartStory" class="btn btn-secondary btn-sm">📖 Story</button>
             <button id="btnStartCredits" class="btn btn-secondary btn-sm" style="opacity: 0.9;">
               ℹ️ About &amp; Game Credits
             </button>
@@ -338,6 +342,35 @@
       </div>
     </div>
 
+    <!-- The story: the rift, the grid, the particles and the sectors, for anyone
+         who wants to know why the balls are falling. From the title card. -->
+    <div id="gameDialogStory" class="overlay-modal flex-center hidden">
+      <div class="modal-card glass-card text-center" style="max-width: 520px;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; width:100%; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.75rem;">
+          <h2 style="margin:0; font-size:1.4rem;">📖 THE RIFT</h2>
+          <button id="btnCloseStory" class="btn-close">&times;</button>
+        </div>
+        <div class="about-content story-content" style="text-align: left; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.92rem; line-height: 1.55; color: rgba(255, 255, 255, 0.9);">
+          <p>
+            A rift has torn open at the edge of known space, and it is leaking <strong>oddballz</strong>: unstable particles that drift loose in clusters of four.
+          </p>
+          <p>
+            Nothing can close it, and nothing sent in comes back. You have taken the job anyway &mdash; a one-way run in a lone containment rig whose hexagonal field grid pulls the oddballz out of the dark towards it, faster the longer it holds. Every cluster it draws in is yours to clean up: as many as you can, before the field gives out.
+          </p>
+          <p>
+            Line them up &mdash; by colour, or in full rows across the grid &mdash; and they cancel out. Let them pile up and the field collapses, and with it the mission. What you leave behind is the count: how much you cleared, and how far you got.
+          </p>
+          <p>
+            Some particles are stranger than others. <strong>Jokers</strong> exist in superposition, every colour at once until they are matched. <strong>Charged particles</strong> discharge along the grid&rsquo;s bottom row. <strong>Unstable cores</strong> go off where they land, taking their neighbours with them. And <strong>dead matter</strong> never reacts to a match &mdash; only a core or a discharge clears it, and if it falls it crushes whatever it lands on.
+          </p>
+          <p>
+            Six sectors lie ahead: the Cosmic Stellar Nebula, the Cyber Conduit Spaceframe, the Quantum Hyperspace Warp, the Alien Bio-Reactor Core, the Deep Space Citadel and the Orbital Solar Array. There is no way home through any of them. Make every one count.
+          </p>
+        </div>
+        <button id="btnStoryClose" class="btn btn-primary btn-lg" style="align-self: center; min-width: 140px;">Close <kbd class="key-hint">Esc</kbd></button>
+      </div>
+    </div>
+
     <!-- About & Credits Modal -->
     <div id="gameDialogAbout" class="overlay-modal flex-center hidden">
       <div class="modal-card glass-card text-center" style="max-width: 520px;">
@@ -348,13 +381,13 @@
         
         <div class="about-content" style="text-align: left; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.92rem; line-height: 1.5; color: rgba(255, 255, 255, 0.9);">
           <p>
-            The gameplay and the original Borland Pascal engine are <strong style="white-space: nowrap;">Fred Kohler</strong>'s. <strong style="white-space: nowrap;">Brian Semotiuk</strong> converted the game to Windows, adapting the code where the port required it, working on it from around 1992&ndash;93 and finalising the build in 1994. It was never fully finished and was never released. <strong>Oddballz HD</strong> ports that engine to JavaScript, with the aim of finally finishing what was started over thirty years ago.
+            The gameplay and the original Borland Pascal engine are <strong style="white-space: nowrap;">Fred Kohler</strong>'s. <strong style="white-space: nowrap;">Brian Semotiuk</strong> converted the game to Windows, adapting the code where the port required it, working on it from around 1992&ndash;93 and finalising the build in 1994. It was never fully finished and was never released. <strong>Quantum Oddballz</strong> ports that engine to JavaScript, with the aim of finally finishing what was started over thirty years ago.
           </p>
           <p>
             The matching, support and gravity rules are the original's, untouched. Around them: selectable board sizes, a game timer, high scores kept separately per mode and board, reworked levelling and scoring, and a number of long-standing bugs fixed. The presentation is rebuilt throughout &mdash; real-time 3D sphere physics, metallic shaders, dynamic space flight backdrops, Web Audio synthesis, smooth continuous motion in place of the original's step-by-step movement, and pieces that flip in place rather than pivoting end over end about a single ball.
           </p>
           <p>
-            Also in Oddballz HD: jokers, bombs, stones and row clearers among the balls, seven original songs, six animated space backgrounds drawn live, a next piece preview and a ghost preview.
+            Also in Quantum Oddballz: jokers, bombs, stones and row clearers among the balls, seven original songs, six animated space sectors drawn live, a next piece preview and a ghost preview.
           </p>
           <div style="background: rgba(255, 255, 255, 0.05); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.85rem; text-align: center; color: var(--accent-gold); font-weight: 600;">
             Code and graphics/design copyright &copy; <span style="white-space: nowrap;">Brian Semotiuk</span> and <span style="white-space: nowrap;">Fred Kohler</span>.
@@ -438,7 +471,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=2.1.96"></script>
+  <script src="./oddballz-app.js?v=2.1.105"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what

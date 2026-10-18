@@ -1,5 +1,5 @@
 /**
- * oddballz-app.js - Standalone Oddballz HD Game Engine
+ * oddballz-app.js - Standalone Quantum Oddballz Game Engine (formerly Oddballz HD)
  * Compatible with direct file:// loading in browser & local web servers.
  * Uses global THREE and confetti.
  */
@@ -314,19 +314,21 @@
   // the conduits' cyans and blue, the warp's blues and violet, the reactor's
   // greens, the citadel's crimson lights and steel, the array's sun from white
   // to red. Spread along the word, drifting slowly through it.
-  // ALL, the default, plays each background in turn, as the C64 build's does; any
-  // other choice holds that one for the whole game.
-  const BACKDROP_ALL = -1;
+  // A game always travels through the sectors in turn, as the C64 build's does;
+  // the choice on the title card is only where it starts, the Nebula unless
+  // another is picked. There used to be ALL beside a choice of one held for the
+  // whole game; the user dropped holding one (18 Oct 2026), so a stored ALL (-1)
+  // now reads as the Nebula.
   const BACKDROP_KEY = 'oddballz_hd_backdrop';
   function storedBackdrop() {
     try {
       const raw = localStorage.getItem(BACKDROP_KEY);
       if (raw !== null) {
         const v = parseInt(raw, 10);
-        if (v >= BACKDROP_ALL && v < BACKDROPS.length) return v;
+        if (v >= 0 && v < BACKDROPS.length) return v;
       }
     } catch (e) {}
-    return BACKDROP_ALL;
+    return 0;
   }
 
   // The row pieces spawn on, and the first row of the visible playfield. Rows above
@@ -7733,6 +7735,9 @@ registerProcessor('odd-sid', OddSid);
       document.getElementById('gameOverScore').textContent = score.toLocaleString();
       document.getElementById('gameOverStats').textContent = 'Level ' + level + ' \u00b7 ' + lines + ' lines';
       document.querySelector('.gameover-score').classList.toggle('best', !!best);
+      // Where the field collapsed: the sector, as its flash named it.
+      const bi = this.renderer.backdropIndex, back = BACKDROPS[bi];
+      document.getElementById('gameOverSector').textContent = back ? 'Sector ' + (bi + 1) + ' · ' + back.label : '';
       document.body.classList.add('is-gameover');
       this.positionGameOverPanel();
     }
@@ -7984,9 +7989,8 @@ registerProcessor('odd-sid', OddSid);
     }
 
     applyBackdropChoice() {
-      const b = storedBackdrop();
-      this.backdropAll = (b === BACKDROP_ALL);
-      this.renderer.setBackdrop(this.backdropAll ? 0 : b);
+      this.backdropAll = true;                  // always on through the sectors
+      this.renderer.setBackdrop(storedBackdrop());
     }
 
     // One pass of a landing's resolve, when the last has finished: its fallen
@@ -8143,6 +8147,21 @@ registerProcessor('odd-sid', OddSid);
       const next = (this.renderer.backdropIndex + 1) % BACKDROPS.length;
       this.renderer.setBackdrop(next);
       this.audio.setSong(BACKDROPS[next].song, true);
+      if (this.isPlaying) this.showSectorFlash();
+    }
+
+    // SECTOR n and its name over the board, as a game reaches it -- the
+    // backgrounds as the stages of a journey (the user, 18 Oct 2026). Restarted
+    // rather than queued, so a quick run of changes shows the latest.
+    showSectorFlash() {
+      const el = document.getElementById('sectorFlash');
+      const i = this.renderer.backdropIndex, back = BACKDROPS[i];
+      if (!el || !back) return;
+      el.querySelector('.sector-num').textContent = 'SECTOR ' + (i + 1);
+      el.querySelector('.sector-name').textContent = back.label;
+      el.classList.remove('show');
+      void el.offsetWidth;
+      el.classList.add('show');
     }
 
     // Start or stop the music to match the sound settings and where the player is:
@@ -8239,6 +8258,7 @@ registerProcessor('odd-sid', OddSid);
           const dismissable = [
             ['gameDialogView', () => this.closeHighScoresModal()],
             ['gameDialogAbout', () => this.closeAboutModal()],
+            ['gameDialogStory', () => this.closeStoryModal()],
             ['gameDialogAudio', () => this.closeAudioModal()]
           ];
           let closed = false;
@@ -8415,6 +8435,14 @@ registerProcessor('odd-sid', OddSid);
       ['btnCloseAbout', 'btnAboutClose'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.addEventListener('click', () => this.closeAboutModal());
+      });
+
+      // The story, from the title card only.
+      const storyBtn = document.getElementById('btnStartStory');
+      if (storyBtn) storyBtn.addEventListener('click', () => this.showStoryModal());
+      ['btnCloseStory', 'btnStoryClose'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.addEventListener('click', () => this.closeStoryModal());
       });
 
       // Both entry points: the in-game header and the title screen. Audio was
@@ -8630,6 +8658,9 @@ registerProcessor('odd-sid', OddSid);
       this.resolveNextAt = 0;
       this.sweepAnim = false;
       this.applyBackdropChoice();
+      // The first sector named once the fade from black has cleared.
+      clearTimeout(this.sectorFlashTimer);
+      this.sectorFlashTimer = setTimeout(() => { if (this.isPlaying) this.showSectorFlash(); }, 700);
       this.audio.init();
       this.audio.setSong(BACKDROPS[this.renderer.backdropIndex].song, true);
       this.engine.initGame();
@@ -8869,7 +8900,7 @@ registerProcessor('odd-sid', OddSid);
       if (this.isPlaying) return false;
       const start = document.getElementById('overlayStart');
       if (!start || start.classList.contains('hidden')) return false;
-      const blockers = ['gameDialogView', 'gameDialogAbout', 'gameDialogAudio',
+      const blockers = ['gameDialogView', 'gameDialogAbout', 'gameDialogStory', 'gameDialogAudio',
                         'overlayPause', 'overlayGameOver'];
       for (const id of blockers) {
         const el = document.getElementById(id);
@@ -10466,6 +10497,16 @@ registerProcessor('odd-sid', OddSid);
       document.body.classList.remove('end-armed');
     }
 
+    showStoryModal() {
+      const modal = document.getElementById('gameDialogStory');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    closeStoryModal() {
+      const modal = document.getElementById('gameDialogStory');
+      if (modal) modal.classList.add('hidden');
+    }
+
     closeAboutModal() {
       const modal = document.getElementById('gameDialogAbout');
       if (modal) modal.classList.add('hidden');
@@ -10577,7 +10618,7 @@ registerProcessor('odd-sid', OddSid);
     const graphics = /webgl|shader|context|failgl/i.test(msg) || !window.WebGLRenderingContext;
     box.innerHTML =
       '<div class="graphics-error-card">' +
-      '<h2>Oddballz HD can’t start</h2>' +
+      '<h2>Quantum Oddballz can’t start</h2>' +
       (graphics
         ? '<p>This browser couldn’t start the 3D graphics the game needs (WebGL).</p>' +
           '<p>Try updating your browser, or turning on hardware acceleration in its settings.</p>'
@@ -10690,18 +10731,17 @@ registerProcessor('odd-sid', OddSid);
       });
     }
 
-    // Background cycles in place like difficulty, and shows at once behind the
-    // title so the choice can be seen being made.
+    // The starting sector cycles in place like difficulty, and shows at once
+    // behind the title so the choice can be seen being made.
     const btnBackdrop = document.getElementById('btnBackdrop');
     if (btnBackdrop) {
       const paintBackdrop = (b) => {
-        btnBackdrop.textContent = '🌌 Background: ' + (b === BACKDROP_ALL ? 'All' : BACKDROPS[b].label);
-        btnBackdrop.classList.toggle('active', b !== BACKDROP_ALL);
+        btnBackdrop.textContent = '🌌 Starting sector: ' + BACKDROPS[b].label;
+        btnBackdrop.classList.toggle('active', b !== 0);
       };
       paintBackdrop(storedBackdrop());
       btnBackdrop.addEventListener('click', () => {
-        const cur = storedBackdrop();
-        const next = cur + 1 >= BACKDROPS.length ? BACKDROP_ALL : cur + 1;
+        const next = (storedBackdrop() + 1) % BACKDROPS.length;
         try { localStorage.setItem(BACKDROP_KEY, String(next)); } catch (e) {}
         paintBackdrop(next);
         window.oddApp.applyBackdropChoice();
