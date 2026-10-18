@@ -2139,3 +2139,112 @@ body.guide-blocked .board-icon-guide { display: none !important; }
     letter-spacing: 0.04em;
   }
 }
+
+/* ===== Ambient Mode =====
+   The backgrounds and their songs alone: no board, no HUD, no controls (the
+   user, 17 Oct 2026). A layer over everything takes the tap that leaves, and
+   carries the background's name as each one arrives, fading after a while. */
+body.ambient #uiOverlay,
+body.ambient #bottomControlsBar { display: none !important; }
+
+.ambient-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: max(2.2rem, env(safe-area-inset-bottom, 0px));
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ambient-caption {
+  text-align: center;
+  pointer-events: none;
+}
+
+.ambient-name {
+  font-weight: 800;
+  font-size: clamp(1.1rem, 3.4vw, 1.9rem);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--hud-a);
+  text-shadow: 0 0 18px var(--hud-a), 0 2px 0 rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+
+.ambient-name.show { opacity: 1; }
+
+.ambient-hint {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(220, 230, 245, 0.7);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+
+.ambient-hint.show { opacity: 1; }
+
+/* Ambient Mode's two icons, next and exit, top right: shown by a tap for a few
+   seconds, then gone so nothing sits over the picture. */
+.ambient-controls {
+  position: absolute;
+  top: max(1rem, env(safe-area-inset-top, 0px));
+  right: 1rem;
+  display: flex;
+  gap: 0.6rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.ambient-controls.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ambient-controls .board-icon {
+  width: 3rem;
+  height: 3rem;
+  font-size: 1.3rem;
+  opacity: 0.9;
+}
+
+/* Fullscreen, at the top bar's right-hand end at any time (the user, 17 Oct
+   2026); hidden where the browser cannot do it (iPhone). On a phone it shows
+   on the title only: in a game the bar has no room to spare, and Ambient Mode
+   goes fullscreen by itself. */
+.game-header .fs-btn { margin-left: 0.35rem; flex-shrink: 0; }
+body:not(.in-game) .game-header .fs-btn { margin-left: auto; }
+
+@media (max-width: 600px) {
+  body.in-game .game-header .fs-btn { display: none; }
+}
+
+/* The title's F11 hint: only where there is a keyboard to press it on. */
+.fullscreen-hint {
+  display: none;
+  margin: 0;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fullscreen-hint { display: block; }
+}
+
+/* The fullscreen icon's drawn corners, centred, in the HUD's colour. */
+.game-header .fs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--hud-a) 70%, #e6edf7);
+}
+
+.game-header .fs-btn.hidden { display: none; }

@@ -32,12 +32,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2.1.54">
+  <link rel="stylesheet" href="./style.css?v=2.1.58">
   <!-- What the update bar says this release brings, shown to anyone running an
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
+  <meta name="release-notes" content="Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -78,6 +78,20 @@
     </footer>
   </div>
 
+  <!-- Ambient Mode: the backgrounds and their songs alone. A tap brings up its two
+       icons, next and exit, for a few seconds; Esc and B do the same from a
+       keyboard. The background's name shows as each one arrives. -->
+  <div id="ambientLayer" class="ambient-layer hidden" aria-live="polite">
+    <div id="ambientControls" class="ambient-controls">
+      <button id="btnAmbientNext" class="board-icon" type="button" title="Next background (B)" aria-label="Next background">⏭️</button>
+      <button id="btnAmbientExit" class="board-icon" type="button" title="Back to the title (Esc)" aria-label="Back to the title">✖️</button>
+    </div>
+    <div class="ambient-caption">
+      <div id="ambientName" class="ambient-name"></div>
+      <div id="ambientHint" class="ambient-hint">Tap the screen for controls</div>
+    </div>
+  </div>
+
   <!-- HUD Glassmorphic Overlay (Header, Stats, Modals) -->
   <div id="uiOverlay">
     <!-- Header Bar -->
@@ -96,6 +110,7 @@
         <button id="btnBoardGuide" class="board-icon board-icon-guide" type="button" title="Controls guide" aria-label="Show or hide the controls guide">❔</button>
         <button id="btnBgCycle" class="board-icon" type="button" title="Next background (B)" aria-label="Next background">🌌</button>
       </div>
+      <button id="btnFullscreen" class="board-icon fs-btn hidden" type="button" title="Fullscreen" aria-label="Fullscreen">⤢</button>
 
       <!-- Mode Selector Tabs -->
       <div class="mode-tabs">
@@ -193,10 +208,12 @@
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center;">
             <button id="btnStartHighScores" class="btn btn-secondary btn-sm">🏆 High Scores</button>
             <button id="btnStartAudio" class="btn btn-secondary btn-sm">🔊 Audio Options</button>
+            <button id="btnStartAmbient" class="btn btn-secondary btn-sm" title="The backgrounds and their songs, nothing else">🎵 Ambient Mode</button>
             <button id="btnStartCredits" class="btn btn-secondary btn-sm" style="opacity: 0.9;">
               ℹ️ About &amp; Game Credits
             </button>
           </div>
+          <p class="fullscreen-hint">Press <kbd>F11</kbd> to toggle fullscreen</p>
           <!-- text-align is set here, not left to the card's `text-center` class:
                that class is used on five modal cards but is not defined anywhere in
                style.css, so it centres nothing. The flex parent shrink-wraps this
@@ -396,7 +413,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=2.1.37"></script>
+  <script src="./oddballz-app.js?v=2.1.40"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what

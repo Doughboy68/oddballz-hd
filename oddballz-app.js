@@ -843,6 +843,24 @@
   // Whether the controls guide is showing (the ? icon on the board).
   const GUIDE_KEY = 'oddballz_hd_guide';
 
+  // Fullscreen, through the Fullscreen API where there is one (not on iPhone).
+  const fullscreen = {
+    supported: () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled),
+    active: () => !!(document.fullscreenElement || document.webkitFullscreenElement),
+    enter() {
+      const el = document.documentElement;
+      const f = el.requestFullscreen || el.webkitRequestFullscreen;
+      try { const r = f && f.call(el); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+    },
+    exit() {
+      const f = document.exitFullscreen || document.webkitExitFullscreen;
+      try { const r = f && f.call(document); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+    }
+  };
+
+  // Ambient Mode with no music sounding: how long each background lasts.
+  const AMBIENT_SILENT_MS = 75000;
+
   // The bars in the spectrum beside the header logo.
   const SPEC_BARS = 14;
 
@@ -7090,6 +7108,11 @@ registerProcessor('odd-sid', OddSid);
         this.logoBurst();
       };
       this.audio.onSongLoop = (id, loops) => {
+        if (this.ambient) {
+          const cur = BACKDROPS[this.renderer.backdropIndex];
+          if (loops >= SONG_PLAYS && cur && cur.song === id) this.ambientNext();
+          return;
+        }
         if (!this.isPlaying || !this.backdropAll || loops < SONG_PLAYS) return;
         const cur = BACKDROPS[this.renderer.backdropIndex];
         if (cur && cur.song === id) this.stepTheme();
@@ -7268,7 +7291,7 @@ registerProcessor('odd-sid', OddSid);
     // left. The M key and the Audio Options switches all come through here.
     syncMusicPlayback() {
       if (this.audio.enabled && this.audio.musicEnabled && (!this.isPlaying || !this.isPaused || this.wasPausedByModal)) {
-        if (this.isPlaying) this.audio.startBGM(); else this.playTitleSong();
+        if (this.isPlaying || this.ambient) this.audio.startBGM(); else this.playTitleSong();
       } else {
         this.audio.stopBGM();
       }
@@ -7301,6 +7324,14 @@ registerProcessor('odd-sid', OddSid);
       window.addEventListener('keydown', (e) => {
         const code = e.code;
         const key = e.key;
+
+        // Ambient Mode: B or right arrow for the next background, M as ever,
+        // Esc, Enter or Space back to the title; nothing else.
+        if (this.ambient) {
+          if (code === 'KeyB' || code === 'ArrowRight') { if (!e.repeat) this.ambientNext(); e.preventDefault(); return; }
+          if (code === 'Escape' || code === 'Enter' || code === 'NumpadEnter' || code === 'Space') { this.exitAmbient(); e.preventDefault(); return; }
+          if (code !== 'KeyM') return;
+        }
 
         // Any key dismisses the attract demo back to the title; Enter then starts.
         if (this.attractActive) this.exitAttract(true);
@@ -7445,6 +7476,51 @@ registerProcessor('odd-sid', OddSid);
         const btn = document.getElementById(id);
         if (btn) btn.addEventListener('click', () => this.showAboutModal());
       });
+
+      // Fullscreen: the top bar's icon, shown only where the browser can do it,
+      // its glyph and title following the state however it changes (the icon,
+      // Ambient Mode, F11-style exits by the browser's own Esc).
+      const fsBtn = document.getElementById('btnFullscreen');
+      if (fsBtn && fullscreen.supported()) {
+        fsBtn.classList.remove('hidden');
+        // Drawn rather than a text arrow, which fonts render differently or not at
+        // all: four corners pointing out to go fullscreen, in to come back.
+        const corners = (out) => {
+          const d = out
+            ? 'M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5'
+            : 'M8 3v5H3M21 8h-5V3M16 21v-5h5M3 16h5v5';
+          return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
+            'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + d + '"/></svg>';
+        };
+        const sync = () => {
+          const on = fullscreen.active();
+          fsBtn.innerHTML = corners(!on);
+          fsBtn.title = on ? 'Back to window (Esc)' : 'Fullscreen (Esc or F11 to leave)';
+          fsBtn.setAttribute('aria-label', on ? 'Back to window' : 'Fullscreen');
+          requestAnimationFrame(() => { this.renderer.onWindowResize(); this.updateHudLayout(); });
+        };
+        fsBtn.addEventListener('click', (ev) => {
+          ev.preventDefault(); fsBtn.blur();
+          if (fullscreen.active()) fullscreen.exit(); else fullscreen.enter();
+        });
+        document.addEventListener('fullscreenchange', sync);
+        document.addEventListener('webkitfullscreenchange', sync);
+        sync();
+      }
+
+      // Ambient Mode: the title's button in; a tap on the screen shows its two
+      // icons (and the background's name) for a few seconds; the icons skip on
+      // or go back to the title.
+      const ambientBtn = document.getElementById('btnStartAmbient');
+      if (ambientBtn) ambientBtn.addEventListener('click', () => this.enterAmbient());
+      const ambientLayer = document.getElementById('ambientLayer');
+      if (ambientLayer) ambientLayer.addEventListener('click', () => this.showAmbientControls());
+      const ambNext = document.getElementById('btnAmbientNext');
+      if (ambNext) ambNext.addEventListener('click', (ev) => {
+        ev.stopPropagation(); ambNext.blur(); this.ambientNext(); this.showAmbientControls();
+      });
+      const ambExit = document.getElementById('btnAmbientExit');
+      if (ambExit) ambExit.addEventListener('click', (ev) => { ev.stopPropagation(); this.exitAmbient(); });
 
       ['btnCloseAbout', 'btnAboutClose'].forEach(id => {
         const btn = document.getElementById(id);
@@ -7755,6 +7831,111 @@ registerProcessor('odd-sid', OddSid);
       this.renderer.updateScene(this.engine);
       this.updateUI();
 
+      this.scheduleAttractIdle();
+    }
+
+    // ===== Ambient Mode =====
+    // The backgrounds and their songs alone, cycling as ALL does in a game: each
+    // song SONG_PLAYS times, then the next background crossfades in with its
+    // song (the user, 17 Oct 2026). No board, no HUD, no controls; the name of
+    // each background shows as it arrives. A tap, Esc, Enter or Space goes back
+    // to the title; B or the right arrow skips on. The screen is kept awake
+    // where the browser allows it. With music off, a background lasts
+    // AMBIENT_SILENT_MS instead. On a phone a tap brings up next and exit icons
+    // rather than leaving at once, so a stray touch cannot end it (the user).
+    enterAmbient() {
+      if (this.isPlaying || this.ambient) return;
+      if (this.attractActive) this.exitAttract(false);
+      if (this.attractIdleTimer) { clearTimeout(this.attractIdleTimer); this.attractIdleTimer = null; }
+      this.ambient = true;
+      // Fullscreen for it, if not already, and back out on leaving.
+      this.ambientMadeFullscreen = false;
+      if (fullscreen.supported() && !fullscreen.active()) {
+        fullscreen.enter();
+        this.ambientMadeFullscreen = true;
+      }
+      document.body.classList.add('ambient');
+      document.getElementById('overlayStart').classList.add('hidden');
+      document.getElementById('ambientLayer').classList.remove('hidden');
+      const R = this.renderer;
+      this.ambientHidden = [R.boardGroup, R.ballsGroup, R.activeGroup, R.ghostGroup]
+        .filter(g => g && g.visible);
+      this.ambientHidden.forEach(g => { g.visible = false; });
+      if (R.glowGroup) R.glowGroup.visible = false;
+      this.particles.clearAll();
+      requestAnimationFrame(() => R.onWindowResize());
+      this.audio.init();
+      this.audio.setSong(BACKDROPS[R.backdropIndex].song, true);
+      if (this.audio.enabled && this.audio.musicEnabled) this.audio.startBGM();
+      this.showAmbientName(true);
+      this.ambientSince = performance.now();
+      clearInterval(this.ambientTimer);
+      this.ambientTimer = setInterval(() => {
+        if (this.ambient && !this.audio.songAudible() &&
+            performance.now() - this.ambientSince > AMBIENT_SILENT_MS) this.ambientNext();
+      }, 1000);
+      try {
+        if (navigator.wakeLock) navigator.wakeLock.request('screen').then(l => { this.ambientLock = l; }).catch(() => {});
+      } catch (e) {}
+    }
+
+    ambientNext() {
+      if (!this.ambient) return;
+      this.stepTheme();
+      this.ambientSince = performance.now();
+      this.showAmbientName(false);
+    }
+
+    // The two icons for a few seconds, with the background's name.
+    showAmbientControls() {
+      if (!this.ambient) return;
+      const c = document.getElementById('ambientControls');
+      if (c) c.classList.add('show');
+      this.showAmbientName(false);
+      clearTimeout(this.ambientControlsTimer);
+      this.ambientControlsTimer = setTimeout(() => { if (c) c.classList.remove('show'); }, 4000);
+    }
+
+    // The background's name, for a while; the hint with the first.
+    showAmbientName(withHint) {
+      const name = document.getElementById('ambientName');
+      const hint = document.getElementById('ambientHint');
+      const back = BACKDROPS[this.renderer.backdropIndex];
+      if (name) {
+        name.textContent = back ? back.label : '';
+        name.classList.add('show');
+      }
+      if (hint && withHint) hint.classList.add('show');
+      clearTimeout(this.ambientNameTimer);
+      this.ambientNameTimer = setTimeout(() => {
+        if (name) name.classList.remove('show');
+        if (hint) hint.classList.remove('show');
+      }, 5000);
+    }
+
+    exitAmbient() {
+      if (!this.ambient) return;
+      this.ambient = false;
+      clearInterval(this.ambientTimer);
+      clearTimeout(this.ambientNameTimer);
+      clearTimeout(this.ambientControlsTimer);
+      document.getElementById('ambientControls').classList.remove('show');
+      document.body.classList.remove('ambient');
+      document.getElementById('ambientLayer').classList.add('hidden');
+      document.getElementById('ambientName').classList.remove('show');
+      document.getElementById('ambientHint').classList.remove('show');
+      document.getElementById('overlayStart').classList.remove('hidden');
+      (this.ambientHidden || []).forEach(g => { g.visible = true; });
+      this.ambientHidden = null;
+      if (this.renderer.glowGroup) this.renderer.glowGroup.visible = true;
+      requestAnimationFrame(() => this.renderer.onWindowResize());
+      try { if (this.ambientLock) this.ambientLock.release(); } catch (e) {}
+      this.ambientLock = null;
+      if (this.ambientMadeFullscreen && fullscreen.active()) fullscreen.exit();
+      this.ambientMadeFullscreen = false;
+      this.applyBackdropChoice();
+      this.playTitleSong();
+      this.updateHudLayout();
       this.scheduleAttractIdle();
     }
 
