@@ -2453,22 +2453,24 @@
   /* drift - the title's song since 17 Oct 2026 (the user: the bouncing tune
    * "sounds too upbeat" for the space themes). Setting out on a mission
    * through the backgrounds' places: "a bit hopeful but gloomy". New to HD, in
-   * the songs' own format. D Dorian, 83 BPM -- minor, with the raised sixth's
+   * the songs' own format. D Dorian, 94 BPM -- minor, with the raised sixth's
    * lift in the G major chord: Dm9 G(add9) Bbmaj7 Csus2.
    *
    * The intro is distant pings like a sonar over a pad swelling in and a low
    * drone, no time kept. Then the engines: a soft pulse of eighths in the bass
    * and a quiet kick on each bar's first beat, under a lead that reaches up
-   * from D. The B lifts through Bb C Am Dm and Bb C F, high, and hangs on a
-   * suspended A that pulls back down into D minor -- the hope always returning
-   * to the gloom.
+   * from D. The B lifts through Bb C Am Dm and Bb C F, high, and ends on a
+   * bright C that turns back into D minor -- the hope always returning to the
+   * gloom, but on a lift rather than a pull down.
    *
    * Written first in D minor at 75 BPM, no pulse ("kinda dark"), then in F
-   * major (lighter, but not the mission the user meant). */
+   * major (lighter, but not the mission the user meant), then as now at 83 BPM
+   * ending B on a suspended A, with a darker pad ("maybe a bit too dark
+   * still"): a notch quicker, the pad opened up, B ending bright. */
   SONGS.push({
     id: 'title',
     title: 'Drift',
-    speed: 9,
+    speed: 8,
     rowsPerBeat: 4,
     rowsPerBar: 16,
     fx: { voice: 2, hand: 'next' },       // the effects borrow the bass
@@ -2480,7 +2482,7 @@
       ddrone: { adsr: [8, 11, 11, 11], wave: [['T', 0]] },
       dpulse: { adsr: [0, 7, 3, 6], wave: [['T', 0]] },
       dpad:   { adsr: [9, 11, 10, 12], wave: [['P', 0]], pulse: [0x600, 0x08, 0x400, 0x900], arpSpeed: 6,
-                filter: { mode: 'LP', res: 8, cutoff: [0x200, 0x03, 0x180, 0x500], bounce: true } },
+                filter: { mode: 'LP', res: 8, cutoff: [0x380, 0x03, 0x280, 0x700], bounce: true } },
       dkick:  { adsr: [0, 6, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
                 wave: [['T', '=C3'], ['T', '=G2'], ['T', '=D2'], ['T', '=A1'], ['T', '=F1']] },
     },
@@ -2513,7 +2515,7 @@
         'D6 . . . | . . . . | . . F6 . | . . . . ' +
         'E6 . . . | . . . . | . . G6 . | . . . . ' +
         'F6 . . . | . . E6 . | . . C6 . | . . A5 . ' +
-        'D6 . . . | . . . . | . . . . | ^ . . .',
+        'G5 . . . | . . . . | E6 . . . | ^ . . .',
 
       // the drone, for the intro: a whole bar on each root
       drone: 'C2:ddrone . . . | . . . . | . . . . | . . . .',
@@ -2544,9 +2546,9 @@
       },
       B: {
         v1: ['leadB@dsig2'],
-        v2: ['pulse-2', 'pulse', 'pulse-3', 'pulse+2', 'pulse-2', 'pulse', 'pulse+5', 'pulse-3'],
+        v2: ['pulse-2', 'pulse', 'pulse-3', 'pulse+2', 'pulse-2', 'pulse', 'pulse+5', 'pulse'],
         v3: ['padMaj7-2', 'padMaj', 'padMin7-3', 'padMin9+2',
-             'padMaj7-2', 'padMaj', 'padMaj7+5', 'padSus4-3'],
+             'padMaj7-2', 'padMaj', 'padMaj7+5', 'padMaj'],
       },
     },
     order: ['Intro', 'A', 'B'],
