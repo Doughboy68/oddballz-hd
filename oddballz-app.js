@@ -7838,6 +7838,17 @@ registerProcessor('odd-sid', OddSid);
 
     startGame() {
       if (this.updateOffer) document.getElementById('updateBar').classList.add('hidden');
+      // The board and its background fade up out of black.
+      const fade = document.getElementById('startFade');
+      if (fade) {
+        fade.classList.remove('out');
+        fade.classList.add('on');
+        void fade.offsetWidth;                        // the black drawn before it fades
+        requestAnimationFrame(() => {
+          fade.classList.remove('on');
+          fade.classList.add('out');
+        });
+      }
       // The on-board background button is for games only (style.css, .in-game).
       document.body.classList.add('in-game');
       if (this.attractActive) this.exitAttract(false);

@@ -2296,3 +2296,18 @@ body.end-armed .paused-hint .hint-armed {
 /* PAUSED and the line under it, both centred: the line is the wider, and the
    word sat at its left edge (the user, 17 Oct 2026, on a phone). */
 .paused-label { text-align: center; }
+
+/* A new game's first sight of the board and its background, faded up out of
+   black (the user, 17 Oct 2026). Over the canvas only, under the banners and
+   the bars, and never in the way of a touch. */
+.start-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.start-fade.on { opacity: 1; transition: none; }
+.start-fade.out { opacity: 0; transition: opacity 1.5s ease-out; }
