@@ -37,7 +37,7 @@
        older version. Lines split on |: the first is the headline, the rest a short
        list; start a line with ! for something the player has to do. Rewrite it
        with each release, alongside the ?v= numbers. -->
-  <meta name="release-notes" content="Game over shows on the board, with a gentle chime and then the title music|The demo always plays on the Nebula background|PAUSED sits centred on the board|Sound stops when you leave the game, on the title too|A Tap for sound hint until the music can play|Music starts on the first tap on iPhone, and plays with the silent switch on|A new game fades in from black|A new title theme, Drift, and a calmer floating title logo|Paused shows how to resume and how to end the game|Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
+  <meta name="release-notes" content="Pieces turn in an arc, flip like a card and hop as they move (Movement: Smooth on the title switches back to the glide)|Fixed falling balls that could show half one colour and half another|Softer ball colours that reflect the background around them, with a rim of its light (the original look is Ball colours: Classic on the title)|The end game icon works on one press|Game over shows on the board, with a gentle chime and then the title music|The demo always plays on the Nebula background|PAUSED sits centred on the board|Sound stops when you leave the game, on the title too|A Tap for sound hint until the music can play|Music starts on the first tap on iPhone, and plays with the silent switch on|A new game fades in from black|A new title theme, Drift, and a calmer floating title logo|Paused shows how to resume and how to end the game|Esc no longer pauses (P does) and leaves fullscreen cleanly|The mouse pointer hides in Ambient Mode and fullscreen play|Ambient Mode: the backgrounds and their songs, nothing else, fullscreen|A fullscreen button in the top bar|Backgrounds crossfade into each other|The on-screen controls restyled to match, in each background's colours|The platform takes on each background's colour|Bigger icons on phones|A cleaner play screen: two slim bars up top in the background's colours, pause and sound as icons, and pausing without a dialog|The score strip no longer covers the board in in-between window sizes|A spectrum analyser beside the logo, in each background's colours|The ODDBALLZ logo dances on the title screen, and in a game takes the background's colours and hops on chains and new levels|Two row clearers in one match now clear two rows, three clear three|The row clearer starts from the nearer end and rolls the whole row|The score and controls cards no longer cover the board in narrow or short windows|NEXT is bigger, and every piece shows at the same ball size|The row sweep no longer leaves an unusable bottom row|The clearing ball flies to the nearer corner and sweeps the row slower|Chains pause longer between each match|B and the background button keep the backgrounds cycling|Backgrounds go by their full names|The demo waits until you stop using the title screen|M now unmutes the music as well as muting it">
   
   <!-- Standalone Global Libraries (Compatible with file:// local opening & http://) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -79,7 +79,7 @@
         </div>
         <div class="gameover-hint">Enter to play again</div>
       </div>
-      <div id="pausedLabel" class="paused-label" aria-live="polite" aria-label="Paused"><span class="title-letters" aria-hidden="true"><span>P</span><span>A</span><span>U</span><span>S</span><span>E</span><span>D</span></span><span class="paused-hint"><span class="hint-normal"><span class="kb">P to resume &middot; E or &#9209; twice to end the game</span><span class="touch">&#9654; to resume &middot; &#9209; twice to end the game</span></span><span class="hint-armed"><span class="kb">Press E or &#9209; again to end the game</span><span class="touch">Press &#9209; again to end the game</span></span></span></div>
+      <div id="pausedLabel" class="paused-label" aria-live="polite" aria-label="Paused"><span class="title-letters" aria-hidden="true"><span>P</span><span>A</span><span>U</span><span>S</span><span>E</span><span>D</span></span><span class="paused-hint"><span class="hint-normal"><span class="kb">&#9654; or P to resume &middot; &#9209; or E to end the game</span><span class="touch">&#9654; to resume &middot; &#9209; to end the game</span></span><span class="hint-armed"><span class="kb">Press E again to end the game</span><span class="touch">Press E again to end the game</span></span></span></div>
     </main>
 
     <!-- Dedicated Controls Panel Physically Below 3D Playfield -->
@@ -123,7 +123,7 @@
       <!-- In a game: end (while paused), pause, sound, the controls guide and the
            next background, as icons at the header's right-hand end. -->
       <div class="board-icons">
-        <button id="btnBoardEnd" class="board-icon board-icon-end" type="button" title="End game (E): press twice" aria-label="End game">⏹️</button>
+        <button id="btnBoardEnd" class="board-icon board-icon-end" type="button" title="End game (E)" aria-label="End game">⏹️</button>
         <button id="btnBoardPause" class="board-icon" type="button" title="Pause (P)" aria-label="Pause">⏸️</button>
         <button id="btnBoardAudio" class="board-icon" type="button" title="Audio options" aria-label="Audio options">🔊</button>
         <button id="btnBoardGuide" class="board-icon board-icon-guide" type="button" title="Controls guide" aria-label="Show or hide the controls guide">❔</button>
@@ -219,6 +219,8 @@
           <button id="btnDensePlayfield" class="btn btn-secondary btn-sm">⬢ Board: 9 wide (classic)</button>
           <button id="btnDifficulty" class="btn btn-secondary btn-sm">🎚️ Difficulty: Normal</button>
           <button id="btnBackdrop" class="btn btn-secondary btn-sm">🌌 Background: All</button>
+          <button id="btnBallStyle" class="btn btn-secondary btn-sm">🎨 Ball colours: Theme</button>
+          <button id="btnMotion" class="btn btn-secondary btn-sm">🌀 Movement: Hop</button>
           <p style="font-size:0.75rem; opacity:0.7; margin:0; color: var(--text-muted); max-width:36ch;">
             Tap to cycle the bottom edge: 9 → 12 → 18 balls. Wider boards use smaller balls on the same playfield. Reloads the game. The how-to-play demo always runs on the classic board.
           </p>
@@ -436,7 +438,7 @@
     </div>
   </div>
 
-  <script src="./oddballz-app.js?v=2.1.62"></script>
+  <script src="./oddballz-app.js?v=2.1.93"></script>
 
   <!-- Offline play is written and ready in sw.js, and deliberately NOT registered
        yet. A service worker is a caching layer between the deployed files and what

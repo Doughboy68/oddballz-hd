@@ -61,6 +61,28 @@
   // a ball breaking off crossed the board in about two frames and the gravity rule
   // was invisible -- the board simply looked different afterwards.
   const BALL_DROP_SPEED = 13.0;
+  // How long the drawn piece takes to go from one shape to the next on a turn
+  // (ThreeRenderer.pieceOffsets). The easing it replaced was 95% of the way in
+  // 125 ms; this is a little longer for the hop and the settle to read.
+  const PIECE_TURN_MS = 170;
+  // A flip, turning over, a little slower: at the turn's pace it was over
+  // before it could be seen (the user, 18 Oct 2026).
+  const PIECE_FLIP_MS = 210;
+  // A turn's flourish: the piece hops towards the camera as it goes round, by
+  // this many ball radii at the middle, and swings a touch past its new place
+  // before settling back (PIECE_TURN_OVERSHOOT, the back-ease's strength). A
+  // flat turn looked dull beside the flip (the user, 18 Oct 2026).
+  const PIECE_TURN_HOP = 0.7;
+  const PIECE_TURN_OVERSHOOT = 1.3;
+  // The same for a step left or right (ThreeRenderer.pieceSlideX): how long the
+  // step takes, the hop in ball radii, and the overshoot.
+  const PIECE_STEP_MS = 130;
+  const PIECE_STEP_HOP = 0.45;
+  const PIECE_STEP_OVERSHOOT = 1.3;
+  // A hard drop's hop: up by this many ball radii as it sets off, and back down
+  // over PIECE_ZIP_HOP_MS while it falls (the user, 18 Oct 2026).
+  const PIECE_ZIP_HOP = 1.0;
+  const PIECE_ZIP_HOP_MS = 200;
   // Then a beat with the board clear, before the next piece slides in.
   const PIECE_SPAWN_DELAY_MS = 400;
   // A landing's resolve, played out: after a pass that takes balls off, at least
@@ -73,6 +95,8 @@
   // its run along the bottom row, popping each ball as it passes. 950 ms for the
   // row alone was far too quick to follow (the user, 17 Oct 2026).
   const SWEEP_ORB_MS = 750;
+  // How far the charged ball starts off the board, in ball radii (runSweep).
+  const SWEEP_ORB_LIFT = 2.3;
   const SWEEP_MS = 1500;
   // How long the demo holds its Special Balls page.
   const SPECIALS_PAGE_MS = 9000;
@@ -4862,12 +4886,8 @@ registerProcessor('odd-sid', OddSid);
       this.scene = scene;
       this.particles = [];
       this.colorPalette = [
-        new THREE.Color(0x38bdf8),
-        new THREE.Color(0xf43f5e),
-        new THREE.Color(0x10b981),
-        new THREE.Color(0xf59e0b),
-        new THREE.Color(0xa855f7),
-        new THREE.Color(0xec4899),
+        // The six ball colours (BALL_COLOURS), lifted a little: sparks are light.
+        ...BALL_COLOURS.map(h => new THREE.Color(h).lerp(new THREE.Color(0xffffff), 0.22)),
         // In ballSlot order after the six: joker, bomb, stone.
         new THREE.Color(0xf2eeff),
         new THREE.Color(0xff8a1e),
@@ -5139,6 +5159,56 @@ registerProcessor('odd-sid', OddSid);
     }
   }
 
+  // The six ball colours, in ballSlot order: azure, ruby, emerald, gold,
+  // amethyst, magenta. The same six hues as before, softened for the space
+  // backgrounds -- the old candy-bright set looked pasted on over a nebula (the
+  // user, 18 Oct 2026), and each hue moved a little towards something found out
+  // there: an icy blue, a coral red, a sea green, brass, lavender, a dusty rose.
+  // Ruby (356) and magenta (322) stay well apart, and lavender (270) between
+  // magenta and blue.
+  //
+  // Measured on the board, saturation is 61-76% against the old 78-96%. A first
+  // pass went to 52-64% and looked faded and dull (the user, same day); taken
+  // that low, softening also lifted every ball's brightness, the darkest from
+  // 73 to 110, which read as pastel rather than calmer.
+  const BALL_COLOURS = [0x287dbe, 0xb72a33, 0x1b9561, 0xb98722, 0x7240ac, 0xb43283];
+  // The previous set, kept as the Classic ball style on the title card (and the C
+  // key on ?palette), with the finish and spark colours that went with it: the
+  // user wanted to live with both for a while (18 Oct 2026).
+  const BALL_COLOURS_CLASSIC = [0x0080d8, 0xd81c32, 0x00a83c, 0xd9a406, 0x8020b8, 0xd8009c];
+  const BALL_FINISH = [[0.20, 0.42], [0.20, 0.38], [0.22, 0.34], [0.24, 0.48], [0.20, 0.38], [0.20, 0.38]];
+  const BALL_FINISH_CLASSIC = [[0.15, 0.35], [0.15, 0.30], [0.18, 0.25], [0.20, 0.40], [0.15, 0.30], [0.15, 0.30]];
+  const SPARK_COLOURS_CLASSIC = [0x38bdf8, 0xf43f5e, 0x10b981, 0xf59e0b, 0xa855f7, 0xec4899];
+  const BALL_STYLE_KEY = 'oddballz_hd_ball_style';
+  // Movement, Hop or Smooth (the title card's Movement button).
+  // Hop: turns in an arc, flips like a card, hops and settles on turns and
+  // steps. Smooth: the glide it had before, every move eased straight to its
+  // new place -- kept as a choice while the user lives with both (18 Oct 2026).
+  const MOTION_KEY = 'oddballz_hd_motion';
+  let motionChoice = null;                 // read once; asked every frame
+  function storedMotion() {
+    if (motionChoice) return motionChoice;
+    try { motionChoice = localStorage.getItem(MOTION_KEY) === 'smooth' ? 'smooth' : 'hop'; } catch (e) { motionChoice = 'hop'; }
+    return motionChoice;
+  }
+  function storedBallStyle() {
+    try { return localStorage.getItem(BALL_STYLE_KEY) === 'classic' ? 'classic' : 'theme'; } catch (e) { return 'theme'; }
+  }
+  // How strongly the balls reflect the background behind them (ballEnvFor). In
+  // practice a tint towards the background's colours -- the blur leaves no
+  // detail -- and 2 is where it shows without washing out the ball's own colour;
+  // at 3 the Nebula pushed azure's blue to the edge of clipping.
+  const BALL_ENV_INTENSITY = 2.0;
+  // The rim light (setBallRim): a soft glow of each background's accent colour
+  // on the upper edge of every ball, fading to nothing towards the middle,
+  // where the ball's own colour is read. Wide and faint, and on the top only
+  // (BALL_RIM_TOP 1): a tight bright rim all the way round (power 3, strength
+  // 1.3) drew a thin pale skin round every ball -- "a thin membrane around
+  // them" (the user, 18 Oct 2026).
+  const BALL_RIM_STRENGTH = 0.5;
+  const BALL_RIM_POWER = 1.6;
+  const BALL_RIM_TOP = 1.0;
+
   // --- 5. THREE.JS 3D RENDERER ---
   class ThreeRenderer {
     constructor(containerElement) {
@@ -5223,12 +5293,13 @@ registerProcessor('odd-sid', OddSid);
         //
         // Ruby sits at hue 349 and magenta at 311 so the two do not both read as
         // pink; purple is the closest neighbour to magenta at 36 degrees.
-        { main: 0x0080d8, roughness: 0.15, metalness: 0.35, emissive: 0x001c2f }, // 1: Electric Azure Cyan-Blue
-        { main: 0xd81c32, roughness: 0.15, metalness: 0.30, emissive: 0x2f060b }, // 2: Neon Ruby Red
-        { main: 0x00a83c, roughness: 0.18, metalness: 0.25, emissive: 0x00250d }, // 3: Vibrant Emerald Green
-        { main: 0xd9a406, roughness: 0.20, metalness: 0.40, emissive: 0x2f2401 }, // 4: Amber Gold
-        { main: 0x8020b8, roughness: 0.15, metalness: 0.30, emissive: 0x1c0728 }, // 5: Electric Amethyst Purple
-        { main: 0xd8009c, roughness: 0.15, metalness: 0.30, emissive: 0x2f0022 }, // 6: Hot Magenta
+        //
+        // The colours themselves are BALL_COLOURS (set by setBallPalette below),
+        // with emissives at the same ~22%. Slightly less glossy and a little more
+        // metallic than they were, so they read as glass and metal carrying the
+        // background's reflection (ballEnvFor) rather than as bright plastic.
+        // Azure, ruby, emerald, gold, amethyst, magenta; finish in BALL_FINISH.
+        ...BALL_COLOURS.map((main, i) => ({ main, roughness: BALL_FINISH[i][0], metalness: BALL_FINISH[i][1] })),
 
         // The special balls, in ballSlot order after the six. Each is told apart
         // by something other than hue, because hue is what the six already use.
@@ -5250,7 +5321,7 @@ registerProcessor('odd-sid', OddSid);
           color: c.main,
           roughness: c.roughness,
           metalness: c.metalness,
-          emissive: c.emissive,
+          emissive: c.emissive !== undefined ? c.emissive : new THREE.Color(c.main).multiplyScalar(0.22),
           emissiveIntensity: 0.25,
           flatShading: !!c.flat,
           clippingPlanes: clip,
@@ -5318,7 +5389,43 @@ registerProcessor('odd-sid', OddSid);
         return a;
       });
 
+      this.installBallEnvBlend();
       this.initSpecialMarkers(clip);
+    }
+
+    // The six colours from a palette (BALL_COLOURS, or the classic set for the
+    // ?palette comparison): settled, falling (dimmed) and ghost alike, base and
+    // emissive, with the rest values the breathe in render() works from.
+    // Theme or Classic balls (the title card's Ball colours button): the colours, the
+    // finish, and for Classic no reflection or rim -- the look as it was before
+    // the space backgrounds.
+    setBallStyle(style) {
+      const classic = style === 'classic';
+      this.setBallPalette(classic ? BALL_COLOURS_CLASSIC : BALL_COLOURS);
+      const finish = classic ? BALL_FINISH_CLASSIC : BALL_FINISH;
+      finish.forEach(([r, m], i) => {
+        for (const mat of [this.ballMaterials[i], this.activeBallMaterials[i]]) { mat.roughness = r; mat.metalness = m; }
+      });
+      this.noBallEnv = this.noBallRim = classic;
+      const bi = this.backdropIndex, has = bi !== null && bi !== undefined && BACKDROPS[bi];
+      const fade = this.bgFade;
+      this.bgFade = null;              // the change is at once, not with a crossfade
+      this.queueBallEnv(has ? BACKDROPS[bi].procedural : null);
+      this.setBallRim(has ? BACKDROPS[bi].platform : null);
+      this.bgFade = fade;
+    }
+
+    setBallPalette(list) {
+      list.forEach((hex, i) => {
+        const m = this.ballMaterials[i], a = this.activeBallMaterials[i], g = this.ghostMaterials[i];
+        m.color.setHex(hex);
+        m.emissive.setHex(hex).multiplyScalar(0.22);
+        m.userData.baseColor = m.color.clone();
+        a.color.setHex(hex).multiplyScalar(ACTIVE_BALL_DIM);
+        a.emissive.copy(m.emissive).multiplyScalar(ACTIVE_BALL_DIM);
+        a.userData.baseColor = a.color.clone();
+        g.color.setHex(hex);
+      });
     }
 
     // The pieces the special balls wear on top of a material, shared by every
@@ -5702,6 +5809,219 @@ registerProcessor('odd-sid', OddSid);
       // NO chassis plate — open hexagon grid floating cleanly in space!
     }
 
+    // Where each ball of the falling piece is drawn, as an offset from the
+    // piece's root in world units, on its way from the shape it had to the shape
+    // the engine now holds (targetRel). Drawing only: the engine's shape is
+    // already the new one, and nothing here reaches it.
+    //
+    // A move that is a turn about some point -- every turn, and the flips of the
+    // symmetrical shapes, a line end to end among them -- swings the piece round
+    // that point in the board's plane. A true mirror flip turns the piece over
+    // about its mirror line like a card, the whole piece rising just enough that
+    // no ball dips into the board. Both rigid, so no two balls can meet. Anything else sends each ball straight to its new place, and any two
+    // whose paths would cross lift apart, one passing over the other. Straight
+    // paths for everything, as it was, ran balls through each other: a flip put
+    // two of them half inside one another for a moment (the user, 18 Oct 2026).
+    // Passing over was tried for flips too, but a line flipped end to end sends
+    // every ball through every other, and it had to stack them four high.
+    pieceOffsets(engine, now) {
+      const rel = engine.targetRel || engine.oddballz.rel;
+      const o = gridToWorld(0, 0);
+      const target = rel.map(r => {
+        const w = gridToWorld(Math.round(r.x), Math.round(r.y));
+        return { x: w.x - o.x, y: w.y - o.y };
+      });
+      const key = target.map(p => p.x.toFixed(3) + ',' + p.y.toFixed(3)).join(' ');
+      let st = this.pieceShape;
+      if (!st || st.ballCount !== engine.ballCount) {
+        // A new piece: drawn in its shape at once.
+        this.pieceMove = null;
+        st = this.pieceShape = { ballCount: engine.ballCount, key, arc: null,
+          from: target.map(p => ({ x: p.x, y: p.y, z: 0 })), to: target, lift: [0, 0, 0, 0], t0: -1e9,
+          shown: target.map(p => ({ x: p.x, y: p.y, z: 0 })) };
+      } else if (key !== st.key) {
+        const live = [0, 1, 2, 3].filter(i => engine.oddballz.image[i] > 0);
+        st.key = key;
+        st.from = st.shown.map(p => ({ x: p.x, y: p.y, z: p.z }));
+        st.to = target;
+        st.t0 = now;
+        // A flip always turns over, a line's too -- a line flipped end to end is
+        // also a half turn, and spun flat it looked like less of a move than the
+        // other shapes' flips (the user, 18 Oct 2026). Which it was is told by
+        // the key pressed (pieceMove), since a line's shape cannot tell.
+        const move = this.pieceMove;
+        this.pieceMove = null;
+        if (move === 'flip') {
+          st.mirror = this.pieceMirror(st.from, target, live);
+          st.arc = st.mirror === null ? this.pieceTurn(st.from, target, live) : null;
+        } else {
+          st.arc = this.pieceTurn(st.from, target, live);
+          st.mirror = st.arc === null ? this.pieceMirror(st.from, target, live) : null;
+        }
+        st.ms = st.mirror ? PIECE_FLIP_MS : PIECE_TURN_MS;
+        st.lift = st.arc === null && st.mirror === null ? this.pieceLifts(st.from, target, live) : [0, 0, 0, 0];
+      }
+      const k = Math.min(1, (now - st.t0) / (st.ms || PIECE_TURN_MS));
+      const e = k * k * (3 - 2 * k);
+      for (let i = 0; i < 4; i++) {
+        const f = st.from[i], t = st.to[i], p = st.shown[i];
+        let flipZ = 0;
+        if (st.arc !== null) {
+          const { angle, cx, cy } = st.arc;
+          const fx = f.x - cx, fy = f.y - cy, tx = t.x - cx, ty = t.y - cy;
+          const rf = Math.hypot(fx, fy), rt = Math.hypot(tx, ty);
+          // Out past the new place and back (an ease-out-back), the whole piece
+          // hopping as one -- both keep it rigid.
+          const c1 = PIECE_TURN_OVERSHOOT, q = k - 1;
+          const eb = 1 + (c1 + 1) * q * q * q + c1 * q * q;
+          const a = Math.atan2(fy, fx) + angle * eb, r = rf + (rt - rf) * e;
+          p.x = cx + r * Math.cos(a); p.y = cy + r * Math.sin(a);
+          flipZ = PIECE_TURN_HOP * SPHERE_RADIUS * Math.sin(Math.PI * k);
+        } else if (st.mirror) {
+          // Turned about the mirror line: across the line, each ball's distance
+          // from it goes round through the vertical. The side that would go down
+          // into the board is carried up with the rest: all of them by the
+          // deepest one's depth, which keeps the piece rigid.
+          const u = st.mirror.u, along = f.x * u.x + f.y * u.y, side = f.x * -u.y + f.y * u.x;
+          const c = Math.cos(Math.PI * e), sn = Math.sin(Math.PI * e);
+          p.x = along * u.x - u.y * side * c; p.y = along * u.y + u.x * side * c;
+          flipZ = (side - st.mirror.low) * sn;
+        } else {
+          p.x = f.x + (t.x - f.x) * e; p.y = f.y + (t.y - f.y) * e;
+        }
+        p.z = f.z * (1 - e) + st.lift[i] * Math.sin(Math.PI * e) + flipZ;
+      }
+      return st.shown;
+    }
+
+    // A step left or right (pieceStep, from the engine's moveOBall): the drawn
+    // piece slides to its new column with a hop and a little overshoot, as a
+    // turn does, rather than gliding there. Returns where the root is drawn
+    // across, in the engine's column units, and the hop's height; the engine's
+    // own place for the piece is already the new column.
+    pieceStep(dx, ballCount) {
+      const sl = this.pieceSlide;
+      if (!sl || sl.ballCount !== ballCount) return;
+      const now = performance.now(), cur = this.pieceSlideAt(now);
+      if (sl.grid) sl.grid.x += dx;
+      sl.o0 = cur.o + dx;
+      sl.z0 = cur.z;
+      sl.t0 = now;
+    }
+
+    // A hard drop setting off (from the engine's zip): a hop as it goes.
+    pieceHop(ballCount) {
+      const sl = this.pieceSlide;
+      if (sl && sl.ballCount === ballCount) sl.h0 = performance.now();
+    }
+
+    pieceSlideAt(now) {
+      const sl = this.pieceSlide;
+      const k = Math.min(1, (now - sl.t0) / PIECE_STEP_MS);
+      const c1 = PIECE_STEP_OVERSHOOT, q = k - 1;
+      const eb = 1 + (c1 + 1) * q * q * q + c1 * q * q;
+      const e = k * k * (3 - 2 * k);
+      const kh = sl.h0 ? Math.min(1, (now - sl.h0) / PIECE_ZIP_HOP_MS) : 1;
+      const zipHop = PIECE_ZIP_HOP * SPHERE_RADIUS * Math.sin(Math.PI * kh);
+      return { o: sl.o0 * (1 - eb), z: sl.z0 * (1 - e) + zipHop + (sl.o0 !== 0 ? PIECE_STEP_HOP * SPHERE_RADIUS * Math.sin(Math.PI * k) : 0) };
+    }
+
+    pieceSlideX(engine, now) {
+      if (!this.pieceSlide || this.pieceSlide.ballCount !== engine.ballCount) {
+        this.pieceSlide = { ballCount: engine.ballCount, o0: 0, z0: 0, t0: -1e9 };
+      }
+      const at = this.pieceSlideAt(now);
+      return { x: engine.targetFloatX - at.o, z: at.z };
+    }
+
+    // The mirror line a move reflects the piece in, through its root, if it is a
+    // flip: a unit vector along the line, or null. The line halves the angle
+    // between where any ball was and where it goes.
+    pieceMirror(from, to, live) {
+      let u = null;
+      for (const i of live) {
+        const sx = from[i].x + to[i].x, sy = from[i].y + to[i].y, l = Math.hypot(sx, sy);
+        if (l > 1e-3) { u = { x: sx / l, y: sy / l }; break; }
+      }
+      if (!u) {                                   // every ball straight across
+        const i = live.find(k => Math.hypot(from[k].x, from[k].y) > 1e-3);
+        if (i === undefined) return null;
+        const l = Math.hypot(from[i].x, from[i].y);
+        u = { x: -from[i].y / l, y: from[i].x / l };
+      }
+      const tol = 0.02 * HEX_SPACING_X;
+      for (const i of live) {
+        const d = from[i].x * u.x + from[i].y * u.y;
+        const rx = 2 * d * u.x - from[i].x, ry = 2 * d * u.y - from[i].y;
+        if (Math.hypot(rx - to[i].x, ry - to[i].y) > tol) return null;
+      }
+      // How far the deepest ball would go below the board, turned over: its
+      // distance on the side that turns downwards.
+      const low = Math.min(0, ...live.map(i => from[i].x * -u.y + from[i].y * u.x));
+      return { u, low };
+    }
+
+    // The turn a move makes, if it is one: an angle and the point it turns about,
+    // found from how the line between any two balls turns -- the same angle for
+    // every pair, and every ball the same distance from the point before and
+    // after. null for anything else, a straight shift included.
+    pieceTurn(from, to, live) {
+      if (live.length < 2) return null;
+      const tol = 0.02 * HEX_SPACING_X;
+      const i0 = live[0];
+      const j0 = live.find(j => Math.hypot(from[j].x - from[i0].x, from[j].y - from[i0].y) > 1e-3);
+      if (j0 === undefined) return null;
+      const angle0 = Math.atan2(to[j0].y - to[i0].y, to[j0].x - to[i0].x) -
+                     Math.atan2(from[j0].y - from[i0].y, from[j0].x - from[i0].x);
+      let angle = angle0;
+      while (angle > Math.PI + 1e-6) angle -= 2 * Math.PI;
+      while (angle <= -Math.PI + 1e-6) angle += 2 * Math.PI;
+      if (Math.abs(angle) < 1e-3) return null;
+      const c = Math.cos(angle), sn = Math.sin(angle);
+      const rot = (x, y) => ({ x: c * x - sn * y, y: sn * x + c * y });
+      for (const i of live) {
+        const r = rot(from[i].x - from[i0].x, from[i].y - from[i0].y);
+        if (Math.hypot(r.x - (to[i].x - to[i0].x), r.y - (to[i].y - to[i0].y)) > tol) return null;
+      }
+      // The fixed point: t0 = C + R(f0 - C), so (I - R) C = t0 - R f0.
+      const rf = rot(from[i0].x, from[i0].y);
+      const bx = to[i0].x - rf.x, by = to[i0].y - rf.y;
+      const m00 = 1 - c, m01 = sn, m10 = -sn, m11 = 1 - c, det = m00 * m11 - m01 * m10;
+      if (Math.abs(det) < 1e-9) return null;
+      return { angle, cx: (bx * m11 - m01 * by) / det, cy: (m00 * by - m10 * bx) / det };
+    }
+
+    // For straight moves: how far each ball lifts at the middle of its move so
+    // that no two pass through each other. Each pair's paths are checked along
+    // the way, and where they come closer than a ball's width the later ball is
+    // raised over the earlier by enough to clear it.
+    pieceLifts(from, to, live) {
+      const D = 2 * SPHERE_RADIUS * 1.04, cap = 2.2 * SPHERE_RADIUS;
+      const need = {};
+      for (let a = 0; a < live.length; a++) for (let b = a + 1; b < live.length; b++) {
+        const i = live[a], j = live[b];
+        let n = 0;
+        for (let e = 0.05; e < 0.96; e += 0.05) {
+          const dx = (from[i].x + (to[i].x - from[i].x) * e) - (from[j].x + (to[j].x - from[j].x) * e);
+          const dy = (from[i].y + (to[i].y - from[i].y) * e) - (from[j].y + (to[j].y - from[j].y) * e);
+          const gap2 = D * D - dx * dx - dy * dy;
+          if (gap2 > 0) n = Math.max(n, Math.sqrt(gap2) / Math.sin(Math.PI * e));
+        }
+        if (n > 0) need[i + '_' + j] = Math.min(cap, n);
+      }
+      // Each ball in turn at the lowest height that clears every earlier one it
+      // crosses: no lift, or just over one of them.
+      const lift = [0, 0, 0, 0];
+      for (let b = 0; b < live.length; b++) {
+        const j = live[b];
+        const clears = (h) => live.slice(0, b).every(i => !need[i + '_' + j] || Math.abs(h - lift[i]) >= need[i + '_' + j] - 1e-6);
+        const options = [0].concat(live.slice(0, b).filter(i => need[i + '_' + j]).map(i => lift[i] + need[i + '_' + j]))
+          .sort((x, y) => x - y);
+        lift[j] = options.find(clears);
+      }
+      return lift;
+    }
+
     updateScene(engine) {
       this.engine = engine;
       const currentKeys = new Set();
@@ -5712,54 +6032,59 @@ registerProcessor('odd-sid', OddSid);
       const assignedMeshes = new Set();
 
       const droppingPathsMap = engine.droppingPathsMap || new Map();
+      const newBallMesh = (val) => {
+        const m = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+        this.dressBall(m, val, this.ballMaterials);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        this.ballsGroup.add(m);
+        return m;
+      };
+
+      // The falls first, every one of them, each taking the mesh of the ball it
+      // came from. Done in the same scan as the rest, a cell a ball had just left
+      // and another had just dropped into kept the leaving ball's mesh, recoloured
+      // and with no fall drawn; and if the scan reached it before the leaving
+      // ball's new cell, that ball got a fresh mesh starting from the very same
+      // spot -- two balls inside each other for the start of the fall, half one
+      // colour and half the other (the user, 18 Oct 2026, caught on video).
+      const handled = new Set();
+      for (const [key, pathInfo] of droppingPathsMap) {
+        const [x, y] = key.split('_').map(Number);
+        const val = engine.checkInMap({ x: x, y: y }) ? engine.ballMap[x][y].bzMap : 0;
+        if (!(val > 0) || !pathInfo.path || !pathInfo.path.length) continue;
+        let mesh = this.staticBallMeshes.get(pathInfo.sourceKey);
+        if (mesh && !assignedMeshes.has(mesh)) this.dressBall(mesh, val, this.ballMaterials);
+        else mesh = newBallMesh(val);
+        mesh.worldPath = pathInfo.path.map(p => gridToWorld(p.x, p.y, SPHERE_RADIUS));
+        mesh.pathIndex = 1;
+        mesh.position.set(mesh.worldPath[0].x, mesh.worldPath[0].y, mesh.worldPath[0].z);
+        const end = mesh.worldPath[mesh.worldPath.length - 1];
+        mesh.targetPos = new THREE.Vector3(end.x, end.y, end.z);
+        mesh.isPathDropping = true;
+        nextStaticMeshes.set(key, mesh);
+        assignedMeshes.add(mesh);
+        handled.add(key);
+        currentKeys.add(key);
+      }
 
       for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
         for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y; y++) {
           const val = engine.ballMap[x][y].bzMap;
           const key = `${x}_${y}`;
 
-          if (val > 0) {
+          if (val > 0 && !handled.has(key)) {
             currentKeys.add(key);
             const wPos = gridToWorld(x, y, SPHERE_RADIUS);
 
+            // Its own mesh, unless a fall above has just taken it.
             let mesh = this.staticBallMeshes.get(key);
-
-            if (!mesh && droppingPathsMap.has(key)) {
-              const pathInfo = droppingPathsMap.get(key);
-              const fromKey = pathInfo.sourceKey;
-
-              const sourceMesh = this.staticBallMeshes.get(fromKey);
-              if (sourceMesh && !assignedMeshes.has(sourceMesh)) {
-                mesh = sourceMesh;
-                this.staticBallMeshes.delete(fromKey);
-                this.dressBall(mesh, val, this.ballMaterials);
-              } else {
-                mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
-                this.dressBall(mesh, val, this.ballMaterials);
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
-                this.ballsGroup.add(mesh);
-              }
-
-              mesh.worldPath = pathInfo.path.map(p => gridToWorld(p.x, p.y, SPHERE_RADIUS));
-              mesh.pathIndex = 1;
-              mesh.position.set(mesh.worldPath[0].x, mesh.worldPath[0].y, mesh.worldPath[0].z);
-              mesh.targetPos = new THREE.Vector3(
-                mesh.worldPath[mesh.worldPath.length - 1].x,
-                mesh.worldPath[mesh.worldPath.length - 1].y,
-                mesh.worldPath[mesh.worldPath.length - 1].z
-              );
-              mesh.isPathDropping = true;
-            }
+            if (mesh && assignedMeshes.has(mesh)) mesh = null;
 
             if (!mesh) {
-              mesh = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
-              this.dressBall(mesh, val, this.ballMaterials);
-              mesh.castShadow = true;
-              mesh.receiveShadow = true;
+              mesh = newBallMesh(val);
               mesh.targetPos = new THREE.Vector3(wPos.x, wPos.y, wPos.z);
               mesh.position.set(wPos.x, wPos.y, wPos.z);
-              this.ballsGroup.add(mesh);
             } else {
               this.dressBall(mesh, val, this.ballMaterials);
               if (!mesh.isPathDropping) {
@@ -5773,10 +6098,10 @@ registerProcessor('odd-sid', OddSid);
         }
       }
 
-      for (const [key, mesh] of this.staticBallMeshes.entries()) {
-        if (!nextStaticMeshes.has(key)) {
-          this.ballsGroup.remove(mesh);
-        }
+      // What no cell has taken: balls gone. A mesh carried to another cell by a
+      // fall is in use, whatever key it was filed under.
+      for (const mesh of this.staticBallMeshes.values()) {
+        if (!assignedMeshes.has(mesh)) this.ballsGroup.remove(mesh);
       }
 
       this.staticBallMeshes = nextStaticMeshes;
@@ -5806,8 +6131,16 @@ registerProcessor('odd-sid', OddSid);
       if (!engine.endGame && engine.oddballz) {
         let avgX = 0, avgY = 0, avgZ = 0;
 
-        const rootFloatX = engine.activeFloatPos ? engine.activeFloatPos.x : engine.oddballz.map[0].x;
+        // Across: the column the engine holds, less what is left of the latest
+        // step's slide (pieceSlideX); the engine's own eased x, which this used
+        // to draw, glides there with no hop or settle.
+        // Smooth motion (storedMotion) draws straight from the engine's own eased
+        // place and shape, as it always did.
+        const hop = storedMotion() === 'hop';
+        const slide = hop && engine.targetFloatX !== undefined ? this.pieceSlideX(engine, performance.now()) : null;
+        const rootFloatX = slide ? slide.x : (engine.activeFloatPos ? engine.activeFloatPos.x : engine.oddballz.map[0].x);
         const rootFloatY = engine.activeFloatPos ? engine.activeFloatPos.y : engine.oddballz.map[0].y;
+        const offsets = hop ? this.pieceOffsets(engine, performance.now()) : null;
 
         for (let i = 0; i <= 3; i++) {
           const val = engine.oddballz.image[i];
@@ -5817,11 +6150,19 @@ registerProcessor('odd-sid', OddSid);
             mesh.visible = true;
             this.dressBall(mesh, val, this.activeBallMaterials);
 
-            const relX = engine.activeRel ? engine.activeRel[i].x : engine.oddballz.rel[i].x;
-            const relY = engine.activeRel ? engine.activeRel[i].y : engine.oddballz.rel[i].y;
-            const floatX = rootFloatX + relX;
-            const floatY = rootFloatY + relY;
-            const wPos = gridToWorld(floatX, floatY, SPHERE_RADIUS);
+            const root = gridToWorld(rootFloatX, rootFloatY, SPHERE_RADIUS + (slide ? slide.z : 0));
+            let wPos;
+            if (offsets) {
+              const off = offsets[i];
+              wPos = { x: root.x + off.x, y: root.y + off.y, z: root.z + off.z };
+            } else {
+              const rel = engine.activeRel ? engine.activeRel[i] : engine.oddballz.rel[i];
+              wPos = gridToWorld(rootFloatX + rel.x, rootFloatY + rel.y, SPHERE_RADIUS);
+            }
+            // Hop movement eases only the piece's place in render(), not its shape,
+            // which pieceOffsets has eased already. Eased on top, a ball trailing
+            // its own path cut the corner of a half turn towards its neighbour,
+            // bringing two to 0.72 of a ball apart.
             mesh.targetPos.set(wPos.x, wPos.y, wPos.z);
 
             if (!mesh.initialized) {
@@ -6569,10 +6910,35 @@ registerProcessor('odd-sid', OddSid);
       }
 
       if (this.activeMeshes) {
+        const e = this.engine;
+        const now = performance.now();
+        const offs = e && e.oddballz && !e.endGame && storedMotion() === 'hop' && e.activeFloatPos &&
+          e.targetFloatX !== undefined ? this.pieceOffsets(e, now) : null;
+        // Hop movement: the piece's place in the grid eased as one point, across
+        // and down together, then the step's slide and hop laid over it uneased
+        // (they are eased already; eased twice, the settle was swallowed). A
+        // step moves the eased point at once, so only the slide shows it. Across
+        // alone unaffected by the ease, a hard drop down to the right -- where
+        // the column changes row by row -- showed the piece at its landing column
+        // while still sliding down: a slot too high until it landed (the user,
+        // 18 Oct 2026).
+        let root = null;
+        if (offs) {
+          const sl = this.pieceSlideX(e, now) && this.pieceSlide;
+          if (!sl.grid) sl.grid = { x: e.targetFloatX, y: e.activeFloatPos.y };
+          sl.grid.x += (e.targetFloatX - sl.grid.x) * lerpSpeed;
+          sl.grid.y += (e.activeFloatPos.y - sl.grid.y) * lerpSpeed;
+          const at = this.pieceSlideAt(now);
+          root = gridToWorld(sl.grid.x - at.o, sl.grid.y, SPHERE_RADIUS + at.z);
+        }
         for (let i = 0; i < this.activeMeshes.length; i++) {
           const mesh = this.activeMeshes[i];
           if (mesh.visible && mesh.targetPos) {
-            mesh.position.lerp(mesh.targetPos, lerpSpeed);
+            if (root) {
+              mesh.position.set(root.x + offs[i].x, root.y + offs[i].y, root.z + offs[i].z);
+            } else {
+              mesh.position.lerp(mesh.targetPos, lerpSpeed);
+            }
             const lit = this.highlightActive && this.highlightActive.has(i);
             const s = lit ? hiScale : 1.0;
             mesh.scale.set(s, s, s);
@@ -6688,13 +7054,160 @@ registerProcessor('odd-sid', OddSid);
         this.scene.background = this.plainBackground || (this.plainBackground = new THREE.Color(0x0a0c16));
         this.setProcedural(null);
         this.setPlatformTint(null);
+        this.queueBallEnv(null);
+        this.setBallRim(null);
         return;
       }
       this.setPlatformTint(BACKDROPS[i].platform);
       const kind = BACKDROPS[i].procedural;
       this.setProcedural(kind);
+      this.queueBallEnv(kind);
+      this.setBallRim(BACKDROPS[i].platform);
       this.backdropKey = 'proc:' + kind;
       this.scene.background = new THREE.Color(PROC_BASE[kind]);
+    }
+
+    // The balls' reflections of the background: each background drawn once,
+    // small, into a render target, mirrored side to side into a seamless 2:1
+    // panorama, and prefiltered (PMREM) so a glossy ball and a rough one each see
+    // it at the right blur. A still, not live -- the balls only need its colours
+    // to sit in the scene rather than on top of it (the user, 18 Oct 2026). Made
+    // once a background, at start (precompileBackgrounds).
+    ballEnvFor(kind) {
+      this.ballEnvs = this.ballEnvs || {};
+      if (this.ballEnvs[kind]) return this.ballEnvs[kind];
+      const mat = this.procMats && this.procMats[kind];
+      if (!mat) return null;
+      const N = 256, r = this.renderer;
+      const rt = new THREE.WebGLRenderTarget(N, N);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(PROC_BASE[kind]);
+      const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+      quad.frustumCulled = false;
+      scene.add(quad);
+      const u = mat.uniforms;
+      const saved = { res: u.uRes.value.clone(), time: u.uTime.value, alpha: u.uAlpha.value };
+      u.uRes.value.set(N, N);
+      u.uTime.value = 30;          // some way in, past anything that builds up at the start
+      u.uAlpha.value = 1;
+      const prevTarget = r.getRenderTarget();
+      r.setRenderTarget(rt);
+      r.render(scene, this.camera);
+      const px = new Uint8Array(N * N * 4);
+      r.readRenderTargetPixels(rt, 0, 0, N, N, px);
+      r.setRenderTarget(prevTarget);
+      u.uRes.value.copy(saved.res);
+      u.uTime.value = saved.time;
+      u.uAlpha.value = saved.alpha;
+      quad.geometry.dispose();
+      rt.dispose();
+
+      const W = N * 2, data = new Uint8Array(W * N * 4);
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++) {
+          const src = (y * N + x) * 4, a = (y * W + x) * 4, b = (y * W + (W - 1 - x)) * 4;
+          for (let c = 0; c < 4; c++) { data[a + c] = px[src + c]; data[b + c] = px[src + c]; }
+        }
+      }
+      const tex = new THREE.DataTexture(data, W, N, THREE.RGBAFormat);
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      tex.needsUpdate = true;
+      this.pmrem = this.pmrem || new THREE.PMREMGenerator(r);
+      const env = this.pmrem.fromEquirectangular(tex).texture;
+      tex.dispose();
+      this.ballEnvs[kind] = env;
+      return env;
+    }
+
+    // The reflection the balls wear: a background's (ballEnvFor), or none for the
+    // plain colour. Through a crossfade the balls blend from the old reflection
+    // to the new one in step with the picture -- swapped at once, every ball's
+    // shading jumped mid-fade (the user, 18 Oct 2026). Turning it on or off
+    // changes the shader, hence needsUpdate; swapping one for another does not.
+    queueBallEnv(kind) {
+      const env = kind && !this.noBallEnv ? this.ballEnvFor(kind) : null;
+      const U = this.envBlend;
+      const now = this.ballMaterials[0].envMap;
+      if (this.bgFade && now && env && !this.ballEnvBlendOff) {
+        // From what is showing: a fade cut short finishes its picture at once
+        // (setProcedural), so its reflection does too.
+        if (this.envTarget) this.applyBallEnv(this.envTarget);
+        U.envMap2.value = env;
+        U.envMix.value = 0;
+        this.envTarget = env;
+      } else {
+        this.applyBallEnv(env);
+      }
+    }
+
+    applyBallEnv(env) {
+      for (const m of this.ballMaterials.concat(this.activeBallMaterials)) {
+        if (!!m.envMap !== !!env) m.needsUpdate = true;
+        m.envMap = env;
+        m.envMapIntensity = BALL_ENV_INTENSITY;
+      }
+      this.envBlend.envMap2.value = env;
+      this.envBlend.envMix.value = 0;
+      this.envTarget = null;
+    }
+
+    // The rim's colour for a background: its accent (BACKDROPS platform), levelled
+    // so a light cyan and a deep violet make about as bright an edge. None for
+    // the plain colour. Faded with the crossfade like the reflection.
+    setBallRim(hex) {
+      const to = new THREE.Color(0, 0, 0);
+      if (hex && !this.noBallRim) {
+        to.set(hex);
+        const lum = 0.2126 * to.r + 0.7152 * to.g + 0.0722 * to.b;
+        to.multiplyScalar(0.45 / Math.max(lum, 0.05));
+      }
+      const now = this.envBlend.rimColour.value;
+      if (this.bgFade) this.rimFade = { from: now.clone(), to };
+      else { now.copy(to); this.rimFade = null; }
+    }
+
+    // Lets a ball material mix a second reflection into its own: envMap2, by
+    // envMix, shared by every ball. r128 samples the prefiltered reflection
+    // through textureCubeUV(texture, direction, roughness) for both its diffuse
+    // and its glossy light, so routing those calls through a function that
+    // samples both and mixes them is the whole change.
+    //
+    // The same patch adds the rim light: the background's accent added at the
+    // ball's edge by a fresnel term, after the lighting, so it reads as light
+    // from the scene catching the glass (the user, 18 Oct 2026).
+    installBallEnvBlend() {
+      const U = this.envBlend = {
+        envMap2: { value: null }, envMix: { value: 0 },
+        rimColour: { value: new THREE.Color(0, 0, 0) }, rimStrength: { value: BALL_RIM_STRENGTH },
+        rimPower: { value: BALL_RIM_POWER }, rimTop: { value: BALL_RIM_TOP }
+      };
+      const patch = (shader) => {
+        shader.uniforms.envMap2 = U.envMap2;
+        shader.uniforms.envMix = U.envMix;
+        shader.uniforms.rimColour = U.rimColour;
+        shader.uniforms.rimStrength = U.rimStrength;
+        shader.uniforms.rimPower = U.rimPower;
+        shader.uniforms.rimTop = U.rimTop;
+        // The calls rewritten first, then the function added: the other way round
+        // rewrites the function's own call and it calls itself, which GLSL
+        // refuses -- the balls simply vanish.
+        const chunk = THREE.ShaderChunk.envmap_physical_pars_fragment
+          .replace(/textureCubeUV\( envMap, /g, 'ballEnvSample( ')
+          .replace('#if defined( USE_ENVMAP )', `#if defined( USE_ENVMAP )
+            uniform sampler2D envMap2;
+            uniform float envMix;
+            vec4 ballEnvSample( vec3 dir, float rough ) {
+              return mix( textureCubeUV( envMap, dir, rough ), textureCubeUV( envMap2, dir, rough ), envMix );
+            }`);
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <envmap_physical_pars_fragment>', 'uniform vec3 rimColour;\nuniform float rimStrength, rimPower, rimTop;\n' + chunk)
+          .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );', `
+            outgoingLight += rimColour * rimStrength *
+              pow( 1.0 - saturate( dot( geometry.normal, geometry.viewDir ) ), rimPower ) *
+              mix( 1.0, smoothstep( -0.1, 0.7, geometry.normal.y ), rimTop );
+            gl_FragColor = vec4( outgoingLight, diffuseColor.a );`);
+      };
+      for (const m of this.ballMaterials.concat(this.activeBallMaterials)) m.onBeforeCompile = patch;
     }
 
     // A live background (BACKDROPS procedural): one full-screen quad, drawn
@@ -6770,6 +7283,14 @@ registerProcessor('odd-sid', OddSid);
       if (!f) return;
       const k = Math.min(1, (performance.now() - f.t0) / BG_FADE_MS);
       f.to.uniforms.uAlpha.value = k * k * (3 - 2 * k);
+      if (this.envTarget) {
+        if (k >= 1) this.applyBallEnv(this.envTarget);
+        else this.envBlend.envMix.value = k * k * (3 - 2 * k);
+      }
+      if (this.rimFade) {
+        this.envBlend.rimColour.value.copy(this.rimFade.from).lerp(this.rimFade.to, k * k * (3 - 2 * k));
+        if (k >= 1) this.rimFade = null;
+      }
       if (k >= 1) {
         this.bgPrev.visible = false;
         this.bgFade = null;
@@ -6796,8 +7317,35 @@ registerProcessor('odd-sid', OddSid);
         if (!prog || !gl.getProgramParameter(prog.program, gl.LINK_STATUS)) {
           throw new Error('The ' + kind + ' background shader did not compile.');
         }
+        this.ballEnvFor(kind);
       }
       this.setProcedural(null);
+      this.checkBallEnvBlend();
+    }
+
+    // The blend is a patch into Three's own shader, and a ball shader that fails
+    // to build draws nothing at all, without an error anyone sees. So build it
+    // once now, with a reflection on, and if it does not link, take the patch off:
+    // the balls then swap reflections at once mid-fade rather than vanish.
+    checkBallEnvBlend() {
+      const env = this.ballEnvs && Object.values(this.ballEnvs)[0];
+      if (!env) return;
+      this.applyBallEnv(env);
+      const probe = new THREE.Mesh(this.sphereGeo, this.ballMaterials[0]);
+      this.scene.add(probe);
+      this.renderer.compile(this.scene, this.camera);
+      this.scene.remove(probe);
+      const gl = this.renderer.getContext();
+      const props = this.renderer.properties.get(this.ballMaterials[0]);
+      const prog = props.currentProgram || props.program;
+      if (!prog || !gl.getProgramParameter(prog.program, gl.LINK_STATUS)) {
+        for (const m of this.ballMaterials.concat(this.activeBallMaterials)) {
+          m.onBeforeCompile = THREE.Material.prototype.onBeforeCompile;
+          m.needsUpdate = true;
+        }
+        this.ballEnvBlendOff = true;
+      }
+      this.applyBallEnv(null);
     }
 
   }
@@ -6808,7 +7356,37 @@ registerProcessor('odd-sid', OddSid);
       this.container = document.getElementById('canvasContainer');
       this.engine = new OddUnitEngine();
       this.renderer = new ThreeRenderer(this.container);
+      // The renderer told which kind of move each transform is, so a flip is drawn
+      // turning over and a turn turning round (ThreeRenderer.pieceOffsets). Wraps
+      // the engine's transform without changing what it does.
+      const engineTransform = this.engine.transform.bind(this.engine);
+      this.engine.transform = (m) => {
+        this.renderer.pieceMove = (m === this.engine.flipX || m === this.engine.flipY) ? 'flip' : 'turn';
+        const before = this.engine.targetFloatX;
+        const result = engineTransform(m);
+        // A turn against a wall can shift the piece over; slid like a step.
+        const dx = this.engine.targetFloatX - before;
+        if (before !== undefined && dx) this.renderer.pieceStep(dx, this.engine.ballCount);
+        return result;
+      };
+      // And of each step left or right, drawn as a slide with a hop
+      // (ThreeRenderer.pieceStep). Again only watched, not changed.
+      const engineMove = this.engine.moveOBall.bind(this.engine);
+      this.engine.moveOBall = (dir) => {
+        const before = this.engine.targetFloatX;
+        const result = engineMove(dir);
+        const dx = this.engine.targetFloatX - before;
+        if (before !== undefined && dx) this.renderer.pieceStep(dx, this.engine.ballCount);
+        return result;
+      };
+      // And of each hard drop, which hops as it sets off (ThreeRenderer.pieceHop).
+      const engineZip = this.engine.zip.bind(this.engine);
+      this.engine.zip = () => {
+        if (!this.engine.isZipping) this.renderer.pieceHop(this.engine.ballCount);
+        return engineZip();
+      };
       this.particles = new ParticleSystem(this.renderer.scene);
+      this.applyBallStyle();
       this.audio = new SoundEngine();
 
       this.isPlaying = false;
@@ -6842,7 +7420,13 @@ registerProcessor('odd-sid', OddSid);
       const pauseBtn = document.getElementById('btnBoardPause');
       if (pauseBtn) pauseBtn.addEventListener('click', (ev) => { ev.preventDefault(); pauseBtn.blur(); this.togglePause(); });
       const endBtn = document.getElementById('btnBoardEnd');
-      if (endBtn) endBtn.addEventListener('click', (ev) => { ev.preventDefault(); endBtn.blur(); if (this.isPaused) this.armEndGame(); });
+      // One press: the icon is only there while paused and is nothing else, so it
+      // needs no arming. E still takes two, being the flip key in play (the user,
+      // 18 Oct 2026).
+      if (endBtn) endBtn.addEventListener('click', (ev) => {
+        ev.preventDefault(); endBtn.blur();
+        if (this.isPaused) { this.disarmEndGame(); this.returnToTitle(); }
+      });
       // The controls guide, off unless asked for; remembered.
       try { if (localStorage.getItem(GUIDE_KEY) === '1') document.body.classList.add('guide-on'); } catch (e) {}
       const guideBtn = document.getElementById('btnBoardGuide');
@@ -7339,6 +7923,16 @@ registerProcessor('odd-sid', OddSid);
 
     // The picture a game starts on: the one chosen on the title card, or under ALL
     // the first, as the C64 build's every game does. Also what the title shows.
+    // The stored ball style (storedBallStyle) on the balls and their sparks.
+    applyBallStyle() {
+      const style = storedBallStyle();
+      this.renderer.setBallStyle(style);
+      const sparks = style === 'classic'
+        ? SPARK_COLOURS_CLASSIC.map(h => new THREE.Color(h))
+        : BALL_COLOURS.map(h => new THREE.Color(h).lerp(new THREE.Color(0xffffff), 0.22));
+      sparks.forEach((c, i) => this.particles.colorPalette[i].copy(c));
+    }
+
     applyBackdropChoice() {
       const b = storedBackdrop();
       this.backdropAll = (b === BACKDROP_ALL);
@@ -7414,7 +8008,11 @@ registerProcessor('odd-sid', OddSid);
       const orb = new THREE.Mesh(this.renderer.sphereGeo, this.renderer.ballMaterials[0]);
       this.renderer.dressBall(orb, value, this.renderer.ballMaterials);
       orb.scale.setScalar(1.15);
-      orb.position.set(from.x, from.y, from.z + SPHERE_RADIUS);
+      // Lifted well clear of the board: by now the balls above have fallen into
+      // the cell it was matched in, and one radius up it sat inside whichever
+      // ball landed there -- half one colour, half the other (the user, 18 Oct
+      // 2026, caught on video). Its own 1.15 radius and the ball's 1 need 2.15.
+      orb.position.set(from.x, from.y, from.z + SPHERE_RADIUS * SWEEP_ORB_LIFT);
       this.renderer.ballsGroup.add(orb);
       this.sweepAnim = true;
       this.sweepPrePopped = new Set();
@@ -7447,7 +8045,9 @@ registerProcessor('odd-sid', OddSid);
       }
       const k = Math.min(1, (now - o.t0) / SWEEP_ORB_MS);
       const ease = k * k;
-      const z = o.from.z + SPHERE_RADIUS * (1 - ease);
+      // High over the pile for the flight, down to the row only near the corner,
+      // so it passes over the balls between rather than through them.
+      const z = o.corner.z + (o.from.z + SPHERE_RADIUS * SWEEP_ORB_LIFT - o.corner.z) * (1 - ease * ease * ease);
       o.mesh.position.set(o.from.x + (o.corner.x - o.from.x) * ease,
                           o.from.y + (o.corner.y - o.from.y) * ease, z);
       o.mesh.rotation.z += 0.25;
@@ -9798,8 +10398,6 @@ registerProcessor('odd-sid', OddSid);
         btn.classList.add('is-armed');
         btn.innerHTML = '⏹ PRESS AGAIN <kbd class="key-hint">E</kbd>';
       }
-      const icon = document.getElementById('btnBoardEnd');
-      if (icon) { icon.classList.add('is-armed'); icon.title = 'Press again to end the game'; }
       document.body.classList.add('end-armed');
       clearTimeout(this.endArmTimer);
       this.endArmTimer = setTimeout(() => this.disarmEndGame(), END_ARM_MS);
@@ -9815,8 +10413,6 @@ registerProcessor('odd-sid', OddSid);
         btn.classList.remove('is-armed');
         btn.innerHTML = '⏹ END GAME <kbd class="key-hint">E</kbd>';
       }
-      const icon = document.getElementById('btnBoardEnd');
-      if (icon) { icon.classList.remove('is-armed'); icon.title = 'End game (E): press twice'; }
       document.body.classList.remove('end-armed');
     }
 
@@ -9970,6 +10566,34 @@ registerProcessor('odd-sid', OddSid);
       // ones taken before the pictures existed.
       app.renderer.setBackdrop(null);
       app.showPaletteSheet();
+      // Side by side by key: C the classic colours or the new, R reflections on
+      // or off, L the rim light on or off, B the next background (from the plain
+      // colour, then each in turn).
+      let classic = false;
+      window.addEventListener('keydown', (ev) => {
+        const R = app.renderer;
+        if (ev.code === 'KeyC') {
+          classic = !classic;
+          R.setBallPalette(classic ? BALL_COLOURS_CLASSIC : BALL_COLOURS);
+        } else if (ev.code === 'KeyR') {
+          R.noBallEnv = !R.noBallEnv;
+          R.queueBallEnv(R.backdropIndex === null || R.backdropIndex === undefined ? null : BACKDROPS[R.backdropIndex].procedural);
+        } else if (ev.code === 'KeyL') {
+          R.noBallRim = !R.noBallRim;
+          const bi = R.backdropIndex;
+          R.setBallRim(bi === null || bi === undefined ? null : BACKDROPS[bi].platform);
+        } else if (ev.code === 'KeyB') {
+          const i = R.backdropIndex;
+          R.setBackdrop(i === null || i === undefined ? 0 : (i + 1 < BACKDROPS.length ? i + 1 : null));
+        } else return;
+        ev.stopImmediatePropagation();
+        const tag = document.getElementById('paletteTag') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'paletteTag' }));
+        tag.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:200;font:600 13px/1.4 monospace;color:#dde;background:rgba(0,0,0,.6);padding:6px 10px;border-radius:4px;pointer-events:none';
+        const bi = R.backdropIndex;
+        tag.textContent = (classic ? 'CLASSIC colours' : 'NEW colours') + ' · reflections ' + (R.noBallEnv ? 'off' : 'on') +
+          ' · rim ' + (R.noBallRim ? 'off' : 'on') +
+          ' · ' + (bi === null || bi === undefined ? 'plain' : BACKDROPS[bi].label) + '   (C / R / L / B)';
+      }, true);
     }
 
     syncControlsHeightVar();
@@ -10031,6 +10655,40 @@ registerProcessor('odd-sid', OddSid);
         try { localStorage.setItem(BACKDROP_KEY, String(next)); } catch (e) {}
         paintBackdrop(next);
         window.oddApp.applyBackdropChoice();
+      });
+    }
+
+    // Ball colours, Theme or Classic, cycled in place and shown at once on the board
+    // behind the title.
+    const btnBalls = document.getElementById('btnBallStyle');
+    if (btnBalls) {
+      const paintBalls = () => {
+        const classic = storedBallStyle() === 'classic';
+        btnBalls.textContent = '\u{1F3A8} Ball colours: ' + (classic ? 'Classic' : 'Theme');
+        btnBalls.classList.toggle('active', classic);
+      };
+      paintBalls();
+      btnBalls.addEventListener('click', () => {
+        try { localStorage.setItem(BALL_STYLE_KEY, storedBallStyle() === 'classic' ? 'theme' : 'classic'); } catch (e) {}
+        paintBalls();
+        window.oddApp.applyBallStyle();
+      });
+    }
+
+    // Movement, Hop or Smooth, cycled in place; it applies from the next
+    // frame, a game in progress included.
+    const btnMotion = document.getElementById('btnMotion');
+    if (btnMotion) {
+      const paintMotion = () => {
+        const smooth = storedMotion() === 'smooth';
+        btnMotion.textContent = '\u{1F300} Movement: ' + (smooth ? 'Smooth' : 'Hop');
+        btnMotion.classList.toggle('active', smooth);
+      };
+      paintMotion();
+      btnMotion.addEventListener('click', () => {
+        motionChoice = storedMotion() === 'smooth' ? 'hop' : 'smooth';
+        try { localStorage.setItem(MOTION_KEY, motionChoice); } catch (e) {}
+        paintMotion();
       });
     }
 
