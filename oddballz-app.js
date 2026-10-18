@@ -308,7 +308,19 @@
       platform: '#ff7a2a', tints: ['#fff3c8', '#ffc24d', '#ff7a2a', '#e8454f'] },
     // Last, so the starting sectors already saved keep their numbers.
     { label: 'Ion Storm',                song: 'storm',      procedural: 'storm',
-      platform: '#9b7bff', tints: ['#b9a6ff', '#f0ecff', '#7a8cff', '#e07bff'] }
+      platform: '#9b7bff', tints: ['#b9a6ff', '#f0ecff', '#7a8cff', '#e07bff'] },
+    { label: 'Pulsar Beacon',            song: 'pulsar',     procedural: 'pulsar',
+      platform: '#3ff0d0', tints: ['#3ff0d0', '#e8fffb', '#5ab8ff', '#9affe6'] },
+    { label: 'Frozen Comet Trail',       song: 'comet',      procedural: 'comet',
+      platform: '#8fd0ff', tints: ['#bfe6ff', '#ffffff', '#7ab8ff', '#9ff0ff'] },
+    { label: 'Gas Giant Rings',          song: 'gasgiant',   procedural: 'gasgiant',
+      platform: '#ff9e8a', tints: ['#ffb39a', '#ffd9a8', '#e07a9a', '#c99aff'] },
+    { label: 'Asteroid Graveyard',       song: 'asteroid',   procedural: 'asteroid',
+      platform: '#d8a05a', tints: ['#e8b878', '#c9c2b8', '#a08a70', '#ffd9a0'] },
+    { label: 'Derelict Fleet',           song: 'derelict',   procedural: 'derelict',
+      platform: '#ff5a3a', tints: ['#ff6a4a', '#ffb347', '#7a9cc8', '#c8d4e8'] },
+    { label: 'Dark Matter Veil',         song: 'darkmatter', procedural: 'darkmatter',
+      platform: '#8a7aa8', tints: ['#a898c8', '#d8d0e8', '#6a6088', '#b0a8c0'] }
   ];
   // platform: the board's colour on that background (setPlatformTint), its most
   // saturated accent -- Solar's first tint is near white, so its orange.
@@ -375,9 +387,12 @@
   // full screen behind everything, its brightness matched to the dimmed pictures
   // it replaced so it sits back behind the board as they did, and the plain
   // colour under it.
-  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9, nebula: 0.9, citadel: 0.9, solar: 0.9, storm: 0.9 };
+  const PROC_BRIGHTNESS = { warp: 0.85, conduit: 0.9, lattice: 0.9, nebula: 0.9, citadel: 0.9, solar: 0.9, storm: 0.9,
+                            pulsar: 0.9, comet: 0.9, gasgiant: 0.9, asteroid: 0.9, derelict: 0.9, darkmatter: 1.0 };
   const PROC_BASE = { warp: 0x020308, conduit: 0x060b16, lattice: 0x03100b,
-                      nebula: 0x0b0a1e, citadel: 0x080a18, solar: 0x030203, storm: 0x07051a };
+                      nebula: 0x0b0a1e, citadel: 0x080a18, solar: 0x030203, storm: 0x07051a,
+                      pulsar: 0x03080c, comet: 0x040814, gasgiant: 0x080509, asteroid: 0x070605,
+                      derelict: 0x030409, darkmatter: 0x020203 };
 
   // Shared by all three: the uniforms, and the line helpers. Every line is drawn
   // by its distance from a segment in screen pixels, with a pixel of soft edge,
@@ -814,6 +829,219 @@
           float near = exp(-d / (m * 0.35));
           c += vec3(0.45, 0.30, 0.75) * (smoothstep(0.30, 0.85, cl) * 0.9 + 0.15) * near * env * 0.9;
         }
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Pulsar: the pulsar beacon (the user, 18 Oct 2026). A neutron star high on
+    // the left, white-hot in a teal glow inside a faint ring of nebula, with two
+    // beams opposite each other sweeping round it, a pass every two seconds --
+    // the beat its song is built on.
+    pulsar: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = mix(vec3(0.010, 0.022, 0.032), vec3(0.018, 0.040, 0.055), vUv.y);
+        c += starField(frag, m * 0.06, 0.25, t) * 0.6;
+        vec2 P = vec2(0.22, 0.76) * uRes;
+        vec2 v = (frag - P) / m;
+        float r = length(v);
+        float neb = fbm(v * 3.0 + vec2(t * 0.01, -t * 0.006));
+        c += vec3(0.05, 0.24, 0.24) * smoothstep(0.45, 0.85, neb) * exp(-abs(r - 0.33) * 6.0) * 0.7;
+        float ang = atan(v.y, v.x);
+        float spin = t * 1.5708;
+        float side = abs(sin(ang - spin));
+        float beam = exp(-side * 26.0) * smoothstep(0.0, 0.04, r) * exp(-r * 1.0);
+        float edge = exp(-side * 90.0) * smoothstep(0.0, 0.03, r) * exp(-r * 1.6);
+        c += vec3(0.25, 0.85, 0.80) * beam * 0.55 + vec3(0.80, 1.0, 0.98) * edge * 0.6;
+        float pulse = 0.85 + 0.15 * pow(abs(cos(ang - spin)), 8.0);
+        c += vec3(0.80, 1.0, 1.0) * exp(-r * 70.0) * 1.3 * pulse + vec3(0.20, 0.70, 0.75) * exp(-r * 10.0) * 0.4;
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Comet: the frozen comet trail. An icy blue field and its haze; a comet's
+    // head high on the right, streaming a broad dust tail and a straighter, bluer
+    // ion tail down to the left, their streamers shifting; and ice crystals
+    // drifting slowly past.
+    comet: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = mix(vec3(0.010, 0.020, 0.042), vec3(0.028, 0.048, 0.088), vUv.y);
+        c += starField(frag, m * 0.055, 0.28, t) * 0.6;
+        vec2 q = frag / m;
+        float h = fbm(q * 1.6 + vec2(t * 0.006, -t * 0.004));
+        c += vec3(0.10, 0.20, 0.32) * smoothstep(0.45, 0.90, h) * 0.45;
+        vec2 H = vec2(0.80 + 0.02 * sin(t * 0.05), 0.82) * uRes;
+        vec2 v = frag - H;
+        vec2 dir = normalize(vec2(-1.0, -0.62));
+        float along = dot(v, dir), across = dot(v, vec2(-dir.y, dir.x));
+        float w = m * 0.012 + max(along, 0.0) * 0.09;
+        float tail = step(0.0, along) * exp(-along / (m * 1.1)) * exp(-across * across / (w * w));
+        float streak = 0.75 + 0.25 * vnoise(vec2(along / m * 8.0 - t * 0.5, across / max(w, 1.0) * 2.0));
+        vec2 dir2 = normalize(vec2(-1.0, -0.42));
+        float a2 = dot(v, dir2), c2 = dot(v, vec2(-dir2.y, dir2.x));
+        float w2 = m * 0.006 + max(a2, 0.0) * 0.03;
+        float ion = step(0.0, a2) * exp(-a2 / (m * 1.4)) * exp(-c2 * c2 / (w2 * w2));
+        c += vec3(0.75, 0.88, 1.0) * tail * 0.55 * streak + vec3(0.35, 0.65, 1.0) * ion * 0.5;
+        float hd = length(v) / m;
+        c += vec3(0.90, 0.97, 1.0) * exp(-hd * 90.0) * 1.3 + vec3(0.50, 0.75, 1.0) * exp(-hd * 18.0) * 0.35;
+        c += starField(frag + vec2(t * m * 0.012, t * m * 0.022), m * 0.09, 0.12, t * 2.0) * vec3(0.70, 0.85, 1.0) * 0.5;
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Gas giant: the gas giant's rings. The planet huge, high on the right with
+    // its centre off the screen, banded in rose and sand with the bands slowly
+    // flowing, lit from the left; its rings sweeping down across the upper sky,
+    // in front of it below and behind it above. High rather than low: low, the
+    // board and the controls hid all but a sliver of it.
+    gasgiant: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = mix(vec3(0.028, 0.016, 0.028), vec3(0.050, 0.030, 0.055), vUv.y);
+        c += starField(frag, m * 0.06, 0.22, t) * 0.55;
+        vec2 C = vec2(uRes.x + 0.05 * m, uRes.y + 0.12 * m);
+        float R = m * 0.80;
+        vec2 v = frag - C;
+        float d = length(v) / R;
+        float ca = cos(-0.42), sa = sin(-0.42);
+        vec2 rv = vec2(ca * v.x - sa * v.y, sa * v.x + ca * v.y);
+        float e = length(rv * vec2(1.0, 3.2)) / R;
+        float rings = smoothstep(1.25, 1.30, e) * (1.0 - smoothstep(1.85, 1.90, e));
+        rings *= (0.55 + 0.45 * vnoise(vec2(e * 40.0, 0.5))) * (1.0 - 0.75 * bump((e - 1.58) * 0.5 + 0.5, 60.0));
+        vec3 ringCol = vec3(0.85, 0.70, 0.62);
+        float infront = step(rv.y, 0.0);
+        if (d < 1.0) {
+          float lat = v.y / R;
+          float band = sin(lat * 26.0 + fbm(v / R * vec2(6.0, 18.0) + vec2(t * 0.01, 0.0)) * 3.0);
+          vec3 body = mix(vec3(0.55, 0.30, 0.36), vec3(0.88, 0.64, 0.48), 0.5 + 0.5 * band);
+          float z = sqrt(1.0 - d * d);
+          float lit = clamp(dot(normalize(vec3(v / R, z)), normalize(vec3(-0.65, -0.25, 0.7))), 0.0, 1.0);
+          c = mix(c, body * (0.10 + 0.90 * lit) * 0.85, smoothstep(1.0, 0.995, d));
+          c += ringCol * rings * infront * 0.6;
+        } else {
+          c += ringCol * rings * 0.6;
+          c += vec3(0.65, 0.38, 0.45) * exp(-(d - 1.0) * 14.0) * 0.25;
+        }
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Asteroid: the asteroid graveyard. Dusk-brown space with a distant sun's
+    // amber glow at the upper left, and three layers of rocks drifting past, far
+    // to near, each slower in the distance, lumpy and lit from the sun's side.
+    asteroid: `
+      // one rock, or none, in each cell of a layer: its colour, and how much of
+      // the pixel it covers
+      vec4 rockLayer(vec2 frag, float m, float scale, float speed, float seed, float t, vec3 tint) {
+        vec2 p = frag / (m * scale) + vec2(t * speed, 0.0);
+        vec2 cell = floor(p), f = fract(p) - 0.5;
+        float h = hash2(cell + seed);
+        if (h > 0.55) return vec4(0.0);
+        vec2 off = (vec2(hash2(cell + seed + 1.3), hash2(cell + seed + 2.7)) - 0.5) * 0.25;
+        vec2 q = f - off;
+        float d = length(q);
+        float rad = 0.12 + 0.12 * hash2(cell + seed + 4.1);
+        float rr = rad * (0.8 + 0.35 * vnoise(q / max(d, 0.001) * 1.5 + h * 10.0));
+        float cover = 1.0 - smoothstep(rr - 0.015, rr, d);
+        if (cover <= 0.0) return vec4(0.0);
+        float k = clamp(d / rr, 0.0, 1.0);
+        vec3 n = normalize(vec3(q / rr, sqrt(max(0.0, 1.0 - k * k))));
+        float lit = clamp(dot(n, normalize(vec3(-0.7, 0.6, 0.5))), 0.0, 1.0);
+        float grit = 0.8 + 0.2 * vnoise(q * 30.0 + h * 50.0);
+        return vec4(tint * (0.10 + 0.95 * lit) * grit, cover);
+      }
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = mix(vec3(0.028, 0.022, 0.018), vec3(0.050, 0.040, 0.034), vUv.y);
+        c += starField(frag, m * 0.065, 0.18, t) * 0.45;
+        vec2 S = vec2(0.10, 0.88) * uRes;
+        float sd = length(frag - S) / m;
+        c += vec3(0.90, 0.60, 0.28) * exp(-sd * 3.2) * 0.30 + vec3(1.0, 0.85, 0.6) * exp(-sd * 40.0) * 0.6;
+        c += vec3(0.10, 0.07, 0.05) * smoothstep(0.5, 0.9, fbm(frag / m * 1.4 + vec2(t * 0.004, 0.0))) * 0.6;
+        vec4 r1 = rockLayer(frag, m, 0.20, 0.006, 3.0, t, vec3(0.30, 0.25, 0.21));
+        c = mix(c, r1.rgb, r1.a * 0.8);
+        vec4 r2 = rockLayer(frag, m, 0.34, 0.011, 11.0, t, vec3(0.42, 0.34, 0.27));
+        c = mix(c, r2.rgb, r2.a);
+        vec4 r3 = rockLayer(frag, m, 0.62, 0.019, 23.0, t, vec3(0.30, 0.24, 0.19));
+        c = mix(c, r3.rgb * 0.75, r3.a);
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Derelict: the derelict fleet. Cold navy space and a blue haze; three wrecked
+    // ships in silhouette at different sizes, each broken through amidships and
+    // rimmed faintly by the haze, drifting a little; red and amber emergency
+    // lights on them blinking out of step.
+    derelict: `
+      float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0); }
+      // one wreck, in its own units: a hull, a bridge, an engine block, and a
+      // ragged break through the middle
+      float wreck(vec2 p) {
+        float hull = sdBox(p, vec2(0.22, 0.025));
+        float bridge = sdBox(p - vec2(0.12, 0.034), vec2(0.04, 0.018));
+        float engine = sdBox(p + vec2(0.20, 0.0), vec2(0.03, 0.045));
+        float gap = sdBox(p - vec2(-0.04, 0.0), vec2(0.010 + 0.008 * sin(p.y * 160.0), 0.06));
+        return max(min(min(hull, bridge), engine), -gap);
+      }
+      vec2 toShip(vec2 frag, vec2 at, float scale, float ang, float m) {
+        vec2 q = (frag - at) / (m * scale);
+        float c = cos(ang), s = sin(ang);
+        return vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+      }
+      float blink(float t, float period, float phase) { return step(0.82, fract(t / period + phase)); }
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = mix(vec3(0.018, 0.026, 0.050), vec3(0.040, 0.058, 0.100), vUv.y);
+        float haze = smoothstep(0.35, 0.85, fbm(frag / m * 1.3 + vec2(t * 0.005, 0.0)));
+        c += vec3(0.08, 0.16, 0.30) * haze * 1.1;
+        c += starField(frag, m * 0.06, 0.22, t) * 0.5;
+        vec3 hullCol = vec3(0.016, 0.019, 0.026);
+        vec3 red = vec3(1.0, 0.18, 0.12), amber = vec3(1.0, 0.62, 0.15);
+        for (int i = 0; i < 3; i++) {
+          float fi = float(i);
+          vec2 at = (i == 0 ? vec2(0.68, 0.83) : (i == 1 ? vec2(0.16, 0.70) : vec2(0.90, 0.52))) * uRes;
+          at += vec2(sin(t * 0.04 + fi * 2.0), cos(t * 0.03 + fi)) * m * 0.01;
+          float scale = i == 0 ? 1.5 : (i == 1 ? 0.9 : 1.1);
+          float ang = i == 0 ? -0.12 : (i == 1 ? 0.25 : 0.42);
+          vec2 q = toShip(frag, at, scale, ang, m);
+          float sd = wreck(q) * m * scale;
+          float cover = 1.0 - smoothstep(-0.5, 0.8, sd);
+          c = mix(c, hullCol + vec3(0.04, 0.07, 0.12) * haze * 0.3, cover);
+          c += vec3(0.10, 0.18, 0.30) * exp(-abs(sd) * 0.9) * 0.06 * (0.4 + haze);
+          vec2 l1 = toShip(frag, at, scale, ang, m) - vec2(0.17, 0.05);
+          vec2 l2 = toShip(frag, at, scale, ang, m) - vec2(-0.21, -0.05);
+          c += red * exp(-length(l1) * m * scale * 0.18) * (0.25 + 0.75 * blink(t, 1.3, fi * 0.37)) * 0.9;
+          c += amber * exp(-length(l2) * m * scale * 0.18) * (0.25 + 0.75 * blink(t, 2.1, fi * 0.61)) * 0.8;
+        }
+        gl_FragColor = vec4(c * uBright, uAlpha);
+      }`,
+
+    // Dark matter: the dark matter veil. Nearly black; stars seen through three
+    // unseen masses drifting slowly, the light bending round each -- the stars
+    // smearing towards them and a faint ring where it focuses -- under a thin
+    // grey-violet haze. Unsettling rather than pretty.
+    darkmatter: `
+      void main() {
+        vec2 frag = vUv * uRes;
+        float m = min(uRes.x, uRes.y), t = uTime;
+        vec3 c = vec3(0.008, 0.008, 0.014);
+        vec2 bent = frag;
+        float rings = 0.0;
+        for (int i = 0; i < 3; i++) {
+          float fi = float(i);
+          vec2 M = (vec2(0.25 + 0.5 * hash(fi * 7.1), 0.25 + 0.5 * hash(fi * 3.3))
+                  + 0.12 * vec2(sin(t * 0.021 + fi * 2.1), cos(t * 0.017 + fi * 1.3))) * uRes;
+          vec2 dv = (frag - M) / m;
+          float r2 = dot(dv, dv);
+          float k = 0.010 + 0.006 * fi;
+          bent -= dv / (r2 + 0.004) * k * m;
+          float rE = sqrt(k) * 1.1;
+          rings += exp(-abs(sqrt(r2) - rE) * 55.0) * 0.5;
+        }
+        c += starField(bent, m * 0.04, 0.45, t * 0.6) * 0.8;
+        c += vec3(0.10, 0.09, 0.14) * smoothstep(0.5, 0.95, fbm(frag / m * 1.1 + vec2(t * 0.003, 0.0))) * 0.35;
+        c += vec3(0.20, 0.18, 0.30) * rings * 0.6;
         gl_FragColor = vec4(c * uBright, uAlpha);
       }`
   };
@@ -3514,6 +3742,533 @@
       },
     },
     order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* pulsar - Pulsar Beacon (the user, 18 Oct 2026). A minor, 125 BPM:
+   * hypnotic. An unbroken sixteenth-note ostinato through each chord, a kick on
+   * every beat with the bass between, and long lead tones over Am F C G; B turns
+   * through D minor to E. The beams sweep at about its bar, a pass every two seconds. */
+  SONGS.push({
+    id: 'pulsar',
+    title: 'Pulsar Beacon',
+    speed: 6,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      plead:  { adsr: [4, 9, 10, 8], wave: [['P', 0]], pulse: [0x800, 0x18, 0x400, 0xC00], vib: [18, 0.2, 8], glide: 0.5 },
+      plead2: { adsr: [4, 9, 10, 8], wave: [['P', 12], ['P', 0]], pulse: [0x700, 0x20, 0x400, 0xC00], vib: [16, 0.25, 8], glide: 0.5 },
+      pbass:  { adsr: [0, 7, 6, 4], wave: [['P', 0]], pulse: [0x400, 0x20, 0x200, 0xA00] },
+      parp:   { adsr: [0, 6, 4, 4], wave: [['P', 0]], pulse: [0x600, 0x30, 0x300, 0xC00],
+                filter: { mode: 'LP', res: 11, cutoff: [0x300, 0x10, 0x300, 0x7FF] } },
+      pswell: { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
+                filter: { mode: 'LP', res: 8, cutoff: [0x200, 0x08, 0x200, 0x700] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      leadA:
+        'E5 . . . | . . . . | . . . . | D5 . C5 . ' +
+        'C5 . . . | . . . . | A4 . . . | . . . . ' +
+        'G4 . . . | . . C5 . | . . E5 . | . . . . ' +
+        'D5 . . . | . . . . | B4 . . . | ^ . . . ' +
+        'A5 . . . | . . . . | . . G5 . | E5 . . . ' +
+        'F5 . . . | . . . . | E5 . . . | C5 . . . ' +
+        'D5 . . . | . . G5 . | . . B5 . | . . . . ' +
+        'G#5 . . . | . . . . | E5 . . . | ^ . . .',
+      leadB:
+        'F5 . . . | . . A5 . | . . D6 . | . . . . ' +
+        'C6 . . . | . . . . | A5 . . . | . . E5 . ' +
+        'F5 . . . | . . . . | A5 . . . | C6 . . . ' +
+        'B5 . . . | . . . . | G#5 . . . | ^ . . . ' +
+        'D6 . . . | . . . . | F5 . . . | A5 . . . ' +
+        'E5 . . . | . . . . | C5 . . . | . . . . ' +
+        'D5 . . . | . . F5 . | . . Bb5 . | . . . . ' +
+        'B5 . . . | >E6 . . . | . . . . | ^ . . .',
+      leadBreak:
+        'E5 . . . | . . . . | . . . . | . . . . ' +
+        'F5 . . . | . . . . | . . . . | . . . . ' +
+        'G5 . . . | . . . . | . . . . | . . . . ' +
+        'B4 . . . | . . . . | D5 . . . | ^ . . .',
+      pOst:   'A4 C5 E5 C5 | A4 C5 E5 C5 | A4 C5 E5 C5 | A4 C5 E5 C5',
+      pOstM:  'A4 C#5 E5 C#5 | A4 C#5 E5 C#5 | A4 C#5 E5 C#5 | A4 C#5 E5 C#5',
+      pbDrive: 'K . A2:pbass . | K . A2 . | K . A2 . | K . A3 .',
+      pbSoft:  'A2:pbass . . . | . . . . | A2 . . . | . . . .',
+      pbFill:  'K . A2:pbass . | K . A2 . | K S K S | S S S S',
+      pHoldm: 'A4~037 . . . | . . . . | . . . . | . . . .',
+      pHold:  'A4~047 . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['pbSoft', 'pbSoft-4', 'pbSoft+3', 'pbSoft-2'],
+        v3: ['pOst@parp', 'pOstM-4@parp', 'pOstM+3@parp', 'pOstM-2@parp'],
+      },
+      A: {
+        v1: ['leadA@plead'],
+        v2: ['pbDrive', 'pbDrive-4', 'pbDrive+3', 'pbDrive-2', 'pbDrive', 'pbDrive-4', 'pbDrive-2', 'pbFill-5'],
+        v3: ['pOst@parp', 'pOstM-4@parp', 'pOstM+3@parp', 'pOstM-2@parp',
+             'pOst@parp', 'pOstM-4@parp', 'pOstM-2@parp', 'pOstM-5@parp'],
+      },
+      B: {
+        v1: ['leadB@plead'],
+        v2: ['pbDrive-7', 'pbDrive', 'pbDrive-4', 'pbDrive-5', 'pbDrive-7', 'pbDrive', 'pbDrive+1', 'pbFill-5'],
+        v3: ['pOst-7@parp', 'pOst@parp', 'pOstM-4@parp', 'pOstM-5@parp',
+             'pOst-7@parp', 'pOst@parp', 'pOstM+1@parp', 'pOstM-5@parp'],
+      },
+      A2: {
+        v1: ['leadA@plead2'],
+        v2: ['pbDrive', 'pbDrive-4', 'pbDrive+3', 'pbDrive-2', 'pbDrive', 'pbDrive-4', 'pbDrive-2', 'pbFill-5'],
+        v3: ['pOst@parp', 'pOstM-4@parp', 'pOstM+3@parp', 'pOstM-2@parp',
+             'pOst@parp', 'pOstM-4@parp', 'pOstM-2@parp', 'pOstM-5@parp'],
+      },
+      Break: {
+        v1: ['leadBreak@plead'],
+        v2: ['pbSoft', 'pbSoft-4', 'pbSoft+3', 'pbSoft-2'],
+        v3: ['pHoldm@pswell', 'pHold-4@pswell', 'pHold+3@pswell', 'pHold-2@pswell'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* comet - Frozen Comet Trail (the user, 18 Oct 2026). F sharp minor, 94 BPM:
+   * cold but beautiful. Bells -- triangle tones that strike and ring away --
+   * for the melody and a slow arpeggio under it, a soft kick on the bar, a
+   * long low bass, over F#m D A E; B through B minor; the reprise with the
+   * bells doubled at the octave. */
+  SONGS.push({
+    id: 'comet',
+    title: 'Frozen Comet Trail',
+    speed: 8,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      cbell:  { adsr: [0, 10, 0, 10], wave: [['T', 0]] },
+      cbell2: { adsr: [0, 10, 0, 10], wave: [['T', 12], ['T', 0]] },
+      carp:   { adsr: [0, 8, 0, 8], wave: [['T', 0]] },
+      cbass:  { adsr: [2, 10, 8, 9], wave: [['T', 0]] },
+      cpad:   { adsr: [10, 10, 10, 11], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 4,
+                filter: { mode: 'LP', res: 6, cutoff: [0x180, 0x06, 0x180, 0x500] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      leadA:
+        'C#6 . . . | . . . . | B5 . A5 . | . . . . ' +
+        'F#5 . . . | . . . . | . . . . | A5 . . . ' +
+        'E6 . . . | . . . . | C#6 . . . | . . . . ' +
+        'B5 . . . | . . . . | G#5 . . . | . . . . ' +
+        'A5 . . . | . . C#6 . | . . F#6 . | . . . . ' +
+        'E6 . . . | . . . . | D6 . . . | . . . . ' +
+        'C#6 . . . | . . . . | E6 . . . | . . . . ' +
+        'B5 . . . | . . . . | . . . . | ^ . . .',
+      leadB:
+        'D6 . . . | . . . . | F#6 . . . | . . . . ' +
+        'A5 . . . | . . . . | . . F#5 . | . . . . ' +
+        'C#6 . . . | . . A5 . | . . . . | . . . . ' +
+        'G#5 . . . | . . . . | B5 . . . | . . . . ' +
+        'F#6 . . . | . . . . | D6 . . . | B5 . . . ' +
+        'A5 . . . | . . . . | D6 . . . | . . . . ' +
+        'E6 . . . | . . C#6 . | . . A5 . | . . . . ' +
+        'B5 . . . | . . . . | E6 . . . | ^ . . .',
+      leadBreak:
+        'F#6 . . . | . . . . | . . . . | . . . . ' +
+        'D6 . . . | . . . . | . . . . | . . . . ' +
+        'C#6 . . . | . . . . | . . . . | . . . . ' +
+        'B5 . . . | . . . . | G#5 . . . | ^ . . .',
+      cArp:    'F#5 . . . | A5 . . . | C#6 . . . | A5 . . .',
+      cArpM:   'F#5 . . . | A#5 . . . | C#6 . . . | A#5 . . .',
+      cbPulse: 'F#2:cbass . . . | . . . . | . . . . | . . . .',
+      cbBeat:  'K . F#2:cbass . | . . . . | . . . . | . . . .',
+      cPadm:   'F#4~037 . . . | . . . . | . . . . | . . . .',
+      cPad:    'F#4~047 . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['cbPulse', 'cbPulse-4', 'cbPulse+3', 'cbPulse-2'],
+        v3: ['cPadm@cpad', 'cPad-4@cpad', 'cPad+3@cpad', 'cPad-2@cpad'],
+      },
+      A: {
+        v1: ['leadA@cbell'],
+        v2: ['cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2', 'cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2'],
+        v3: ['cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp',
+             'cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp'],
+      },
+      B: {
+        v1: ['leadB@cbell'],
+        v2: ['cbBeat+5', 'cbBeat-4', 'cbBeat', 'cbBeat-2', 'cbBeat+5', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2'],
+        v3: ['cArp-7@carp', 'cArpM-4@carp', 'cArp@carp', 'cArpM-2@carp',
+             'cArp-7@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp'],
+      },
+      A2: {
+        v1: ['leadA@cbell2'],
+        v2: ['cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2', 'cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2'],
+        v3: ['cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp',
+             'cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp'],
+      },
+      Break: {
+        v1: ['leadBreak@cbell'],
+        v2: ['cbPulse', 'cbPulse-4', 'cbPulse+3', 'cbPulse-2'],
+        v3: ['cPadm@cpad', 'cPad-4@cpad', 'cPad+3@cpad', 'cPad-2@cpad'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* gasgiant - Gas Giant Rings (the user, 18 Oct 2026). C Lydian, 94 BPM:
+   * wide and majestic. A half-time groove, kick on 1 and snare on 3; slow
+   * swelling chords, C to D over C -- the raised fourth that makes it Lydian --
+   * then A minor and G; a broad sawtooth lead. B moves through E minor and F
+   * and rises to G. */
+  SONGS.push({
+    id: 'gasgiant',
+    title: 'Gas Giant Rings',
+    speed: 8,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      glead:  { adsr: [5, 9, 10, 9], wave: [['S', 0]], vib: [20, 0.2, 7], glide: 0.6 },
+      glead2: { adsr: [5, 9, 10, 9], wave: [['S', 12], ['S', 0]], vib: [18, 0.25, 7], glide: 0.6 },
+      gbass:  { adsr: [0, 8, 7, 5], wave: [['P', 0]], pulse: [0x500, 0x20, 0x300, 0xA00] },
+      gchord: { adsr: [6, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
+                filter: { mode: 'LP', res: 7, cutoff: [0x300, 0x06, 0x280, 0x700] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      leadA:
+        'G5 . . . | . . . . | . . . . | E5 . G5 . ' +
+        'F#5 . . . | . . . . | A5 . . . | . . . . ' +
+        'E5 . . . | . . . . | C5 . . . | . . E5 . ' +
+        'D5 . . . | . . . . | . . . . | ^ . . . ' +
+        'C6 . . . | . . . . | A5 . . . | . . . . ' +
+        'B5 . . . | . . . . | D6 . . . | . . . . ' +
+        'C6 . . . | . . B5 . | A5 . . . | E5 . . . ' +
+        'G5 . . . | . . . . | . . . . | ^ . . .',
+      leadB:
+        'B5 . . . | . . . . | G5 . . . | E5 . . . ' +
+        'A5 . . . | . . . . | C6 . . . | . . . . ' +
+        'E6 . . . | . . . . | . . D6 . | C6 . . . ' +
+        'D6 . . . | . . . . | B5 . . . | ^ . . . ' +
+        'G5 . . . | . . B5 . | . . E6 . | . . . . ' +
+        'F6 . . . | . . . . | C6 . . . | A5 . . . ' +
+        'F#6 . . . | . . . . | D6 . . . | A5 . . . ' +
+        'G6 . . . | . . . . | . . . . | ^ . . .',
+      leadBreak:
+        'E5 . G5 . | C6 . . . | . . . . | . . . . ' +
+        'F#5 . A5 . | D6 . . . | . . . . | . . . . ' +
+        'E5 . A5 . | C6 . . . | . . . . | . . . . ' +
+        'D5 . G5 . | B5 . . . | D6 . . . | ^ . . .',
+      gbHalf: 'K . C2:gbass . | . . . . | S . C2 . | . . C3 .',
+      gbSoft: 'C2:gbass . . . | . . . . | . . . . | . . . .',
+      gbFill: 'K . C2:gbass . | . . . . | S S K S | S S S S',
+      gHold:  'C4~047 . . . | . . . . | . . . . | . . . .',
+      gHoldm: 'C4~037 . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['gbSoft', 'gbSoft', 'gbSoft-3', 'gbSoft-5'],
+        v3: ['gHold@gchord', 'gHold+2@gchord', 'gHoldm-3@gchord', 'gHold-5@gchord'],
+      },
+      A: {
+        v1: ['leadA-12@glead'],
+        v2: ['gbHalf', 'gbHalf', 'gbHalf-3', 'gbHalf-5', 'gbHalf+5', 'gbHalf-5', 'gbHalf-3', 'gbFill-5'],
+        v3: ['gHold@gchord', 'gHold+2@gchord', 'gHoldm-3@gchord', 'gHold-5@gchord',
+             'gHold+5@gchord', 'gHold-5@gchord', 'gHoldm-3@gchord', 'gHold-5@gchord'],
+      },
+      B: {
+        v1: ['leadB-12@glead'],
+        v2: ['gbHalf+4', 'gbHalf+5', 'gbHalf', 'gbHalf-5', 'gbHalf+4', 'gbHalf+5', 'gbHalf+2', 'gbFill-5'],
+        v3: ['gHoldm+4@gchord', 'gHold+5@gchord', 'gHold@gchord', 'gHold-5@gchord',
+             'gHoldm+4@gchord', 'gHold+5@gchord', 'gHold+2@gchord', 'gHold-5@gchord'],
+      },
+      A2: {
+        v1: ['leadA@glead2'],
+        v2: ['gbHalf', 'gbHalf', 'gbHalf-3', 'gbHalf-5', 'gbHalf+5', 'gbHalf-5', 'gbHalf-3', 'gbFill-5'],
+        v3: ['gHold@gchord', 'gHold+2@gchord', 'gHoldm-3@gchord', 'gHold-5@gchord',
+             'gHold+5@gchord', 'gHold-5@gchord', 'gHoldm-3@gchord', 'gHold-5@gchord'],
+      },
+      Break: {
+        v1: ['leadBreak-12@glead'],
+        v2: ['gbSoft', 'gbSoft', 'gbSoft-3', 'gbSoft-5'],
+        v3: ['gHold@gchord', 'gHold+2@gchord', 'gHoldm-3@gchord', 'gHold-5@gchord'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* asteroid - Asteroid Graveyard (the user, 18 Oct 2026). G minor, 107 BPM:
+   * sparse and lonely. Low bass pulses on 1 and 3 with a soft kick, long
+   * triangle tones far apart over a slow pad, Gm Eb Cm D; B through B flat
+   * and F; the reprise trades the pad for distant pings. No snare. */
+  SONGS.push({
+    id: 'asteroid',
+    title: 'Asteroid Graveyard',
+    speed: 7,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      alead:  { adsr: [6, 10, 10, 11], wave: [['T', 0]], vib: [24, 0.3, 6], glide: 0.6 },
+      alead2: { adsr: [6, 10, 10, 11], wave: [['T', 12], ['T', 0]], vib: [22, 0.3, 6], glide: 0.6 },
+      abass:  { adsr: [0, 10, 0, 9], wave: [['P', 0]], pulse: [0x300, 0x10, 0x200, 0x800] },
+      aping:  { adsr: [0, 8, 0, 10], wave: [['T', 0]] },
+      apad:   { adsr: [11, 10, 9, 11], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 4,
+                filter: { mode: 'LP', res: 6, cutoff: [0x150, 0x05, 0x150, 0x450] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      leadA:
+        'D5 . . . | . . . . | . . . . | . . . . ' +
+        'G5 . . . | . . . . | Bb5 . . . | . . . . ' +
+        'G5 . . . | . . . . | Eb5 . . . | . . . . ' +
+        'F#5 . . . | . . . . | . . . . | ^ . . . ' +
+        'Bb5 . . . | . . . . | A5 . . . | G5 . . . ' +
+        'Bb5 . . . | . . . . | . . . . | G5 . . . ' +
+        'C6 . . . | . . . . | Eb6 . . . | . . . . ' +
+        'D6 . . . | . . . . | A5 . . . | ^ . . .',
+      leadB:
+        'G5 . . . | . . . . | . . Bb5 . | . . . . ' +
+        'D6 . . . | . . . . | . . . . | F5 . . . ' +
+        'A5 . . . | . . . . | C6 . . . | . . . . ' +
+        'A5 . . . | . . . . | F#5 . . . | ^ . . . ' +
+        'D6 . . . | . . . . | Bb5 . . . | . . . . ' +
+        'F6 . . . | . . . . | D6 . . . | . . . . ' +
+        'Eb6 . . . | . . . . | G5 . . . | Bb5 . . . ' +
+        'A5 . . . | >D6 . . . | . . . . | ^ . . .',
+      leadBreak:
+        'G5 . . . | . . . . | . . . . | . . . . ' +
+        'Eb5 . . . | . . . . | . . . . | . . . . ' +
+        'C5 . . . | . . . . | . . . . | . . . . ' +
+        'D5 . . . | . . . . | F#5 . . . | ^ . . .',
+      abPulse: 'K . G2:abass . | . . . . | . . G2 . | . . . .',
+      abSoft:  'G2:abass . . . | . . . . | . . . . | . . . .',
+      aPadm:   'G4~037 . . . | . . . . | . . . . | . . . .',
+      aPad:    'G4~047 . . . | . . . . | . . . . | . . . .',
+      aPing:   'G6 . . . | . . . . | . . . . | . . D6 .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['abSoft', 'abSoft-4', 'abSoft-7', 'abSoft-5'],
+        v3: ['aPadm@apad', 'aPad-4@apad', 'aPadm-7@apad', 'aPad-5@apad'],
+      },
+      A: {
+        v1: ['leadA-12@alead'],
+        v2: ['abPulse', 'abPulse-4', 'abPulse-7', 'abPulse-5', 'abPulse', 'abPulse-4', 'abPulse-7', 'abPulse-5'],
+        v3: ['aPadm@apad', 'aPad-4@apad', 'aPadm-7@apad', 'aPad-5@apad',
+             'aPadm@apad', 'aPad-4@apad', 'aPadm-7@apad', 'aPad-5@apad'],
+      },
+      B: {
+        v1: ['leadB-12@alead'],
+        v2: ['abPulse', 'abPulse+3', 'abPulse-2', 'abPulse-5', 'abPulse', 'abPulse+3', 'abPulse-4', 'abPulse-5'],
+        v3: ['aPadm@apad', 'aPad+3@apad', 'aPad-2@apad', 'aPad-5@apad',
+             'aPadm@apad', 'aPad+3@apad', 'aPad-4@apad', 'aPad-5@apad'],
+      },
+      A2: {
+        v1: ['leadA@alead2'],
+        v2: ['abPulse', 'abPulse-4', 'abPulse-7', 'abPulse-5', 'abPulse', 'abPulse-4', 'abPulse-7', 'abPulse-5'],
+        v3: ['aPing@aping', 'aPing-4@aping', 'aPing-7@aping', 'aPing-5@aping',
+             'aPing@aping', 'aPing-4@aping', 'aPing-7@aping', 'aPing-5@aping'],
+      },
+      Break: {
+        v1: ['leadBreak-12@alead'],
+        v2: ['abSoft', 'abSoft-4', 'abSoft-7', 'abSoft-5'],
+        v3: ['aPadm@apad', 'aPad-4@apad', 'aPadm-7@apad', 'aPad-5@apad'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* derelict - Derelict Fleet (the user, 18 Oct 2026). C minor, 83 BPM: eerie
+   * and mechanical. A slow march -- kick on 1 and 3, snare on 2 and 4 -- with
+   * the bass stepping between and bursts of radio static; stiff, filtered
+   * chord stabs; a thin, wavering lead over Cm Ab Fm G, with D flat for the
+   * chill; B from F minor through E flat. */
+  SONGS.push({
+    id: 'derelict',
+    title: 'Derelict Fleet',
+    speed: 9,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      dlead:  { adsr: [3, 9, 9, 8], wave: [['P', 0]], pulse: [0x200, 0x08, 0x180, 0x600], vib: [10, 0.45, 5], glide: 0.3 },
+      dlead2: { adsr: [3, 9, 9, 8], wave: [['P', 12], ['P', 0]], pulse: [0x200, 0x08, 0x180, 0x600], vib: [10, 0.45, 5], glide: 0.3 },
+      dbass:  { adsr: [0, 8, 6, 4], wave: [['P', 0]], pulse: [0x300, 0x10, 0x200, 0x900] },
+      dchord: { adsr: [2, 9, 6, 7], wave: [['P', 0]], pulse: [0x400, 0x20, 0x300, 0xA00], arpSpeed: 2,
+                filter: { mode: 'LP', res: 12, cutoff: [0x400, -0x10, 0x200, 0x700] } },
+      static: { adsr: [0, 11, 0, 11], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C6'], ['N', '=G5'], ['N', '=E6'], ['N', '=C6'], ['N', '=A5']] },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare', X: 'static' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      leadA:
+        'G5 . . . | . . . . | Eb5 . . . | . . . . ' +
+        'C5 . . . | . . . . | Eb5 . . . | Ab5 . . . ' +
+        'G5 . . . | . . F5 . | . . Ab5 . | . . . . ' +
+        'B4 . . . | . . . . | D5 . . . | ^ . . . ' +
+        'C6 . . . | . . . . | B5 . . . | G5 . . . ' +
+        'Ab5 . . . | . . . . | F5 . . . | Db5 . . . ' +
+        'Eb5 . . . | . . . . | C5 . . . | Eb5 . . . ' +
+        'D5 . . . | . . . . | B4 . . . | ^ . . .',
+      leadB:
+        'F5 . . . | . . Ab5 . | . . C6 . | . . . . ' +
+        'Eb6 . . . | . . . . | C6 . . . | . . G5 . ' +
+        'Ab5 . . . | . . . . | C6 . . . | Eb6 . . . ' +
+        'D6 . . . | . . . . | B5 . . . | ^ . . . ' +
+        'C6 . . . | . . . . | Ab5 . . . | F5 . . . ' +
+        'F5 . . . | . . . . | Ab5 . . . | Db6 . . . ' +
+        'Bb5 . . . | . . G5 . | . . Eb5 . | . . . . ' +
+        'D5 . . . | >G5 . . . | . . . . | ^ . . .',
+      leadBreak:
+        'C5 . . . | . . . . | . . . . | . . . . ' +
+        'Eb5 . . . | . . . . | . . . . | . . . . ' +
+        'F5 . . . | . . . . | . . . . | . . . . ' +
+        'D5 . . . | . . . . | B4 . . . | ^ . . .',
+      dbMarch:  'K . C3:dbass . | S . G2 . | K . Ab2 . | S . G2 .',
+      dbStatic: 'K . C3:dbass . | S . G2 . | X . Ab2 . | S . G2 .',
+      dbFill:   'K . C3:dbass . | S . G2 . | K S K S | X . . .',
+      dbSoft:   'C3:dbass . . . | . . . . | G2 . . . | . . . .',
+      dChm:   'C4~037 . . . | . . C4~037 . | . . . . | C4~037 . . .',
+      dCh:    'C4~047 . . . | . . C4~047 . | . . . . | C4~047 . . .',
+      dHoldm: 'C4~037 . . . | . . . . | . . . . | . . . .',
+      dHold:  'C4~047 . . . | . . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['dbSoft', 'dbSoft-4', 'dbSoft-7', 'dbSoft-5'],
+        v3: ['dHoldm@dchord', 'dHold-4@dchord', 'dHoldm+5@dchord', 'dHold-5@dchord'],
+      },
+      A: {
+        v1: ['leadA@dlead'],
+        v2: ['dbMarch', 'dbMarch-4', 'dbMarch-7', 'dbStatic-5', 'dbMarch', 'dbMarch+1', 'dbMarch-4', 'dbFill-5'],
+        v3: ['dChm@dchord', 'dCh-4@dchord', 'dChm+5@dchord', 'dCh-5@dchord',
+             'dChm@dchord', 'dCh+1@dchord', 'dCh-4@dchord', 'dCh-5@dchord'],
+      },
+      B: {
+        v1: ['leadB@dlead'],
+        v2: ['dbMarch-7', 'dbMarch', 'dbMarch-4', 'dbStatic-5', 'dbMarch-7', 'dbMarch+1', 'dbMarch+3', 'dbFill-5'],
+        v3: ['dChm+5@dchord', 'dChm@dchord', 'dCh-4@dchord', 'dCh-5@dchord',
+             'dChm+5@dchord', 'dCh+1@dchord', 'dCh+3@dchord', 'dCh-5@dchord'],
+      },
+      A2: {
+        v1: ['leadA@dlead2'],
+        v2: ['dbMarch', 'dbMarch-4', 'dbMarch-7', 'dbStatic-5', 'dbMarch', 'dbMarch+1', 'dbMarch-4', 'dbFill-5'],
+        v3: ['dChm@dchord', 'dCh-4@dchord', 'dChm+5@dchord', 'dCh-5@dchord',
+             'dChm@dchord', 'dCh+1@dchord', 'dCh-4@dchord', 'dCh-5@dchord'],
+      },
+      Break: {
+        v1: ['leadBreak@dlead'],
+        v2: ['dbSoft', 'dbSoft-4', 'dbSoft-7', 'dbSoft-5'],
+        v3: ['dHoldm@dchord', 'dHold-4@dchord', 'dHoldm+5@dchord', 'dHold-5@dchord'],
+      },
+    },
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
+    loopTo: 'A',
+  });
+
+  /* darkmatter - Dark Matter Veil (the user, 18 Oct 2026). Around B, 83 BPM,
+   * barely a key at all: unsettling. A sub-bass swelling each bar and creeping
+   * a semitone, a slow dissonant cluster turning over it -- B, C, F, F sharp --
+   * and a low thud now and then; then a drone line, very sparse, with distant
+   * pings. Mostly space. */
+  SONGS.push({
+    id: 'darkmatter',
+    title: 'Dark Matter Veil',
+    speed: 9,
+    rowsPerBeat: 4,
+    rowsPerBar: 16,
+
+    instruments: {
+      xdrone: { adsr: [12, 10, 12, 12], wave: [['P', 0]], pulse: [0x200, 0x04, 0x180, 0x500], vib: [0, 0.15, 2] },
+      xsub:   { adsr: [8, 10, 12, 12], wave: [['T', 0]] },
+      xping:  { adsr: [0, 9, 0, 11], wave: [['T', 0]] },
+      xclus:  { adsr: [10, 10, 10, 12], wave: [['P', 0]], pulse: [0x400, 0x08, 0x300, 0x900], arpSpeed: 8,
+                filter: { mode: 'LP', res: 9, cutoff: [0x180, 0x04, 0x150, 0x400] } },
+      kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
+      snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
+                wave: [['N', '=C7'], ['P', '=C5'], ['N', '=G6'], ['N', '=E6'], ['N', '=D6']] },
+    },
+    drums: { K: 'kick', S: 'snare' },
+
+    patterns: {
+      rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
+      xLead:
+        'B4 . . . | . . . . | . . . . | . . . . ' +
+        'C5 . . . | . . . . | . . . . | . . . . ' +
+        'B4 . . . | . . . . | . . . . | . . . . ' +
+        'F5 . . . | . . . . | . . . . | ^ . . . ' +
+        'D5 . . . | . . . . | . . . . | . . . . ' +
+        'C#5 . . . | . . . . | . . . . | . . . . ' +
+        'C5 . . . | . . . . | . . . . | . . . . ' +
+        'B4 . . . | . . . . | . . . . | ^ . . .',
+      xSub:   'B1:xsub . . . | . . . . | . . . . | . . . .',
+      xSubK:  'K . B1:xsub . | . . . . | . . . . | . . . .',
+      xClus:  'B3~0167 . . . | . . . . | . . . . | . . . .',
+      xClus2: 'B3~0356 . . . | . . . . | . . . . | . . . .',
+      xPing:  '. . . . | . . . . | F#6 . . . | . . . .',
+      xPing2: '. . . . | C6 . . . | . . . . | . . . .',
+    },
+
+    sections: {
+      A: {
+        v1: ['rest2', 'rest2', 'rest2', 'rest2'],
+        v2: ['xSubK', 'xSub', 'xSub+1', 'xSub+1', 'xSubK', 'xSub', 'xSub-2', 'xSub'],
+        v3: ['xClus@xclus', 'xClus@xclus', 'xClus2@xclus', 'xClus2@xclus',
+             'xClus@xclus', 'xClus@xclus', 'xClus2@xclus', 'xClus2@xclus'],
+      },
+      B: {
+        v1: ['xLead@xdrone'],
+        v2: ['xSubK', 'xSub+1', 'xSub', 'xSub', 'xSubK+3', 'xSub+2', 'xSub+1', 'xSub'],
+        v3: ['xPing@xping', 'xPing2@xping', 'xPing@xping', 'xPing2@xping',
+             'xPing@xping', 'xPing2@xping', 'xPing@xping', 'xPing2@xping'],
+      },
+    },
+    order: ['A', 'B'],
     loopTo: 'A',
   });
 
