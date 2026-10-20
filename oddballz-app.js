@@ -1089,6 +1089,45 @@
   const ROCK_SIDE_MIN = 15;      // never spawn dead centre, where the board is
   const ROCK_SIDE_RANGE = 46;
 
+  // How the flight looks in each sector (ThreeRenderer.setFlight), eased from one
+  // to the next as the sector changes. One dust field at one speed suited none of
+  // them well -- too quick, and plain rocks everywhere (the user, 19 Oct 2026).
+  //   speed    times each mote's own speed (14-40 units/s); 1 was the old pace
+  //   tint     the dust's colour, mixed in by tintMix (0 white stars, 1 all tint)
+  //   density  how much of the field shows, 0 to 1
+  //   trail    times the streak length
+  //   drift    a slow sideways sway, for spores and embers that float, not fly
+  //   rocks    what passes on the sides: 'rock', 'ice', 'shard' or null, and how
+  //            many (rockCount); a kind changes only as each leaves and respawns
+  //            far off, so nothing pops in or out of view
+  const FLIGHT_DEFAULT = { speed: 0.5, tint: '#ffffff', tintMix: 0, density: 0.8, trail: 0.7, drift: 0,
+                           rocks: 'rock', rockCount: 8, rockTint: '#8a8f9e' };
+  const FLIGHT = {
+    nebula:     { speed: 0.45, tint: '#c9b3ff', tintMix: 0.35, density: 0.7,  trail: 0.7, drift: 0,   rocks: null },
+    conduit:    { speed: 0.6,  tint: '#9fe8ff', tintMix: 0.3,  density: 0.8,  trail: 0.8, drift: 0,   rocks: 'rock', rockCount: 8,  rockTint: '#7f9ab8' },
+    warp:       { speed: 1.4,  tint: '#cfe0ff', tintMix: 0.2,  density: 1.0,  trail: 1.2, drift: 0,   rocks: null },
+    lattice:    { speed: 0.3,  tint: '#7dffb0', tintMix: 0.85, density: 0.45, trail: 0.2, drift: 1.0, rocks: null },
+    citadel:    { speed: 0.5,  tint: '#ffb0c0', tintMix: 0.25, density: 0.7,  trail: 0.7, drift: 0,   rocks: 'rock', rockCount: 10, rockTint: '#9a8a9e' },
+    solar:      { speed: 0.35, tint: '#ffb050', tintMix: 0.85, density: 0.5,  trail: 0.3, drift: 0.6, rocks: 'rock', rockCount: 6,  rockTint: '#a8846a' },
+    storm:      { speed: 0.8,  tint: '#c0a8ff', tintMix: 0.6,  density: 0.9,  trail: 1.0, drift: 0,   rocks: null },
+    pulsar:     { speed: 0.5,  tint: '#7fffe0', tintMix: 0.6,  density: 0.6,  trail: 0.6, drift: 0,   rocks: 'rock', rockCount: 6,  rockTint: '#7a9a98' },
+    comet:      { speed: 0.35, tint: '#d8f0ff', tintMix: 0.5,  density: 0.55, trail: 0.3, drift: 0.3, rocks: 'ice',  rockCount: 10 },
+    gasgiant:   { speed: 0.4,  tint: '#ffd0b8', tintMix: 0.3,  density: 0.6,  trail: 0.6, drift: 0,   rocks: null },
+    asteroid:   { speed: 0.4,  tint: '#ffd8a8', tintMix: 0.3,  density: 0.5,  trail: 0.5, drift: 0,   rocks: null },
+    derelict:   { speed: 0.35, tint: '#a8c0ff', tintMix: 0.2,  density: 0.5,  trail: 0.5, drift: 0,   rocks: 'shard', rockCount: 12 },
+    darkmatter: { speed: 0.3,  tint: '#b8b0d0', tintMix: 0.2,  density: 0.15, trail: 0.5, drift: 0,   rocks: null },
+  };
+  const FLIGHT_EASE = 0.7;       // per second, towards the new sector's profile
+  // Space dust on or off (the title card's Space dust button): the whole flight
+  // layer, for anyone who finds the motion distracting.
+  const DUST_KEY = 'oddballz_hd_spacedust';
+  let dustChoice = null;
+  function storedDust() {
+    if (dustChoice) return dustChoice;
+    try { dustChoice = localStorage.getItem(DUST_KEY) === 'off' ? 'off' : 'on'; } catch (e) { dustChoice = 'on'; }
+    return dustChoice;
+  }
+
   // What one line is worth for its LENGTH, given how many balls it runs beyond the
   // shortest legal line of its kind. Separate from how many lines a landing cleared
   // at once, which checkAdvance scores; a player can do well at either.
@@ -3697,7 +3736,7 @@
       slead2: { adsr: [2, 8, 9, 6], wave: [['P', 12], ['P', 0]], pulse: [0x600, 0x40, 0x300, 0xD00],
                 vib: [12, 0.3, 7], glide: 0.4 },
       sbass:  { adsr: [0, 7, 5, 3], wave: [['P', 0]], pulse: [0x400, 0x30, 0x200, 0xB00] },
-      schord: { adsr: [0, 9, 5, 6], wave: [['P', 0]], pulse: [0x500, 0x20, 0x300, 0xB00], arpSpeed: 1,
+      schord: { adsr: [0, 9, 5, 6], wave: [['P', 0]], pulse: [0x500, 0x20, 0x300, 0xB00], arpSpeed: 2,
                 filter: { mode: 'LP', res: 10, cutoff: [0x600, -0x08, 0x300, 0x7FF] } },
       sswell: { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
                 filter: { mode: 'LP', res: 9, cutoff: [0x200, 0x0A, 0x200, 0x780] } },
@@ -3739,13 +3778,15 @@
         'B4 . D#5 . | F#5 . B5 . | D#6 . . . | ^ . . .',
 
       // bass + drums on E: kick and snare on the beat, the bass in sixteenths
-      sbDrive: 'K . E2:sbass E2 | S . E2 E2 | K . E2 E2 | S . E3 E2',
+      // eighths, not sixteenths (the user, 19 Oct 2026: calmer)
+      sbDrive: 'K . E2:sbass . | S . E2 . | K . E2 . | S . E3 .',
       sbSoft:  'E2:sbass . . . | . . E2 . | . . . . | E3 . . .',
-      sbFill:  'K . E2:sbass E2 | S . E2 E2 | K S K S | S S S S',
+      sbFill:  'K . E2:sbass . | S . E2 . | K S K S | S S S S',
 
       // chords on E4: fast arpeggios struck 3-3-2, or held under the break
-      sStabm: 'E4~037 . . E4~037 | . . E4~037 . | E4~037 . . E4~037 | . . E4~037 .',
-      sStab:  'E4~047 . . E4~047 | . . E4~047 . | E4~047 . . E4~047 | . . E4~047 .',
+      // three stabs a bar, not eight
+      sStabm: 'E4~037 . . . | . . E4~037 . | . . . . | E4~037 . . .',
+      sStab:  'E4~047 . . . | . . E4~047 . | . . . . | E4~047 . . .',
       sHoldm: 'E4~037 . . . | . . . . | . . . . | . . . .',
       sHold:  'E4~047 . . . | . . . . | . . . . | . . . .',
     },
@@ -3799,7 +3840,7 @@
       plead:  { adsr: [4, 9, 10, 8], wave: [['P', 0]], pulse: [0x800, 0x18, 0x400, 0xC00], vib: [18, 0.2, 8], glide: 0.5 },
       plead2: { adsr: [4, 9, 10, 8], wave: [['P', 12], ['P', 0]], pulse: [0x700, 0x20, 0x400, 0xC00], vib: [16, 0.25, 8], glide: 0.5 },
       pbass:  { adsr: [0, 7, 6, 4], wave: [['P', 0]], pulse: [0x400, 0x20, 0x200, 0xA00] },
-      parp:   { adsr: [0, 6, 4, 4], wave: [['P', 0]], pulse: [0x600, 0x30, 0x300, 0xC00],
+      parp:   { adsr: [2, 8, 5, 7], wave: [['P', 0]], pulse: [0x600, 0x30, 0x300, 0xC00],
                 filter: { mode: 'LP', res: 11, cutoff: [0x300, 0x10, 0x300, 0x7FF] } },
       pswell: { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
                 filter: { mode: 'LP', res: 8, cutoff: [0x200, 0x08, 0x200, 0x700] } },
@@ -3835,9 +3876,11 @@
         'F5 . . . | . . . . | . . . . | . . . . ' +
         'G5 . . . | . . . . | . . . . | . . . . ' +
         'B4 . . . | . . . . | D5 . . . | ^ . . .',
-      pOst:   'A4 C5 E5 C5 | A4 C5 E5 C5 | A4 C5 E5 C5 | A4 C5 E5 C5',
-      pOstM:  'A4 C#5 E5 C#5 | A4 C#5 E5 C#5 | A4 C#5 E5 C#5 | A4 C#5 E5 C#5',
-      pbDrive: 'K . A2:pbass . | K . A2 . | K . A2 . | K . A3 .',
+      // eighths, not sixteenths: the pulse kept, half as busy (the user, 19 Oct
+      // 2026: the songs should soothe, not run)
+      pOst:   'A4 . C5 . | E5 . C5 . | A4 . C5 . | E5 . C5 .',
+      pOstM:  'A4 . C#5 . | E5 . C#5 . | A4 . C#5 . | E5 . C#5 .',
+      pbDrive: 'K . A2:pbass . | . . A2 . | K . A2 . | . . A3 .',
       pbSoft:  'A2:pbass . . . | . . . . | A2 . . . | . . . .',
       pbFill:  'K . A2:pbass . | K . A2 . | K S K S | S S S S',
       pHoldm: 'A4~037 . . . | . . . . | . . . . | . . . .',
@@ -7446,7 +7489,10 @@ registerProcessor('odd-sid', OddSid);
           y: (Math.random() * 2 - 1) * STAR_SPREAD,
           z: -(STAR_NEAR_MIN + Math.random() * (STAR_FAR - STAR_NEAR_MIN)),
           speed: 14 + Math.random() * 26,
-          r: base.r * mag, g: base.g * mag, b: base.b * mag
+          r: base.r * mag, g: base.g * mag, b: base.b * mag,
+          mag,
+          rank: Math.random(),          // which share of the field it belongs to (density)
+          phase: Math.random() * 6.28   // for the drift
         });
       }
 
@@ -7500,58 +7546,131 @@ registerProcessor('odd-sid', OddSid);
     // high-frequency noise, which is the difference between a rock and gravel.
     buildAsteroids() {
       this.flightAsteroids = [];
-      const rockMat = new THREE.MeshStandardMaterial({
-        color: 0x3a3f58,
-        roughness: 0.9,
-        metalness: 0.2,
-        flatShading: true
+      // Rocks: craters dented in and mottled colour, on top of the lumps; tinted
+      // to the sector through the shared material (render()). They were plain
+      // grey-blue lumps, one flat colour (the user, 19 Oct 2026).
+      this.rockMat = new THREE.MeshStandardMaterial({
+        color: 0x8a8f9e, roughness: 0.95, metalness: 0.1, flatShading: true, vertexColors: true
+      });
+      // Ice for the comet: sharp, pale, glassy.
+      this.iceMat = new THREE.MeshStandardMaterial({
+        color: 0xd8ecff, roughness: 0.12, metalness: 0.05, emissive: 0x2a4a70, emissiveIntensity: 0.25,
+        flatShading: true, transparent: true, opacity: 0.88
+      });
+      // Wreck plating and girders for the derelict fleet.
+      this.shardMat = new THREE.MeshStandardMaterial({
+        color: 0x3a3e48, roughness: 0.45, metalness: 0.7, flatShading: true
       });
 
       const v = new THREE.Vector3();
-      for (let i = 0; i < 20; i++) {
-        const size = 0.8 + Math.random() * 2.5;
-        // Detail 1, not 2 or more: a rock wants a few broad faces catching the
-        // light, and subdividing further only makes room for noise to look busy.
-        const geo = new THREE.IcosahedronGeometry(size, 1);
+      // A direction's own noise, so the copies of a corner (r128's polyhedra are
+      // not indexed) all agree: lumps and colour from the direction alone.
+      const lumps = (d, ph) => 1
+        + 0.20 * Math.sin(2.3 * d.x + ph[0])
+        + 0.16 * Math.sin(2.9 * d.y + ph[1])
+        + 0.13 * Math.sin(3.3 * d.z + ph[2])
+        + 0.09 * Math.sin(5.1 * (d.x + d.y + d.z) + ph[3]);
+      const add = (mesh, kind, idx, speed) => {
+        mesh.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+        this.placeRock(mesh, -(60 + Math.random() * (ROCK_FAR - 60)));
+        mesh.userData = {
+          kind, idx, speed, base: mesh.scale.clone(), shrink: 1,
+          spinX: (Math.random() - 0.5) * 0.6,
+          spinY: (Math.random() - 0.5) * 0.6,
+          spinZ: (Math.random() - 0.5) * 0.6
+        };
+        mesh.visible = false;
+        // Into the camera-pinned group with the stars, not spaceFlightGroup. They
+        // have to share the stars' frame to cruise on the same axis; the flight
+        // group is tilted to sit with the board and would send them sideways again.
+        this.starFieldGroup.add(mesh);
+        this.flightAsteroids.push(mesh);
+      };
+
+      for (let i = 0; i < 14; i++) {
+        const size = 0.9 + Math.random() * 2.4;
+        // Detail 2: room for craters, still broad faces catching the light.
+        const geo = new THREE.IcosahedronGeometry(size, 2);
         const p = geo.attributes.position;
         const ph = [0, 1, 2, 3].map(() => Math.random() * Math.PI * 2);
+        const craters = [0, 1, 2].map(() => ({
+          c: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
+          r: 0.25 + Math.random() * 0.25, depth: 0.10 + Math.random() * 0.08
+        }));
+        const col = new Float32Array(p.count * 3);
         for (let k = 0; k < p.count; k++) {
           v.set(p.getX(k), p.getY(k), p.getZ(k));
           const len = v.length() || 1;
           const d = v.clone().divideScalar(len);
-          const bump = 1
-            + 0.20 * Math.sin(2.3 * d.x + ph[0])
-            + 0.16 * Math.sin(2.9 * d.y + ph[1])
-            + 0.13 * Math.sin(3.3 * d.z + ph[2])
-            + 0.09 * Math.sin(5.1 * (d.x + d.y + d.z) + ph[3]);
+          let bump = lumps(d, ph);
+          let shade = 0.78 + 0.22 * Math.sin(7.0 * d.x + ph[1]) * Math.sin(6.1 * d.y + ph[2])
+                    + 0.10 * Math.sin(13.0 * (d.x - d.z) + ph[3]);
+          for (const cr of craters) {
+            const a = Math.acos(Math.max(-1, Math.min(1, d.dot(cr.c))));
+            if (a < cr.r) {
+              const f = a / cr.r;                       // 0 at the centre, 1 at the rim
+              bump -= cr.depth * (1 - f * f);           // a bowl
+              if (f > 0.75) bump += cr.depth * 0.35 * (1 - Math.abs(f - 0.88) / 0.13);   // its raised rim
+              shade *= 0.80 + 0.2 * f;                  // darker inside
+            }
+          }
           p.setXYZ(k, d.x * len * bump, d.y * len * bump, d.z * len * bump);
+          const warm = 0.92 + 0.08 * Math.sin(3.7 * d.z + ph[0]);
+          col[k * 3] = shade * warm; col[k * 3 + 1] = shade; col[k * 3 + 2] = shade * (2 - warm);
         }
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         geo.computeVertexNormals();
+        const rock = new THREE.Mesh(geo, this.rockMat);
+        rock.scale.set(0.78 + Math.random() * 0.44, 0.78 + Math.random() * 0.44, 0.78 + Math.random() * 0.44);
+        add(rock, 'rock', i, 6 + Math.random() * 8);
+      }
 
-        const rock = new THREE.Mesh(geo, rockMat);
-        // Irregular silhouette from a whole-mesh scale, which cannot tear anything
-        // because it is applied to the object rather than to individual vertices.
-        rock.scale.set(
-          0.78 + Math.random() * 0.44,
-          0.78 + Math.random() * 0.44,
-          0.78 + Math.random() * 0.44
-        );
-        rock.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+      for (let i = 0; i < 12; i++) {
+        const size = 0.6 + Math.random() * 1.6;
+        const geo = new THREE.IcosahedronGeometry(size, 0);
+        const ice = new THREE.Mesh(geo, this.iceMat);
+        ice.scale.set(0.6 + Math.random() * 0.4, 1.2 + Math.random() * 0.9, 0.6 + Math.random() * 0.4);
+        add(ice, 'ice', i, 5 + Math.random() * 6);
+      }
 
-        this.placeRock(rock, -(60 + Math.random() * (ROCK_FAR - 60)));
+      for (let i = 0; i < 14; i++) {
+        // Plates and girders: flat or long, never a cube.
+        const girder = Math.random() < 0.4;
+        const w = girder ? 4 + Math.random() * 4 : 1.5 + Math.random() * 3;
+        const h = girder ? 0.3 + Math.random() * 0.3 : 1.0 + Math.random() * 2.5;
+        const dpt = girder ? 0.3 + Math.random() * 0.3 : 0.12 + Math.random() * 0.15;
+        const shard = new THREE.Mesh(new THREE.BoxGeometry(w, h, dpt), this.shardMat);
+        add(shard, 'shard', i, 5 + Math.random() * 6);
+      }
+      this.updateDebrisVisibility(true);
+    }
 
-        rock.userData = {
-          speed: 10 + Math.random() * 16,
-          spinX: (Math.random() - 0.5) * 1.5,
-          spinY: (Math.random() - 0.5) * 1.5,
-          spinZ: (Math.random() - 0.5) * 1.5
-        };
+    // Which debris shows: the current sector's kind, up to its count. Called for
+    // one piece as it respawns far off (so a change of sector never pops one in
+    // or out in view), or for all of them at the start.
+    debrisWanted(mesh) {
+      const f = this.flightTarget || FLIGHT_DEFAULT;
+      const kind = f.rocks === undefined ? FLIGHT_DEFAULT.rocks : f.rocks;
+      const count = f.rockCount || FLIGHT_DEFAULT.rockCount;
+      return mesh.userData.kind === kind && mesh.userData.idx < count;
+    }
 
-        // Into the camera-pinned group with the stars, not spaceFlightGroup. They
-        // have to share the stars' frame to cruise on the same axis; the flight
-        // group is tilted to sit with the board and would send them sideways again.
-        this.starFieldGroup.add(rock);
-        this.flightAsteroids.push(rock);
+    updateDebrisVisibility(all) {
+      if (!this.flightAsteroids) return;
+      for (const m of this.flightAsteroids) if (all) m.visible = this.debrisWanted(m);
+    }
+
+    // The flight profile for a background kind (FLIGHT), eased to in render().
+    setFlight(kind) {
+      const f = Object.assign({}, FLIGHT_DEFAULT, (kind && FLIGHT[kind]) || {});
+      if (kind && FLIGHT[kind] && FLIGHT[kind].rocks === null) f.rocks = null;
+      this.flightTarget = f;
+      this.flightTargetTint = new THREE.Color(f.tint);
+      this.flightTargetRock = new THREE.Color(f.rockTint);
+      if (!this.flightNow) {
+        this.flightNow = { speed: f.speed, tintMix: f.tintMix, density: f.density, trail: f.trail, drift: f.drift,
+                           tint: this.flightTargetTint.clone(), rock: this.flightTargetRock.clone() };
+        this.updateDebrisVisibility(true);
       }
     }
 
@@ -7692,43 +7811,9 @@ registerProcessor('odd-sid', OddSid);
       this.buildCruiseStarfield();
       this.buildAsteroids();
 
-      // 3. DISTANT BACKGROUND PLANETS (Aligned with space tilt)
-      const planetGroup = new THREE.Group();
-      const planetGeo = new THREE.SphereGeometry(14, 32, 32);
-      const planetMat = new THREE.MeshStandardMaterial({
-        color: 0x1e3a8a,
-        roughness: 0.7,
-        metalness: 0.1,
-        emissive: 0x0f172a
-      });
-      const planet = new THREE.Mesh(planetGeo, planetMat);
-      planet.position.set(70, 100, -80);
-
-      const ringGeo = new THREE.RingGeometry(17, 26, 64);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.4
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = Math.PI / 2.8;
-      planet.add(ring);
-      planetGroup.add(planet);
-
-      const moonGeo = new THREE.SphereGeometry(5, 24, 24);
-      const moonMat = new THREE.MeshStandardMaterial({
-        color: 0xc084fc,
-        roughness: 0.4,
-        emissive: 0x581c87,
-        emissiveIntensity: 0.5
-      });
-      const moon = new THREE.Mesh(moonGeo, moonMat);
-      moon.position.set(-80, 110, -100);
-      planetGroup.add(moon);
-
-      this.spaceFlightGroup.add(planetGroup);
-
+      // The old distant planet with its ring, and its moon, are gone: a disc in
+      // the lower corner of every sector, clashing with the sectors' own planets
+      // (the user, 19 Oct 2026). Each sector draws its own sky now.
       this.scene.add(this.spaceFlightGroup);
       this._flightTime = 0;
     }
@@ -7899,8 +7984,26 @@ registerProcessor('odd-sid', OddSid);
       // engine.isZipping is true for the duration of a zip -- but it belongs to an
       // effect that has been designed, not to the resting state of the background.
 
+      // The sector's flight profile, eased towards (setFlight); and the whole
+      // layer hidden when Space dust is off.
+      if (!this.flightTarget) this.setFlight(null);
+      const fl = this.flightNow, ft = this.flightTarget;
+      {
+        const k = Math.min(1, dt * FLIGHT_EASE);
+        fl.speed += (ft.speed - fl.speed) * k;
+        fl.tintMix += (ft.tintMix - fl.tintMix) * k;
+        fl.density += (ft.density - fl.density) * k;
+        fl.trail += (ft.trail - fl.trail) * k;
+        fl.drift += (ft.drift - fl.drift) * k;
+        fl.tint.lerp(this.flightTargetTint, k);
+        fl.rock.lerp(this.flightTargetRock, k);
+        if (this.rockMat) this.rockMat.color.copy(fl.rock);
+      }
+      const dustOn = storedDust() === 'on';
+      if (this.starFieldGroup) this.starFieldGroup.visible = dustOn;
+
       // 1. Cruise: stars fly toward the viewer down the camera's own axis
-      if (this.flightStars && this.starPointsMesh && this.starFieldGroup) {
+      if (dustOn && this.flightStars && this.starPointsMesh && this.starFieldGroup) {
         // Pin the field to the camera so star coordinates ARE camera space. Doing
         // it here rather than at build time matters: updateCameraFraming moves the
         // camera on every resize and orientation change.
@@ -7918,9 +8021,14 @@ registerProcessor('odd-sid', OddSid);
         const seg = this.starStreaks.geometry.attributes.position;
         const scol = this.starStreaks.geometry.attributes.color;
 
+        const t = this._flightTime;
         for (let i = 0; i < this.flightStars.length; i++) {
           const s = this.flightStars[i];
-          s.z += s.speed * dt;
+          s.z += s.speed * fl.speed * dt;
+          if (fl.drift > 0.001) {
+            s.x += Math.sin(t * 0.4 + s.phase) * fl.drift * dt * 2.0;
+            s.y += Math.cos(t * 0.33 + s.phase * 1.3) * fl.drift * dt * 2.0;
+          }
 
           if (s.z > -nearLimit) {
             s.z = -STAR_FAR;
@@ -7931,21 +8039,28 @@ registerProcessor('odd-sid', OddSid);
           // Fade in over the far fifth so stars do not pop into existence at the
           // back of the field.
           const depth = (-s.z - nearLimit) / (span || 1);
-          const fade = depth > 0.8 ? Math.max(0, (1 - depth) / 0.2) : 1;
+          // The share of the field this sector shows (density), faded at its edge
+          // so the count can ease without motes blinking on and off.
+          const shown = Math.max(0, Math.min(1, (fl.density - s.rank) * 12));
+          const fade = (depth > 0.8 ? Math.max(0, (1 - depth) / 0.2) : 1) * shown;
+          const mix = fl.tintMix;
+          const cr = s.r * (1 - mix) + fl.tint.r * s.mag * mix;
+          const cg = s.g * (1 - mix) + fl.tint.g * s.mag * mix;
+          const cb = s.b * (1 - mix) + fl.tint.b * s.mag * mix;
 
           // Streak length in world units. Perspective alone then makes it longer on
           // screen as the star closes, which is the part that reads as speed. Capped
           // against its own distance so a near star cannot smear across the view.
-          let len = s.speed * STAR_TRAIL;
+          let len = s.speed * fl.speed * STAR_TRAIL * fl.trail;
           const maxLen = -s.z * 0.22;
           if (len > maxLen) len = maxLen;
 
           pts.array[i * 3] = s.x;
           pts.array[i * 3 + 1] = s.y;
           pts.array[i * 3 + 2] = s.z;
-          pcol.array[i * 3] = s.r * fade;
-          pcol.array[i * 3 + 1] = s.g * fade;
-          pcol.array[i * 3 + 2] = s.b * fade;
+          pcol.array[i * 3] = cr * fade;
+          pcol.array[i * 3 + 1] = cg * fade;
+          pcol.array[i * 3 + 2] = cb * fade;
 
           // Head at the star, tail left black so additive blending fades it out.
           seg.array[i * 6] = s.x;
@@ -7954,9 +8069,9 @@ registerProcessor('odd-sid', OddSid);
           seg.array[i * 6 + 3] = s.x;
           seg.array[i * 6 + 4] = s.y;
           seg.array[i * 6 + 5] = s.z - len;
-          scol.array[i * 6] = s.r * fade * 0.8;
-          scol.array[i * 6 + 1] = s.g * fade * 0.8;
-          scol.array[i * 6 + 2] = s.b * fade * 0.8;
+          scol.array[i * 6] = cr * fade * 0.8;
+          scol.array[i * 6 + 1] = cg * fade * 0.8;
+          scol.array[i * 6 + 2] = cb * fade * 0.8;
           scol.array[i * 6 + 3] = 0;
           scol.array[i * 6 + 4] = 0;
           scol.array[i * 6 + 5] = 0;
@@ -7968,18 +8083,33 @@ registerProcessor('odd-sid', OddSid);
       }
 
       // 2. Asteroids cruise on the same axis as the stars, in the same camera space
-      if (this.flightAsteroids && this.starFieldGroup) {
+      if (dustOn && this.flightAsteroids && this.starFieldGroup) {
         // The same limit the stars use, so nothing solid crosses the playfield
         // either. Recomputed rather than cached: the camera moves on resize.
         const rockNear = Math.max(STAR_NEAR_MIN, this.boardNearDistance() - STAR_BOARD_MARGIN);
         for (const rock of this.flightAsteroids) {
           const u = rock.userData;
-          rock.position.z += u.speed * dt;
+          rock.position.z += u.speed * fl.speed * dt;
           rock.rotation.x += u.spinX * dt;
           rock.rotation.y += u.spinY * dt;
           rock.rotation.z += u.spinZ * dt;
 
-          if (rock.position.z > -rockNear) this.placeRock(rock, -ROCK_FAR);
+          if (rock.position.z > -rockNear) {
+            this.placeRock(rock, -ROCK_FAR);
+            rock.visible = this.debrisWanted(rock);   // the sector's kind, from here on
+            u.shrink = 1;
+            rock.scale.copy(u.base);
+          } else if (rock.position.z < -ROCK_FAR * 0.7) {
+            // Still far off, a speck: it can change to the sector's kind at once
+            // without being seen to.
+            rock.visible = this.debrisWanted(rock);
+          } else if (rock.visible && !this.debrisWanted(rock)) {
+            // Near, and not this sector's: it shrinks away over a couple of
+            // seconds rather than drifting on for a minute at these speeds.
+            u.shrink -= dt / 2.5;
+            if (u.shrink <= 0) { rock.visible = false; u.shrink = 1; rock.scale.copy(u.base); }
+            else rock.scale.copy(u.base).multiplyScalar(u.shrink);
+          }
         }
       }
 
@@ -8175,6 +8305,7 @@ registerProcessor('odd-sid', OddSid);
         this.setPlatformTint(null);
         this.queueBallEnv(null);
         this.setBallRim(null);
+        this.setFlight(null);
         return;
       }
       this.setPlatformTint(BACKDROPS[i].platform);
@@ -8182,6 +8313,7 @@ registerProcessor('odd-sid', OddSid);
       this.setProcedural(kind);
       this.queueBallEnv(kind);
       this.setBallRim(BACKDROPS[i].platform);
+      this.setFlight(kind);
       this.backdropKey = 'proc:' + kind;
       this.scene.background = new THREE.Color(PROC_BASE[kind]);
     }
@@ -11921,6 +12053,22 @@ registerProcessor('odd-sid', OddSid);
         motionChoice = storedMotion() === 'smooth' ? 'hop' : 'smooth';
         try { localStorage.setItem(MOTION_KEY, motionChoice); } catch (e) {}
         paintMotion();
+      });
+    }
+
+    // Space dust, On or Off: the flying dust and debris round the board.
+    const btnDust = document.getElementById('btnSpaceDust');
+    if (btnDust) {
+      const paintDust = () => {
+        const off = storedDust() === 'off';
+        btnDust.textContent = '\u2728 Space dust: ' + (off ? 'Off' : 'On');
+        btnDust.classList.toggle('active', off);
+      };
+      paintDust();
+      btnDust.addEventListener('click', () => {
+        dustChoice = storedDust() === 'off' ? 'on' : 'off';
+        try { localStorage.setItem(DUST_KEY, dustChoice); } catch (e) {}
+        paintDust();
       });
     }
 
