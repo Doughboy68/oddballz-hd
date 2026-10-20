@@ -74,6 +74,12 @@
   // flat turn looked dull beside the flip (the user, 18 Oct 2026).
   const PIECE_TURN_HOP = 0.7;
   const PIECE_TURN_OVERSHOOT = 1.3;
+  // A flip's hop, in ball radii: the whole piece rises as it turns over and comes
+  // down again. Turned over its line alone, the middle stayed on the board and,
+  // seen from above, it looked like spinning in place; the flip that read as a
+  // hop was the one lifted clear by a ball swinging under, about this high (the
+  // user, 20 Oct 2026).
+  const PIECE_FLIP_HOP = 1.9;
   // The same for a step left or right (ThreeRenderer.pieceSlideX): how long the
   // step takes, the hop in ball radii, and the overshoot.
   const PIECE_STEP_MS = 130;
@@ -1050,8 +1056,12 @@
         float rings = 0.0;
         for (int i = 0; i < 3; i++) {
           float fi = float(i);
-          vec2 M = (vec2(0.25 + 0.5 * hash(fi * 7.1), 0.25 + 0.5 * hash(fi * 3.3))
-                  + 0.12 * vec2(sin(t * 0.021 + fi * 2.1), cos(t * 0.017 + fi * 1.3))) * uRes;
+          // Where the board does not cover them: two in the band above it (all a
+          // phone shows), one low on the right for wider screens. Placed at
+          // random in the middle, they were hidden behind the platform in play
+          // (the user, 20 Oct 2026).
+          vec2 home = i == 0 ? vec2(0.16, 0.82) : (i == 1 ? vec2(0.80, 0.86) : vec2(0.90, 0.40));
+          vec2 M = (home + 0.03 * vec2(sin(t * 0.021 + fi * 2.1), cos(t * 0.017 + fi * 1.3))) * uRes;
           vec2 dv = (frag - M) / m;
           float r2 = dot(dv, dv);
           float k = 0.010 + 0.006 * fi;
@@ -1404,7 +1414,12 @@
       this.ballShapes = [
         [{ x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }],
         [{ x: -1, y: 0 }, { x: -2, y: 0 }, { x: 1, y: 0 }],
-        [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: -1 }],
+        // The T: its top and right balls listed the other way round from the
+        // original, so a colour shift (rotColors, by this order) runs left,
+        // middle, right, top and back to the left -- the one jump beside the
+        // middle, not straight through it from the right end (the user, 20 Oct
+        // 2026). The shape is the same.
+        [{ x: -1, y: 0 }, { x: 0, y: -1 }, { x: 1, y: 0 }],
         [{ x: -1, y: 0 }, { x: -2, y: -1 }, { x: 1, y: 0 }],
         [{ x: -1, y: -1 }, { x: -2, y: -1 }, { x: 1, y: 0 }],
         [{ x: -1, y: 0 }, { x: -2, y: -1 }, { x: -2, y: -2 }],
@@ -1975,7 +1990,7 @@
           const ry = this.oddballz.rel[i].y;
           saveMove[i] = { x: ry, y: ry - rx };
         }
-      } else if (tMatrix === this.flipX || tMatrix === this.flipY) {
+      } else if (tMatrix === this.flipX || tMatrix === this.flipY || (tMatrix && tMatrix.isFlip)) {
         const rawReflect = [];
         for (let i = 0; i <= 3; i++) {
           const rx = this.oddballz.rel[i].x;
@@ -2727,16 +2742,22 @@
   // The C64 build's SONG_PLAYS.
   const SONG_PLAYS = 3;
   // The containment pulse: each sector the journey reaches on its own (its song
-  // played out, not B) charges one, and the next landing fires it -- a sweep
-  // across each of the bottom this-many rows of the board, from the floor up,
-  // taking every ball in them; then the landing plays out, so the balls above
-  // fall into the space, chains and all. So that a long game can go on: no one
-  // gets through that many levels without help (the user, 18 Oct 2026). It took
-  // the top six rows of the pile at first, which made the journey too easy --
-  // a third of the balls gone and nothing moved; from the bottom, with what is
-  // above coming down, it helps less and the board is left to sort itself out
-  // (the user, 19 Oct 2026).
+  // played out, not B) fires one as soon as the board is still -- a sweep across
+  // each of the top this-many rows of the pile, in turn, taking every ball in
+  // them. So that a long game can go on: no one gets through that many levels
+  // without help (the user, 18 Oct 2026). The top six: the balls climb the
+  // hexagon's slanted walls, so the bottom is the wrong place to look -- three
+  // bottom-row sweeps took 2 balls of 34 -- and the top is what ends a game. It
+  // was tried for a day as the bottom six rows at the next landing, with the
+  // pile falling into the space: that came out easier still, and the wait for a
+  // landing made it late (the user, 20 Oct 2026).
   const PULSE_ROWS = 6;
+  // Shape configs that flip in their own frame (pieces 3-6): see flipPiece.
+  const OWN_FRAME_FLIPS = [2, 3, 4, 5];
+  // The curve (config 5) has its mirror lines one turn on from the others': its
+  // chord, end ball to end ball, and square to that. Flipped on the screen's axes
+  // even as dealt, the chord changed slant.
+  const FRAME_TILT = { 5: Math.PI / 3 };
   const PULSE_ROW_MS = 130;              // between one row's sweep and the next
   // The songs' level against the effects, applied after the synth. The lab's
   // output at the default music volume measured RMS 0.085-0.10, against 0.045 for
@@ -6922,6 +6943,22 @@ registerProcessor('odd-sid', OddSid);
           shown: target.map(p => ({ x: p.x, y: p.y, z: 0 })) };
       } else if (key !== st.key) {
         const live = [0, 1, 2, 3].filter(i => engine.oddballz.image[i] > 0);
+        // Flipped straight back while the last flip is still turning over: that
+        // flip runs backwards from where it has got to. Started afresh from the
+        // half-turned card, which no mirror fits, it went in straight lines and
+        // looked like a spin (the user, 20 Oct 2026).
+        const kWas = (now - st.t0) / (st.ms || PIECE_TURN_MS);
+        const tol = 0.02 * HEX_SPACING_X;
+        if (this.pieceMove === 'flip' && st.mirror && kWas < 1 &&
+            live.every(i => Math.hypot(st.from[i].x - target[i].x, st.from[i].y - target[i].y) < tol)) {
+          this.pieceMove = null;
+          st.key = key;
+          st.from = st.to.map(p => ({ x: p.x, y: p.y, z: 0 }));
+          st.to = target;
+          st.mirror = { u: st.mirror.u, low: st.mirror.low, back: !st.mirror.back };
+          st.t0 = now - (1 - kWas) * st.ms;
+          return this.pieceShapeAt(st, now);
+        }
         st.key = key;
         st.from = st.shown.map(p => ({ x: p.x, y: p.y, z: p.z }));
         st.to = target;
@@ -6943,6 +6980,11 @@ registerProcessor('odd-sid', OddSid);
         st.ms = st.mirror ? PIECE_FLIP_MS : PIECE_TURN_MS;
         st.lift = st.arc === null && st.mirror === null ? this.pieceLifts(st.from, target, live) : [0, 0, 0, 0];
       }
+      return this.pieceShapeAt(st, now);
+    }
+
+    // The drawn shape, part way through the move pieceOffsets has set going.
+    pieceShapeAt(st, now) {
       const k = Math.min(1, (now - st.t0) / (st.ms || PIECE_TURN_MS));
       const e = k * k * (3 - 2 * k);
       for (let i = 0; i < 4; i++) {
@@ -6964,10 +7006,12 @@ registerProcessor('odd-sid', OddSid);
           // from it goes round through the vertical. The side that would go down
           // into the board is carried up with the rest: all of them by the
           // deepest one's depth, which keeps the piece rigid.
-          const u = st.mirror.u, along = f.x * u.x + f.y * u.y, side = f.x * -u.y + f.y * u.x;
-          const c = Math.cos(Math.PI * e), sn = Math.sin(Math.PI * e);
+          // Run backwards (back), it is the same turn from the far side.
+          const o = st.mirror.back ? t : f, eo = st.mirror.back ? 1 - e : e;
+          const u = st.mirror.u, along = o.x * u.x + o.y * u.y, side = o.x * -u.y + o.y * u.x;
+          const c = Math.cos(Math.PI * eo), sn = Math.sin(Math.PI * eo);
           p.x = along * u.x - u.y * side * c; p.y = along * u.y + u.x * side * c;
-          flipZ = (side - st.mirror.low) * sn;
+          flipZ = (side - st.mirror.low) * sn + PIECE_FLIP_HOP * SPHERE_RADIUS * sn;
         } else {
           p.x = f.x + (t.x - f.x) * e; p.y = f.y + (t.y - f.y) * e;
         }
@@ -7068,9 +7112,18 @@ registerProcessor('odd-sid', OddSid);
         const rx = 2 * d * u.x - from[i].x, ry = 2 * d * u.y - from[i].y;
         if (Math.hypot(rx - to[i].x, ry - to[i].y) > tol) return null;
       }
+      // Turned the way that sends the balls off the line up and over, not under
+      // with the piece lifted clear: the way that needs the least lift, and on a
+      // tie the way the balls lean. Which way round the line it turned was left
+      // to the first ball, so a flip went over one way and back under, reading as
+      // a spin (the user, 20 Oct 2026). Reversing u keeps the mirror the same.
+      const sideOf = i => from[i].x * -u.y + from[i].y * u.x;
+      const sides = live.map(sideOf), up = Math.max(0, ...sides), down = -Math.min(0, ...sides);
+      const lean = sides.reduce((sum, d) => sum + d, 0);
+      if (down > up + 1e-6 || (Math.abs(down - up) <= 1e-6 && lean < -1e-6)) u = { x: -u.x, y: -u.y };
       // How far the deepest ball would go below the board, turned over: its
       // distance on the side that turns downwards.
-      const low = Math.min(0, ...live.map(i => from[i].x * -u.y + from[i].y * u.x));
+      const low = Math.min(0, ...live.map(sideOf));
       return { u, low };
     }
 
@@ -8612,7 +8665,7 @@ registerProcessor('odd-sid', OddSid);
       // the engine's transform without changing what it does.
       const engineTransform = this.engine.transform.bind(this.engine);
       this.engine.transform = (m) => {
-        this.renderer.pieceMove = (m === this.engine.flipX || m === this.engine.flipY) ? 'flip' : 'turn';
+        this.renderer.pieceMove = (m === this.engine.flipX || m === this.engine.flipY || (m && m.isFlip)) ? 'flip' : 'turn';
         const before = this.engine.targetFloatX;
         const result = engineTransform(m);
         // A turn against a wall can shift the piece over; slid like a step.
@@ -9337,6 +9390,76 @@ registerProcessor('odd-sid', OddSid);
       setTimeout(() => { this.sweepAnim = false; }, SWEEP_MS + 80);
     }
 
+    // A flip from the controls. The engine's own flips mirror on the screen's
+    // axes. Pieces 3 to 6 (configs 2-5: the T, the hook, the S and the curve)
+    // flip in their own frame instead: the two mirror lines they have as dealt
+    // turn with them, so a slanted piece flips the way it does lying flat and
+    // keeps its slant, rather than coming out pointing a new way and needing a
+    // turn back (the user, 20 Oct 2026). Flip X takes whichever of the two lines
+    // looks more upright on screen, Flip Y the flatter one; as dealt that is just
+    // the engine's pair, except for the curve (FRAME_TILT), whose own lines lie a
+    // turn on. Pieces 1, 2 and 7 keep the engine's flips. A try at
+    // flipping every piece along its fall line put the others wrong.
+    flipPiece(axis) {
+      const e = this.engine;
+      const plain = axis === 'x' ? e.flipX : e.flipY;
+      const piece = e.oddballz;
+      if (!piece || !OWN_FRAME_FLIPS.includes(piece.shapeConfig) || !e.targetRel) return e.transform(plain);
+      const along = this.frameAngle(piece.shapeConfig, e.targetRel, FRAME_TILT[piece.shapeConfig] || 0);
+      if (along === null) return e.transform(plain);
+      const square = along + Math.PI / 2;
+      const upright = Math.abs(Math.sin(along)) > Math.abs(Math.sin(square)) ? along : square;
+      const flat = upright === along ? square : along;
+      return e.transform(this.mirrorTable(axis === 'x' ? upright : flat));
+    }
+
+    // Where a line through the root at angle tilt on the dealt piece lies now, as
+    // a screen angle: carried by the turn (a multiple of 60 degrees, mirrored or
+    // not) that takes the dealt balls onto where they are now, ball for ball. A
+    // mirrored piece carries it mirrored, so a flip twice comes back. Null if no
+    // turn fits.
+    frameAngle(config, relNow, tilt) {
+      const sq = Math.sqrt(3) / 2;
+      const scr = r => [Math.round(r.x) - 0.5 * Math.round(r.y), Math.round(r.y) * sq];
+      const dealt = [{ x: 0, y: 0 }, ...this.engine.ballShapes[config]].map(scr);
+      const now = relNow.map(scr);
+      if (now.length !== dealt.length) return null;
+      for (let k = 0; k < 6; k++) {
+        const a = k * Math.PI / 3, c = Math.cos(a), sn = Math.sin(a);
+        for (const m of [1, -1]) {                       // -1: mirrored across the flat line first
+          const fits = dealt.every(([X, Y0], i) => {
+            const Y = m * Y0;
+            return Math.abs(c * X - sn * Y - now[i][0]) < 0.01 && Math.abs(sn * X + c * Y - now[i][1]) < 0.01;
+          });
+          if (fits) return a + m * tilt;
+        }
+      }
+      return null;
+    }
+
+    // The engine's flip table form, [y + 2][x + 2], for a mirror across the line
+    // through the root at the given angle on screen. Cached; the hex grid's mirror
+    // lines are every 30 degrees, so there are only six.
+    mirrorTable(alpha) {
+      const k = Math.round(((alpha % Math.PI) + Math.PI) % Math.PI / (Math.PI / 6)) % 6;
+      this.mirrorTables = this.mirrorTables || {};
+      if (this.mirrorTables[k]) return this.mirrorTables[k];
+      const a = k * Math.PI / 6, sq = Math.sqrt(3) / 2, c2 = Math.cos(2 * a), s2 = Math.sin(2 * a);
+      const t = [];
+      for (let my = 0; my < 5; my++) {
+        t[my] = [];
+        for (let mx = 0; mx < 5; mx++) {
+          const x = mx - 2, y = my - 2;
+          const X = x - 0.5 * y, Y = y * sq;
+          const X2 = c2 * X + s2 * Y, Y2 = s2 * X - c2 * Y;
+          const y2 = Math.round(Y2 / sq);
+          t[my][mx] = { x: Math.round(X2 + 0.5 * y2), y: y2 };
+        }
+      }
+      t.isFlip = true;
+      return (this.mirrorTables[k] = t);
+    }
+
     // B, and the background button on the board for anyone without a keyboard:
     // the next background and its song. It steps and nothing more -- under ALL the
     // backgrounds go on changing with their songs after it; only a choice made on
@@ -9363,17 +9486,21 @@ registerProcessor('odd-sid', OddSid);
       if (this.isPlaying) this.showSectorFlash(this.isPlaying && earned);
     }
 
-    // The containment pulse (PULSE_ROWS), fired at a landing before its resolve:
-    // the bottom rows of the board, from the floor up, each swept in turn -- a
-    // streak across it in the sector's colour, every ball in it popped. Straight
-    // onto the board as demoPop does; the landing's resolve, held until the
-    // sweeps are done (the time returned, in ms), then drops what was above
-    // them into the space and plays out any chains.
+    // The containment pulse (PULSE_ROWS): the top rows of the pile, found now,
+    // each swept in turn -- a streak across it in the sector's colour, every ball
+    // in it popped. Straight onto the board as demoPop does, the engine being
+    // still: the balls below the rows are held up from below, so nothing falls,
+    // and a falling piece only finds more room.
     firePulse() {
       const e = this.engine;
       this.pulsePending = false;
       const rows = [];
-      for (let y = BOARD_BOUNDS.MAX_Y; y >= BOARD_BOUNDS.MIN_Y && rows.length < PULSE_ROWS; y--) rows.push(y);
+      for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y && rows.length < PULSE_ROWS; y++) {
+        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
+          if (e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap > 0) { rows.push(y); break; }
+        }
+      }
+      if (!rows.length) return 0;
       this.showBanner('bannerChain', 'CONTAINMENT PULSE');
       this.logoBurst();
       this.audio.playSound('boom', 1);
@@ -9578,9 +9705,9 @@ registerProcessor('odd-sid', OddSid);
           // Q/E sit above A/D so the whole game is playable left-handed:
           // Q W E / A S D for flips, rotation and movement, F for colour, Space to drop.
           case 'KeyX': case 'Home': case 'KeyQ':
-            this.engine.transform(this.engine.flipX); e.preventDefault(); break;
+            this.flipPiece('x'); e.preventDefault(); break;
           case 'KeyY': case 'End': case 'KeyE':
-            this.engine.transform(this.engine.flipY); e.preventDefault(); break;
+            this.flipPiece('y'); e.preventDefault(); break;
           case 'Space':
             this.engine.zip(); e.preventDefault(); break;
         }
@@ -9805,8 +9932,8 @@ registerProcessor('odd-sid', OddSid);
       bindTouch('btnTouchRight', () => this.engine.moveOBall(4));
       bindTouch('btnTouchRotCW', () => this.engine.transform(this.engine.rotCW));
       bindTouch('btnTouchRotCCW', () => this.engine.transform(this.engine.rotCCW));
-      bindTouch('btnTouchFlip', () => this.engine.transform(this.engine.flipX));
-      bindTouch('btnTouchFlipY', () => this.engine.transform(this.engine.flipY));
+      bindTouch('btnTouchFlip', () => this.flipPiece('x'));
+      bindTouch('btnTouchFlipY', () => this.flipPiece('y'));
       bindTouch('btnTouchF', () => this.engine.rotColors());
       bindTouch('btnTouchSpace', () => this.engine.zip());
 
@@ -9925,6 +10052,15 @@ registerProcessor('odd-sid', OddSid);
       this.audio.init();
       this.audio.setSong(BACKDROPS[this.renderer.backdropIndex].song, true);
       this.engine.initGame();
+      // Testing: ?level=N on the address starts every game at level N, with that
+      // level's pieces, specials and pace (the user, 20 Oct 2026). Not a game
+      // option; nothing without it changes.
+      const testLevel = parseInt(new URLSearchParams(location.search).get('level'), 10);
+      if (testLevel > 1) {
+        this.engine.level = Math.min(testLevel, 50);
+        this.engine.applyLevelAttr();
+        this.engine.initColorInc();
+      }
       this.engine.build();
       this.particles.clearAll();
 
@@ -11219,6 +11355,9 @@ registerProcessor('odd-sid', OddSid);
         // hold after it.
         if (this.sweepOrb) this.updateSweepOrb(performance.now());
         if (this.engine.resolving) this.stepResolve(currentTime);
+        if (this.pulsePending && !this.engine.resolving && !this.sweepOrb && !this.renderer.hasDroppingBalls()) {
+          this.firePulse();
+        }
         const pausing = this.engine.resolving || (this.spawnHoldUntil !== undefined &&
           (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls()));
 
@@ -11267,9 +11406,7 @@ registerProcessor('odd-sid', OddSid);
             this.slideOffset = 0;
             if (this.engine.resolving) {
               // The first pass at once, as the landing always did; the rest wait.
-              // A charged pulse goes off first, and the pass waits for it.
               this.resolveNextAt = currentTime;
-              if (this.pulsePending) this.resolveNextAt += this.firePulse();
               this.stepResolve(currentTime);
             } else {
               this.spawnHoldUntil = currentTime + PIECE_SPAWN_DELAY_MS;
