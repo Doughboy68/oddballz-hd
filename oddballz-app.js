@@ -3879,10 +3879,12 @@
   });
 
   /* comet - Frozen Comet Trail (the user, 18 Oct 2026). F sharp minor, 94 BPM:
-   * cold but beautiful. Bells -- triangle tones that strike and ring away --
-   * for the melody and a slow arpeggio under it, a soft kick on the bar, a
-   * long low bass, over F#m D A E; B through B minor; the reprise with the
-   * bells doubled at the octave. */
+   * cold but calm. A soft triangle melody in the middle register over two
+   * gentle notes a bar, a soft kick on the bar and a long low bass, F#m D A E;
+   * B through B minor; the reprise in a softer pulse tone. It was bells an
+   * octave up, struck hard over a quarter-note bell arpeggio and doubled
+   * higher still in the reprise -- "irritating when those high pitches plink
+   * plink plink come in" (the user, 19 Oct 2026). */
   SONGS.push({
     id: 'comet',
     title: 'Frozen Comet Trail',
@@ -3891,9 +3893,9 @@
     rowsPerBar: 16,
 
     instruments: {
-      cbell:  { adsr: [0, 10, 0, 10], wave: [['T', 0]] },
-      cbell2: { adsr: [0, 10, 0, 10], wave: [['T', 12], ['T', 0]] },
-      carp:   { adsr: [0, 8, 0, 8], wave: [['T', 0]] },
+      cbell:  { adsr: [4, 10, 9, 10], wave: [['T', 0]], vib: [24, 0.2, 6] },
+      cbell2: { adsr: [5, 10, 9, 10], wave: [['P', 0]], pulse: [0x300, 0x08, 0x200, 0x700], vib: [24, 0.2, 6] },
+      carp:   { adsr: [5, 10, 7, 11], wave: [['T', 0]] },
       cbass:  { adsr: [2, 10, 8, 9], wave: [['T', 0]] },
       cpad:   { adsr: [10, 10, 10, 11], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 4,
                 filter: { mode: 'LP', res: 6, cutoff: [0x180, 0x06, 0x180, 0x500] } },
@@ -3929,8 +3931,8 @@
         'D6 . . . | . . . . | . . . . | . . . . ' +
         'C#6 . . . | . . . . | . . . . | . . . . ' +
         'B5 . . . | . . . . | G#5 . . . | ^ . . .',
-      cArp:    'F#5 . . . | A5 . . . | C#6 . . . | A5 . . .',
-      cArpM:   'F#5 . . . | A#5 . . . | C#6 . . . | A#5 . . .',
+      // two soft notes a bar, root and fifth, so minor and major alike
+      cHalf:   'F#4 . . . | . . . . | C#5 . . . | . . . .',
       cbPulse: 'F#2:cbass . . . | . . . . | . . . . | . . . .',
       cbBeat:  'K . F#2:cbass . | . . . . | . . . . | . . . .',
       cPadm:   'F#4~037 . . . | . . . . | . . . . | . . . .',
@@ -3944,25 +3946,25 @@
         v3: ['cPadm@cpad', 'cPad-4@cpad', 'cPad+3@cpad', 'cPad-2@cpad'],
       },
       A: {
-        v1: ['leadA@cbell'],
+        v1: ['leadA-12@cbell'],
         v2: ['cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2', 'cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2'],
-        v3: ['cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp',
-             'cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp'],
+        v3: ['cHalf@carp', 'cHalf-4@carp', 'cHalf+3@carp', 'cHalf-2@carp',
+             'cHalf@carp', 'cHalf-4@carp', 'cHalf+3@carp', 'cHalf-2@carp'],
       },
       B: {
-        v1: ['leadB@cbell'],
+        v1: ['leadB-12@cbell'],
         v2: ['cbBeat+5', 'cbBeat-4', 'cbBeat', 'cbBeat-2', 'cbBeat+5', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2'],
-        v3: ['cArp-7@carp', 'cArpM-4@carp', 'cArp@carp', 'cArpM-2@carp',
-             'cArp-7@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp'],
+        v3: ['cHalf-7@carp', 'cHalf-4@carp', 'cHalf@carp', 'cHalf-2@carp',
+             'cHalf-7@carp', 'cHalf-4@carp', 'cHalf+3@carp', 'cHalf-2@carp'],
       },
       A2: {
-        v1: ['leadA@cbell2'],
+        v1: ['leadA-12@cbell2'],
         v2: ['cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2', 'cbBeat', 'cbBeat-4', 'cbBeat+3', 'cbBeat-2'],
-        v3: ['cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp',
-             'cArp@carp', 'cArpM-4@carp', 'cArpM+3@carp', 'cArpM-2@carp'],
+        v3: ['cHalf@carp', 'cHalf-4@carp', 'cHalf+3@carp', 'cHalf-2@carp',
+             'cHalf@carp', 'cHalf-4@carp', 'cHalf+3@carp', 'cHalf-2@carp'],
       },
       Break: {
-        v1: ['leadBreak@cbell'],
+        v1: ['leadBreak-12@cbell'],
         v2: ['cbPulse', 'cbPulse-4', 'cbPulse+3', 'cbPulse-2'],
         v3: ['cPadm@cpad', 'cPad-4@cpad', 'cPad+3@cpad', 'cPad-2@cpad'],
       },
