@@ -4229,27 +4229,27 @@
     loopTo: 'A',
   });
 
-  /* darkmatter - Dark Matter Veil. B Dorian, 107 BPM: mysterious, not bleak.
-   * A shimmering triangle arpeggio in sixteenths, a light groove with the
-   * bass between, and a melody over Bm E G A -- the E major is the Dorian
-   * sixth, what keeps it from going dark. B turns through F sharp minor and
-   * E minor to an F sharp major that pulls home; the reprise doubles the lead
-   * at the octave. First written as sub-bass drones and a turning cluster,
-   * "too dark sounding" and boring (the user, 19 Oct 2026). */
+  /* darkmatter - Dark Matter Veil. B minor, 94 BPM: mysterious, between dark
+   * and bright. Long held lead notes over a slowly shimmering pad, Bm G Em F#,
+   * the F sharp major pulling back home; a sparse half-time beat with one bass
+   * note a bar; the reprise trades the pad for distant pings. Two tries before
+   * it: sub-bass drones and a cluster, "too dark sounding" and boring; then B
+   * Dorian with a sixteenth-note arpeggio and a busy melody, "too happy now"
+   * with too many short notes (the user, 19 Oct 2026). */
   SONGS.push({
     id: 'darkmatter',
     title: 'Dark Matter Veil',
-    speed: 7,
+    speed: 8,
     rowsPerBeat: 4,
     rowsPerBar: 16,
 
     instruments: {
-      xlead:  { adsr: [4, 9, 10, 9], wave: [['P', 0]], pulse: [0x600, 0x18, 0x300, 0xB00], vib: [18, 0.25, 7], glide: 0.5 },
-      xlead2: { adsr: [4, 9, 10, 9], wave: [['P', 12], ['P', 0]], pulse: [0x600, 0x20, 0x300, 0xB00], vib: [16, 0.3, 7], glide: 0.5 },
-      xarp:   { adsr: [0, 6, 3, 5], wave: [['T', 0]] },
-      xbass:  { adsr: [0, 8, 7, 5], wave: [['T', 0], ['P', 0]], pulse: [0x500, 0x20, 0x300, 0xA00] },
-      xpad:   { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
-                filter: { mode: 'LP', res: 8, cutoff: [0x220, 0x08, 0x200, 0x700] } },
+      xlead:  { adsr: [7, 10, 10, 11], wave: [['P', 0]], pulse: [0x500, 0x10, 0x300, 0xA00], vib: [24, 0.25, 6], glide: 0.6 },
+      xlead2: { adsr: [7, 10, 10, 11], wave: [['P', 12], ['P', 0]], pulse: [0x500, 0x10, 0x300, 0xA00], vib: [22, 0.3, 6], glide: 0.6 },
+      xping:  { adsr: [0, 9, 0, 11], wave: [['T', 0]] },
+      xbass:  { adsr: [2, 10, 9, 9], wave: [['T', 0]] },
+      xpad:   { adsr: [10, 10, 10, 11], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 5,
+                filter: { mode: 'LP', res: 8, cutoff: [0x200, 0x06, 0x1C0, 0x600] } },
       kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
                 wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
       snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
@@ -4260,70 +4260,67 @@
     patterns: {
       rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
 
-      // lead A (Bm E G A | Bm E G A)
+      // lead A (Bm G Em F# | Bm G Em F#): long tones
       leadA:
-        'F#5 . . . | . . D5 . | B4 . . . | . . D5 . ' +
-        'E5 . . . | . . G#5 . | B5 . . . | . . G#5 . ' +
-        'D6 . . . | . . B5 . | G5 . . . | . . B5 . ' +
-        'C#6 . . . | . . . . | A5 . . . | ^ . . . ' +
-        'B5 . . . | . . A5 . | F#5 . . . | . . D5 . ' +
-        'E5 . . . | . . F#5 . | G#5 . . . | B5 . . . ' +
-        'D6 . . . | . . . . | E6 . . . | D6 . . . ' +
-        'C#6 . . . | . . . . | E5 . . . | ^ . . .',
-      // lead B (G A F#m Bm | G A Em F#)
+        'F#5 . . . | . . . . | . . . . | D5 . . . ' +
+        'D5 . . . | . . . . | B4 . . . | . . . . ' +
+        'E5 . . . | . . . . | G5 . . . | . . . . ' +
+        'F#5 . . . | . . . . | . . . . | ^ . . . ' +
+        'B5 . . . | . . . . | A5 . . . | F#5 . . . ' +
+        'G5 . . . | . . . . | . . . . | D5 . . . ' +
+        'E5 . . . | . . . . | B4 . . . | . . . . ' +
+        'C#5 . . . | . . . . | A#4 . . . | ^ . . .',
+      // lead B (G A Bm Bm | Em G F# F#)
       leadB:
-        'B5 . . . | . . . . | D6 . . . | . . G5 . ' +
-        'A5 . . . | . . C#6 . | . . E6 . | . . . . ' +
-        'F#6 . . . | . . . . | C#6 . . . | A5 . . . ' +
+        'B5 . . . | . . . . | . . . . | . . . . ' +
+        'C#6 . . . | . . . . | A5 . . . | . . . . ' +
+        'D6 . . . | . . . . | . . . . | . . . . ' +
         'B5 . . . | . . . . | F#5 . . . | ^ . . . ' +
-        'G5 . . . | . . B5 . | . . D6 . | . . . . ' +
-        'E6 . . . | . . . . | C#6 . . . | A5 . . . ' +
-        'G5 . . . | . . B5 . | . . E6 . | . . . . ' +
-        'F#5 . . . | >A#5 . . . | . . . . | ^ . . .',
-      // the break (Bm E G A), each chord climbed
+        'G5 . . . | . . . . | E5 . . . | . . . . ' +
+        'B5 . . . | . . . . | D6 . . . | . . . . ' +
+        'C#6 . . . | . . . . | . . . . | . . . . ' +
+        'A#5 . . . | . . . . | F#5 . . . | ^ . . .',
       leadBreak:
-        'B4 . D5 . | F#5 . B5 . | . . . . | . . . . ' +
-        'B4 . E5 . | G#5 . B5 . | . . . . | . . . . ' +
-        'B4 . D5 . | G5 . B5 . | . . . . | . . . . ' +
-        'C#5 . E5 . | A5 . C#6 . | E6 . . . | ^ . . .',
+        'F#5 . . . | . . . . | . . . . | . . . . ' +
+        'D5 . . . | . . . . | . . . . | . . . . ' +
+        'E5 . . . | . . . . | . . . . | . . . . ' +
+        'C#5 . . . | . . . . | . . . . | ^ . . .',
 
-      xArpm:   'B4 D5 F#5 D5 | B4 D5 F#5 D5 | B4 D5 F#5 D5 | B4 D5 F#5 D5',
-      xArpM:   'B4 D#5 F#5 D#5 | B4 D#5 F#5 D#5 | B4 D#5 F#5 D#5 | B4 D#5 F#5 D#5',
-      xbGroove: 'K . B2:xbass . | . . B2 . | S . B2 . | . . F#2 .',
-      xbFill:   'K . B2:xbass . | . . B2 . | S S K S | S S S S',
-      xbSoft:   'B2:xbass . . . | . . . . | . . . . | F#2 . . .',
-      xPadm:   'B3~037 . . . | . . . . | . . . . | . . . .',
-      xPad:    'B3~047 . . . | . . . . | . . . . | . . . .',
+      xbHalf: 'K . B2:xbass . | . . . . | S . . . | . . . .',
+      xbSoft: 'B2:xbass . . . | . . . . | . . . . | . . . .',
+      xPadm:  'B3~037 . . . | . . . . | . . . . | . . . .',
+      xPad:   'B3~047 . . . | . . . . | . . . . | . . . .',
+      xPing:  '. . . . | . . . . | F#6 . . . | . . . .',
     },
 
     sections: {
       Intro: {
         v1: ['rest2', 'rest2'],
-        v2: ['xbSoft', 'xbSoft+5', 'xbSoft-4', 'xbSoft-2'],
-        v3: ['xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp'],
+        v2: ['xbSoft', 'xbSoft-4', 'xbSoft-7', 'xbSoft-5'],
+        v3: ['xPadm@xpad', 'xPad-4@xpad', 'xPadm-7@xpad', 'xPad-5@xpad'],
       },
       A: {
         v1: ['leadA@xlead'],
-        v2: ['xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbGroove-2', 'xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbFill-2'],
-        v3: ['xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp',
-             'xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp'],
+        v2: ['xbHalf', 'xbHalf-4', 'xbHalf-7', 'xbHalf-5', 'xbHalf', 'xbHalf-4', 'xbHalf-7', 'xbHalf-5'],
+        v3: ['xPadm@xpad', 'xPad-4@xpad', 'xPadm-7@xpad', 'xPad-5@xpad',
+             'xPadm@xpad', 'xPad-4@xpad', 'xPadm-7@xpad', 'xPad-5@xpad'],
       },
       B: {
         v1: ['leadB@xlead'],
-        v2: ['xbGroove-4', 'xbGroove-2', 'xbGroove-5', 'xbGroove', 'xbGroove-4', 'xbGroove-2', 'xbGroove+5', 'xbFill-5'],
-        v3: ['xArpM-4@xarp', 'xArpM-2@xarp', 'xArpm-5@xarp', 'xArpm@xarp',
-             'xArpM-4@xarp', 'xArpM-2@xarp', 'xArpm+5@xarp', 'xArpM-5@xarp'],
+        v2: ['xbHalf-4', 'xbHalf-2', 'xbHalf', 'xbHalf', 'xbHalf-7', 'xbHalf-4', 'xbHalf-5', 'xbHalf-5'],
+        v3: ['xPad-4@xpad', 'xPad-2@xpad', 'xPadm@xpad', 'xPadm@xpad',
+             'xPadm-7@xpad', 'xPad-4@xpad', 'xPad-5@xpad', 'xPad-5@xpad'],
       },
       A2: {
         v1: ['leadA@xlead2'],
-        v2: ['xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbGroove-2', 'xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbFill-2'],
-        v3: ['xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp',
-             'xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp'],
+        v2: ['xbHalf', 'xbHalf-4', 'xbHalf-7', 'xbHalf-5', 'xbHalf', 'xbHalf-4', 'xbHalf-7', 'xbHalf-5'],
+        v3: ['xPing@xping', 'xPing-4@xping', 'xPing-7@xping', 'xPing-5@xping',
+             'xPing@xping', 'xPing-4@xping', 'xPing-7@xping', 'xPing-5@xping'],
       },
       Break: {
         v1: ['leadBreak@xlead'],
-        v2: ['xbSoft', 'xbSoft+5', 'xbSoft-4', 'xbSoft-2'],
-        v3: ['xPadm@xpad', 'xPad+5@xpad', 'xPad-4@xpad', 'xPad-2@xpad'],
+        v2: ['xbSoft', 'xbSoft-4', 'xbSoft-7', 'xbSoft-5'],
+        v3: ['xPadm@xpad', 'xPad-4@xpad', 'xPadm-7@xpad', 'xPad-5@xpad'],
       },
     },
     order: ['Intro', 'A', 'B', 'A2', 'Break'],

@@ -2568,12 +2568,14 @@ body.is-gameover .gameover-panel { display: flex; animation: gameover-in 0.7s ea
   text-shadow: 0 0 16px var(--hud-a), 0 2px 0 rgba(0, 0, 0, 0.6);
 }
 
-.sector-flash.show { animation: sector-flash 3.4s ease-out forwards; }
+/* Six seconds, held for about four and a half: at 3.4 it was gone before it
+   could be read (the user, 19 Oct 2026). */
+.sector-flash.show { animation: sector-flash 6s ease-out forwards; }
 
 @keyframes sector-flash {
   0%   { opacity: 0; transform: translate(-50%, 0.6rem); }
-  18%  { opacity: 1; transform: translate(-50%, 0); }
-  72%  { opacity: 1; transform: translate(-50%, 0); }
+  10%  { opacity: 1; transform: translate(-50%, 0); }
+  85%  { opacity: 1; transform: translate(-50%, 0); }
   100% { opacity: 0; transform: translate(-50%, -0.5rem); }
 }
 
