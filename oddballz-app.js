@@ -911,17 +911,37 @@
         rings *= (0.55 + 0.45 * vnoise(vec2(e * 40.0, 0.5))) * (1.0 - 0.75 * bump((e - 1.58) * 0.5 + 0.5, 60.0));
         vec3 ringCol = vec3(0.85, 0.70, 0.62);
         float infront = step(rv.y, 0.0);
+        vec3 L = normalize(vec3(-0.65, -0.25, 0.7));
+        // The far side of the rings, behind the planet, in its shadow: the light
+        // comes from the left, so the right of the far half goes dark.
+        float ringShade = mix(1.0, 0.35 + 0.65 * smoothstep(0.2, -0.5, rv.x / R), 1.0 - infront);
         if (d < 1.0) {
-          float lat = v.y / R;
-          float band = sin(lat * 26.0 + fbm(v / R * vec2(6.0, 18.0) + vec2(t * 0.01, 0.0)) * 3.0);
-          vec3 body = mix(vec3(0.55, 0.30, 0.36), vec3(0.88, 0.64, 0.48), 0.5 + 0.5 * band);
+          // A sphere, not a disc: the point's normal, turned into the planet's
+          // own frame -- its axis tilted with the rings, leaning towards us by
+          // the rings' own slant -- so the bands are its latitudes and curve
+          // round it, turning slowly with it.
           float z = sqrt(1.0 - d * d);
-          float lit = clamp(dot(normalize(vec3(v / R, z)), normalize(vec3(-0.65, -0.25, 0.7))), 0.0, 1.0);
-          c = mix(c, body * (0.10 + 0.90 * lit) * 0.85, smoothstep(1.0, 0.995, d));
+          vec3 n = vec3(rv / R, z);
+          float tilt = 0.32, ct = cos(tilt), st = sin(tilt);
+          vec3 pn = vec3(n.x, n.y * ct + n.z * st, -n.y * st + n.z * ct);
+          float lat = asin(clamp(pn.y, -1.0, 1.0));
+          float lon = atan(pn.x, pn.z) + t * 0.01;
+          float swirl = fbm(vec2(lon * 3.0, lat * 9.0) + vec2(t * 0.004, 0.0));
+          float band = sin(lat * 14.0 + swirl * 2.6);
+          vec3 body = mix(vec3(0.50, 0.27, 0.33), vec3(0.88, 0.64, 0.48), 0.5 + 0.5 * band);
+          body = mix(body, vec3(0.95, 0.80, 0.62), smoothstep(0.75, 0.95, swirl) * 0.35);
+          float lit = clamp(dot(vec3(v / R, z), L), 0.0, 1.0);
+          float day = smoothstep(-0.05, 0.35, dot(vec3(v / R, z), L));
+          float limb = pow(z, 0.45);
+          vec3 col = body * (0.06 + 0.94 * lit * day) * limb * 0.9;
+          // a thin atmosphere at the edge, lit side
+          col += vec3(0.95, 0.60, 0.55) * pow(1.0 - z, 3.0) * day * 0.55;
+          c = mix(c, col, smoothstep(1.0, 0.995, d));
           c += ringCol * rings * infront * 0.6;
         } else {
-          c += ringCol * rings * 0.6;
-          c += vec3(0.65, 0.38, 0.45) * exp(-(d - 1.0) * 14.0) * 0.25;
+          c += ringCol * rings * ringShade * 0.6;
+          float rim = exp(-(d - 1.0) * 26.0);
+          c += vec3(0.85, 0.50, 0.50) * rim * 0.30 * (0.3 + 0.7 * smoothstep(0.4, -0.6, v.x / R));
         }
         gl_FragColor = vec4(c * uBright, uAlpha);
       }`,
