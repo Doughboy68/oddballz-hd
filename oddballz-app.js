@@ -1833,6 +1833,24 @@
           }
         }
 
+        // Dead Matter dropped -- the hard drop, not left to settle -- crushes the
+        // board ball it was falling into: the cell the piece's direction leads
+        // to, down-left (2) or down-right (5), and only a ball of the board, not
+        // one of its own piece's. Marked as a stone that fell that way, the next
+        // pass crushes it and the stone together (bombBlast). The C64 build's
+        // rule (flow.s, before piece_stamp); the port had only the falling
+        // stone's crush, so a dropped one simply rested (the user, 19 Oct 2026).
+        if (this.isZipping) {
+          for (let i = 0; i <= 3; i++) {
+            if (this.oddballz.image[i] !== STONE) continue;
+            const into = { x: this.oddballz.map[i].x, y: this.oddballz.map[i].y };
+            moveInDirection(into, this.direction);
+            if (this.checkInMap(into) && this.ballMap[into.x][into.y].bzMap > 0) {
+              this.oddballz.image[i] = this.direction === 2 ? ZSTONE_L : ZSTONE_R;
+            }
+          }
+        }
+
         this.stamp();
         if (this.onPlaySound) this.onPlaySound('drop');
 
@@ -2650,14 +2668,15 @@
   // The C64 build's SONG_PLAYS.
   const SONG_PLAYS = 3;
   // The containment pulse: each sector the journey reaches on its own (its song
-  // played out, not B) fires one once the board is still -- a sweep across each
-  // of the top this-many rows of the pile, in turn, taking every ball in them.
-  // So that a long game can go on: no one gets through that many levels without
-  // help (the user, 18 Oct 2026). The top, not the bottom: the balls climb the
-  // hexagon's slanted walls, so the bottom row is nearly empty in play -- three
-  // sweeps of it took 2 balls of 34 -- while the top is what ends a game.
-  // Six rows, as the peaks are narrow: measured on piles from play, the top three
-  // held 6-15% of the balls, the top six 28-44%, about a third.
+  // played out, not B) charges one, and the next landing fires it -- a sweep
+  // across each of the bottom this-many rows of the board, from the floor up,
+  // taking every ball in them; then the landing plays out, so the balls above
+  // fall into the space, chains and all. So that a long game can go on: no one
+  // gets through that many levels without help (the user, 18 Oct 2026). It took
+  // the top six rows of the pile at first, which made the journey too easy --
+  // a third of the balls gone and nothing moved; from the bottom, with what is
+  // above coming down, it helps less and the board is left to sort itself out
+  // (the user, 19 Oct 2026).
   const PULSE_ROWS = 6;
   const PULSE_ROW_MS = 130;              // between one row's sweep and the next
   // The songs' level against the effects, applied after the synth. The lab's
@@ -4210,24 +4229,27 @@
     loopTo: 'A',
   });
 
-  /* darkmatter - Dark Matter Veil (the user, 18 Oct 2026). Around B, 83 BPM,
-   * barely a key at all: unsettling. A sub-bass swelling each bar and creeping
-   * a semitone, a slow dissonant cluster turning over it -- B, C, F, F sharp --
-   * and a low thud now and then; then a drone line, very sparse, with distant
-   * pings. Mostly space. */
+  /* darkmatter - Dark Matter Veil. B Dorian, 107 BPM: mysterious, not bleak.
+   * A shimmering triangle arpeggio in sixteenths, a light groove with the
+   * bass between, and a melody over Bm E G A -- the E major is the Dorian
+   * sixth, what keeps it from going dark. B turns through F sharp minor and
+   * E minor to an F sharp major that pulls home; the reprise doubles the lead
+   * at the octave. First written as sub-bass drones and a turning cluster,
+   * "too dark sounding" and boring (the user, 19 Oct 2026). */
   SONGS.push({
     id: 'darkmatter',
     title: 'Dark Matter Veil',
-    speed: 9,
+    speed: 7,
     rowsPerBeat: 4,
     rowsPerBar: 16,
 
     instruments: {
-      xdrone: { adsr: [12, 10, 12, 12], wave: [['P', 0]], pulse: [0x200, 0x04, 0x180, 0x500], vib: [0, 0.15, 2] },
-      xsub:   { adsr: [8, 10, 12, 12], wave: [['T', 0]] },
-      xping:  { adsr: [0, 9, 0, 11], wave: [['T', 0]] },
-      xclus:  { adsr: [10, 10, 10, 12], wave: [['P', 0]], pulse: [0x400, 0x08, 0x300, 0x900], arpSpeed: 8,
-                filter: { mode: 'LP', res: 9, cutoff: [0x180, 0x04, 0x150, 0x400] } },
+      xlead:  { adsr: [4, 9, 10, 9], wave: [['P', 0]], pulse: [0x600, 0x18, 0x300, 0xB00], vib: [18, 0.25, 7], glide: 0.5 },
+      xlead2: { adsr: [4, 9, 10, 9], wave: [['P', 12], ['P', 0]], pulse: [0x600, 0x20, 0x300, 0xB00], vib: [16, 0.3, 7], glide: 0.5 },
+      xarp:   { adsr: [0, 6, 3, 5], wave: [['T', 0]] },
+      xbass:  { adsr: [0, 8, 7, 5], wave: [['T', 0], ['P', 0]], pulse: [0x500, 0x20, 0x300, 0xA00] },
+      xpad:   { adsr: [9, 10, 10, 10], wave: [['P', 0]], pulse: [0x500, 0x10, 0x400, 0xA00], arpSpeed: 3,
+                filter: { mode: 'LP', res: 8, cutoff: [0x220, 0x08, 0x200, 0x700] } },
       kick:   { adsr: [0, 8, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
                 wave: [['N', '=A5'], ['P', '=C4'], ['P', '=G3'], ['P', '=D3'], ['T', '=A2'], ['T', '=E2'], ['T', '=C2']] },
       snare:  { adsr: [0, 7, 0, 0], pulse: [0x800, 0, 0x800, 0x800],
@@ -4237,38 +4259,74 @@
 
     patterns: {
       rest2: '. . . . | . . . . | . . . . | . . . .  . . . . | . . . . | . . . . | . . . .',
-      xLead:
-        'B4 . . . | . . . . | . . . . | . . . . ' +
-        'C5 . . . | . . . . | . . . . | . . . . ' +
-        'B4 . . . | . . . . | . . . . | . . . . ' +
-        'F5 . . . | . . . . | . . . . | ^ . . . ' +
-        'D5 . . . | . . . . | . . . . | . . . . ' +
-        'C#5 . . . | . . . . | . . . . | . . . . ' +
-        'C5 . . . | . . . . | . . . . | . . . . ' +
-        'B4 . . . | . . . . | . . . . | ^ . . .',
-      xSub:   'B1:xsub . . . | . . . . | . . . . | . . . .',
-      xSubK:  'K . B1:xsub . | . . . . | . . . . | . . . .',
-      xClus:  'B3~0167 . . . | . . . . | . . . . | . . . .',
-      xClus2: 'B3~0356 . . . | . . . . | . . . . | . . . .',
-      xPing:  '. . . . | . . . . | F#6 . . . | . . . .',
-      xPing2: '. . . . | C6 . . . | . . . . | . . . .',
+
+      // lead A (Bm E G A | Bm E G A)
+      leadA:
+        'F#5 . . . | . . D5 . | B4 . . . | . . D5 . ' +
+        'E5 . . . | . . G#5 . | B5 . . . | . . G#5 . ' +
+        'D6 . . . | . . B5 . | G5 . . . | . . B5 . ' +
+        'C#6 . . . | . . . . | A5 . . . | ^ . . . ' +
+        'B5 . . . | . . A5 . | F#5 . . . | . . D5 . ' +
+        'E5 . . . | . . F#5 . | G#5 . . . | B5 . . . ' +
+        'D6 . . . | . . . . | E6 . . . | D6 . . . ' +
+        'C#6 . . . | . . . . | E5 . . . | ^ . . .',
+      // lead B (G A F#m Bm | G A Em F#)
+      leadB:
+        'B5 . . . | . . . . | D6 . . . | . . G5 . ' +
+        'A5 . . . | . . C#6 . | . . E6 . | . . . . ' +
+        'F#6 . . . | . . . . | C#6 . . . | A5 . . . ' +
+        'B5 . . . | . . . . | F#5 . . . | ^ . . . ' +
+        'G5 . . . | . . B5 . | . . D6 . | . . . . ' +
+        'E6 . . . | . . . . | C#6 . . . | A5 . . . ' +
+        'G5 . . . | . . B5 . | . . E6 . | . . . . ' +
+        'F#5 . . . | >A#5 . . . | . . . . | ^ . . .',
+      // the break (Bm E G A), each chord climbed
+      leadBreak:
+        'B4 . D5 . | F#5 . B5 . | . . . . | . . . . ' +
+        'B4 . E5 . | G#5 . B5 . | . . . . | . . . . ' +
+        'B4 . D5 . | G5 . B5 . | . . . . | . . . . ' +
+        'C#5 . E5 . | A5 . C#6 . | E6 . . . | ^ . . .',
+
+      xArpm:   'B4 D5 F#5 D5 | B4 D5 F#5 D5 | B4 D5 F#5 D5 | B4 D5 F#5 D5',
+      xArpM:   'B4 D#5 F#5 D#5 | B4 D#5 F#5 D#5 | B4 D#5 F#5 D#5 | B4 D#5 F#5 D#5',
+      xbGroove: 'K . B2:xbass . | . . B2 . | S . B2 . | . . F#2 .',
+      xbFill:   'K . B2:xbass . | . . B2 . | S S K S | S S S S',
+      xbSoft:   'B2:xbass . . . | . . . . | . . . . | F#2 . . .',
+      xPadm:   'B3~037 . . . | . . . . | . . . . | . . . .',
+      xPad:    'B3~047 . . . | . . . . | . . . . | . . . .',
     },
 
     sections: {
+      Intro: {
+        v1: ['rest2', 'rest2'],
+        v2: ['xbSoft', 'xbSoft+5', 'xbSoft-4', 'xbSoft-2'],
+        v3: ['xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp'],
+      },
       A: {
-        v1: ['rest2', 'rest2', 'rest2', 'rest2'],
-        v2: ['xSubK', 'xSub', 'xSub+1', 'xSub+1', 'xSubK', 'xSub', 'xSub-2', 'xSub'],
-        v3: ['xClus@xclus', 'xClus@xclus', 'xClus2@xclus', 'xClus2@xclus',
-             'xClus@xclus', 'xClus@xclus', 'xClus2@xclus', 'xClus2@xclus'],
+        v1: ['leadA@xlead'],
+        v2: ['xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbGroove-2', 'xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbFill-2'],
+        v3: ['xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp',
+             'xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp'],
       },
       B: {
-        v1: ['xLead@xdrone'],
-        v2: ['xSubK', 'xSub+1', 'xSub', 'xSub', 'xSubK+3', 'xSub+2', 'xSub+1', 'xSub'],
-        v3: ['xPing@xping', 'xPing2@xping', 'xPing@xping', 'xPing2@xping',
-             'xPing@xping', 'xPing2@xping', 'xPing@xping', 'xPing2@xping'],
+        v1: ['leadB@xlead'],
+        v2: ['xbGroove-4', 'xbGroove-2', 'xbGroove-5', 'xbGroove', 'xbGroove-4', 'xbGroove-2', 'xbGroove+5', 'xbFill-5'],
+        v3: ['xArpM-4@xarp', 'xArpM-2@xarp', 'xArpm-5@xarp', 'xArpm@xarp',
+             'xArpM-4@xarp', 'xArpM-2@xarp', 'xArpm+5@xarp', 'xArpM-5@xarp'],
+      },
+      A2: {
+        v1: ['leadA@xlead2'],
+        v2: ['xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbGroove-2', 'xbGroove', 'xbGroove+5', 'xbGroove-4', 'xbFill-2'],
+        v3: ['xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp',
+             'xArpm@xarp', 'xArpM+5@xarp', 'xArpM-4@xarp', 'xArpM-2@xarp'],
+      },
+      Break: {
+        v1: ['leadBreak@xlead'],
+        v2: ['xbSoft', 'xbSoft+5', 'xbSoft-4', 'xbSoft-2'],
+        v3: ['xPadm@xpad', 'xPad+5@xpad', 'xPad-4@xpad', 'xPad-2@xpad'],
       },
     },
-    order: ['A', 'B'],
+    order: ['Intro', 'A', 'B', 'A2', 'Break'],
     loopTo: 'A',
   });
 
@@ -9154,21 +9212,17 @@ registerProcessor('odd-sid', OddSid);
       if (this.isPlaying) this.showSectorFlash(this.isPlaying && earned);
     }
 
-    // The containment pulse (PULSE_ROWS): the top rows of the pile, found now,
-    // each swept in turn -- a streak across it in the sector's colour, every ball
-    // in it popped. Straight onto the board as demoPop does, the engine being
-    // still: the balls below the rows are held up from below, so nothing falls,
-    // and a falling piece only finds more room.
+    // The containment pulse (PULSE_ROWS), fired at a landing before its resolve:
+    // the bottom rows of the board, from the floor up, each swept in turn -- a
+    // streak across it in the sector's colour, every ball in it popped. Straight
+    // onto the board as demoPop does; the landing's resolve, held until the
+    // sweeps are done (the time returned, in ms), then drops what was above
+    // them into the space and plays out any chains.
     firePulse() {
       const e = this.engine;
       this.pulsePending = false;
       const rows = [];
-      for (let y = BOARD_BOUNDS.MIN_Y; y <= BOARD_BOUNDS.MAX_Y && rows.length < PULSE_ROWS; y++) {
-        for (let x = BOARD_BOUNDS.MIN_X; x <= BOARD_BOUNDS.MAX_X; x++) {
-          if (e.checkInMap({ x: x, y: y }) && e.ballMap[x][y].bzMap > 0) { rows.push(y); break; }
-        }
-      }
-      if (!rows.length) return;
+      for (let y = BOARD_BOUNDS.MAX_Y; y >= BOARD_BOUNDS.MIN_Y && rows.length < PULSE_ROWS; y--) rows.push(y);
       this.showBanner('bannerChain', 'CONTAINMENT PULSE');
       this.logoBurst();
       this.audio.playSound('boom', 1);
@@ -9192,6 +9246,7 @@ registerProcessor('odd-sid', OddSid);
         }
         this.renderer.updateScene(e);
       }, i * PULSE_ROW_MS));
+      return rows.length * PULSE_ROW_MS + 150;
     }
 
     // SECTOR n and its name over the board, as a game reaches it -- the
@@ -11004,9 +11059,6 @@ registerProcessor('odd-sid', OddSid);
         // hold after it.
         if (this.sweepOrb) this.updateSweepOrb(performance.now());
         if (this.engine.resolving) this.stepResolve(currentTime);
-        if (this.pulsePending && !this.engine.resolving && !this.sweepOrb && !this.renderer.hasDroppingBalls()) {
-          this.firePulse();
-        }
         const pausing = this.engine.resolving || (this.spawnHoldUntil !== undefined &&
           (currentTime < this.spawnHoldUntil || this.renderer.hasDroppingBalls()));
 
@@ -11055,7 +11107,9 @@ registerProcessor('odd-sid', OddSid);
             this.slideOffset = 0;
             if (this.engine.resolving) {
               // The first pass at once, as the landing always did; the rest wait.
+              // A charged pulse goes off first, and the pass waits for it.
               this.resolveNextAt = currentTime;
+              if (this.pulsePending) this.resolveNextAt += this.firePulse();
               this.stepResolve(currentTime);
             } else {
               this.spawnHoldUntil = currentTime + PIECE_SPAWN_DELAY_MS;
