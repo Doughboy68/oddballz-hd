@@ -9278,6 +9278,15 @@ registerProcessor('odd-sid', OddSid);
       el.querySelector('.sector-num').textContent = 'SECTOR ' + (i + 1);
       el.querySelector('.sector-name').textContent = back.label;
       el.querySelector('.sector-pulse').textContent = pulse ? 'Containment pulse charged' : '';
+      // Below the score bar, wherever it is: at a fixed share of the screen it
+      // went under the bar on some window shapes (the user, 19 Oct 2026).
+      const host = el.offsetParent || el.parentElement;
+      const stats = document.querySelector('.stats-panel');
+      if (host && stats) {
+        const hostTop = host.getBoundingClientRect().top;
+        const below = stats.getBoundingClientRect().bottom - hostTop;
+        el.style.top = Math.max(0, Math.round(below + 10)) + 'px';
+      }
       el.classList.remove('show');
       void el.offsetWidth;
       el.classList.add('show');
