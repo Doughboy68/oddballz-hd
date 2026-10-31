@@ -80,6 +80,10 @@
   // hop was the one lifted clear by a ball swinging under, about this high (the
   // user, 20 Oct 2026).
   const PIECE_FLIP_HOP = 1.9;
+  // A window played with a mouse and no taller than a 1080p laptop's: the buttons
+  // slim to one row and the board fills what is left. Phones and tablets, which
+  // have no such pointer, keep their layout. style.css has the same query.
+  const LAPTOP_WINDOW = '(hover: hover) and (pointer: fine) and (min-width: 761px) and (max-height: 1000px)';
   // The same for a step left or right (ThreeRenderer.pieceSlideX): how long the
   // step takes, the hop in ball radii, and the overshoot.
   const PIECE_STEP_MS = 130;
@@ -408,8 +412,22 @@
     uniform vec2 uRes;
     uniform float uTime, uBright, uAlpha;
     varying vec2 vUv;
-    float hash(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
-    float hash2(vec2 q) { return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+    // Without sin: fract(sin(n) * 43758) multiplies the last bit of n's rounding
+    // into a different number altogether, so a noise cell and its neighbour could
+    // get different values for the corner they share, wherever a GPU's compiler
+    // rearranged the sum. Clouds came out in hard squares and straight lines, on a
+    // laptop and not on the machines they were written on (the user, 31 Oct 2026).
+    float hash(float n) {
+      n = fract((n + 11.37) * 0.1031);
+      n *= n + 33.33;
+      n *= n + n;
+      return fract(n);
+    }
+    float hash2(vec2 q) {
+      vec3 p = fract((q.xyx + 11.37) * 0.1031);
+      p += dot(p, p.yzx + 33.33);
+      return fract((p.x + p.y) * p.z);
+    }
     // distance from p to segment ab, and how far along it the nearest point is
     vec2 seg(vec2 p, vec2 a, vec2 b) {
       vec2 pa = p - a, ba = b - a;
@@ -8264,7 +8282,7 @@ registerProcessor('odd-sid', OddSid);
     // set up before the tiles are built. Canvas size does not enter into it: for a
     // perspective camera aspect scales x only, so vertical balance depends solely
     // on fov, camera pose and the board's world extent.
-    solveDesktopPan() {
+    solveDesktopPan(target = 0) {
       const cam = this.camera;
       const halfH = 0.52 * WORLD_SCALE * Math.sin(Math.PI / 3);
       const topY = gridToWorld(CENTER_X, SPAWN_ROW).y + halfH;
@@ -8276,7 +8294,7 @@ registerProcessor('odd-sid', OddSid);
         cam.updateMatrixWorld();
         const ndcTop = new THREE.Vector3(0.4, topY, 0).project(cam).y;
         const ndcBot = new THREE.Vector3(0.4, botY, 0).project(cam).y;
-        return (1 - ndcTop) - (1 + ndcBot);   // top margin minus bottom margin
+        return (1 - ndcTop) - (1 + ndcBot) - target;   // top margin minus bottom margin
       };
 
       let lo = -8, hi = 4;
@@ -8292,6 +8310,7 @@ registerProcessor('odd-sid', OddSid);
       const height = this.container.clientHeight || window.innerHeight;
       const aspect = width / height;
       this.camera.aspect = aspect;
+      this.camera.zoom = 1;
 
       if (aspect < 1.0) {
         // iPhone & Android portrait mobile camera framing: Ergonomic scaled view showing full board & all tips
@@ -8316,10 +8335,46 @@ registerProcessor('odd-sid', OddSid);
         const pan = this.solveDesktopPan();
         this.camera.position.set(0.4, -17.5 + pan, 21.0);
         this.camera.lookAt(0.4, 0.8 + pan, 0);
+        if (window.matchMedia(LAPTOP_WINDOW).matches) this.fitBoardToFreeSpace(height);
       }
 
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
+    }
+
+    // A laptop's window (LAPTOP_WINDOW): the board as big as the space between the
+    // stats bar and the buttons allows. At the fixed desktop distance it took a
+    // third of the height of a 1080p laptop, with the bars and buttons over the
+    // rest (the user, 31 Oct 2026). Zoom only, so the viewing angle is the same.
+    fitBoardToFreeSpace(height) {
+      const cam = this.camera, MARGIN = 10;
+      const bar = document.querySelector('.stats-panel');
+      const under = bar ? bar.getBoundingClientRect().bottom - this.container.getBoundingClientRect().top : 0;
+      if (under > 0) this.hudUnder = under;          // zero while the bar is hidden
+      const top = this.hudUnder || 0;
+      const halfH = 0.52 * WORLD_SCALE * Math.sin(Math.PI / 3);
+      const topY = gridToWorld(CENTER_X, SPAWN_ROW).y + halfH;
+      const botY = gridToWorld(CENTER_X, BP.MAX_Y).y - halfH;
+      const v = new THREE.Vector3();
+      const want = 2 * (height - top - 2 * MARGIN) / height;     // in NDC
+      for (let pass = 0; pass < 3; pass++) {
+        const z = cam.zoom;
+        cam.updateMatrixWorld();
+        const span = (new THREE.Vector3(0.4, topY, 0).project(cam).y - new THREE.Vector3(0.4, botY, 0).project(cam).y) / z;
+        let wide = 0;
+        if (this.boardGroup) {
+          this.boardGroup.updateMatrixWorld(true);
+          for (const m of this.boardGroup.children) {
+            m.getWorldPosition(v).project(cam);
+            wide = Math.max(wide, Math.abs(v.x) / z);
+          }
+        }
+        cam.zoom = Math.max(1, Math.min(want / span, wide ? 0.94 / wide : Infinity));
+        cam.updateProjectionMatrix();
+        const pan = this.solveDesktopPan(2 * top / height);
+        cam.position.set(0.4, -17.5 + pan, 21.0);
+        cam.lookAt(0.4, 0.8 + pan, 0);
+      }
     }
 
     onWindowResize() {

@@ -2593,3 +2593,27 @@ body.is-gameover .gameover-panel { display: flex; animation: gameover-in 0.7s ea
 }
 
 .sector-pulse:empty { display: none; }
+
+/* A window played with a mouse, no taller than a 1080p laptop's (LAPTOP_WINDOW in
+   oddballz-app.js): the buttons are for clicking, not thumbs, so one slim row of
+   eight. Two rows of thumb-sized buttons took a quarter of the window from the
+   board (the user, 31 Oct 2026). */
+@media (hover: hover) and (pointer: fine) and (min-width: 761px) and (max-height: 1000px) {
+  #bottomControlsBar {
+    padding-top: 0.2rem;
+    padding-bottom: max(0.2rem, env(safe-area-inset-bottom, 0px));
+  }
+  #bottomControlsBar .touch-cluster {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 0.25rem;
+    padding: 0.2rem;
+  }
+  #bottomControlsBar .touch-btn {
+    flex-direction: row;
+    gap: 0.3rem;
+    min-height: 32px;
+    padding: 0.1rem 0.2rem;
+  }
+  #bottomControlsBar .touch-btn .btn-icon { font-size: 0.95rem; }
+  #bottomControlsBar .touch-btn .btn-label { font-size: 0.6rem; letter-spacing: 0.04em; }
+}
